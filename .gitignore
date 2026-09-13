@@ -1,33 +1,38 @@
-HELP.md
+# Build artifacts
 target/
-.mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
-
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
+backend/target/
+dist/
+frontend/dist/
 build/
-!**/src/main/**/build/
-!**/src/test/**/build/
 
-### VS Code ###
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+.npm/
+.vite/
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Logs & Temporary files
+*.log
+logs/
+scratch/
+.system_generated/
+
+# IDE & OS
+.idea/
+*.iml
+*.iws
+*.ipr
 .vscode/
+.DS_Store
+Thumbs.db
+HELP.md
+
+# Private Personal Learning Environment
+learning-lab/
