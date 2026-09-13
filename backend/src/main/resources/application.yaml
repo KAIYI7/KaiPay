@@ -1,0 +1,74 @@
+# =============================================================================
+# KaiPay Application Configuration
+# Dedicated Port Allocation (Isolated from Payd & Host Services):
+#   - KaiPay API Server: 28080
+#   - KaiPay PostgreSQL: 25432 (mapped to container 5432)
+#   - KaiPay Apache Kafka: 29092 (mapped to container 9092)
+#   - KaiPay Redis: 26379 (mapped to container 6379)
+#   - KaiPay Kafka-UI: 28048 (mapped to container 8080)
+# =============================================================================
+
+server:
+  port: ${PORT:28080}
+
+spring:
+  application:
+    name: KaiPay
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:25432/kaipay}
+    username: ${DB_USERNAME:kaipay}
+    password: ${DB_PASSWORD:kaipay_secret}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          batch_size: 25
+          order_inserts: true
+          order_updates: true
+    show-sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        delivery.timeout.ms: 3000
+        request.timeout.ms: 2000
+    consumer:
+      group-id: kaipay-payment-processor-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual_immediate
+
+kaipay:
+  kafka:
+    topics:
+      payment-requests: kaipay.payment.requests
+  outbox:
+    batch-size: 20
+    poll-interval-ms: 500
+
+logging:
+  level:
+    com.lky.kaipay: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: INFO
