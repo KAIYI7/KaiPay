@@ -54,7 +54,7 @@ class PaymentEventOutboxRepositoryIntegrationTest extends AbstractPostgresIntegr
         outboxRepository.save(event1);
         outboxRepository.save(event2);
 
-        List<PaymentEventOutbox> pending = outboxRepository.findPendingEventsForUpdate(10);
+        List<PaymentEventOutbox> pending = outboxRepository.findPendingEventsForUpdate(10, java.time.Instant.now());
 
         assertThat(pending).hasSize(1);
         PaymentEventOutbox retrieved = pending.getFirst();
@@ -69,7 +69,7 @@ class PaymentEventOutboxRepositoryIntegrationTest extends AbstractPostgresIntegr
         retrieved.markPublished();
         outboxRepository.save(retrieved);
 
-        List<PaymentEventOutbox> pendingAfterPublish = outboxRepository.findPendingEventsForUpdate(10);
+        List<PaymentEventOutbox> pendingAfterPublish = outboxRepository.findPendingEventsForUpdate(10, java.time.Instant.now());
         assertThat(pendingAfterPublish).isEmpty();
     }
 

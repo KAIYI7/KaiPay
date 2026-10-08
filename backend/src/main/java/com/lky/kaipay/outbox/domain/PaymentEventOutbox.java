@@ -73,13 +73,41 @@ public class PaymentEventOutbox {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
+    @Column(name = "last_attempt_at")
+    private Instant lastAttemptAt;
+
+    @Column(name = "quarantined_at")
+    private Instant quarantinedAt;
+
     public void markPublished() {
+        markPublished(Instant.now());
+    }
+
+    public void markPublished(Instant now) {
         this.status = PaymentEventOutboxStatus.PUBLISHED;
-        this.publishedAt = Instant.now();
+        this.publishedAt = now;
+        this.nextAttemptAt = null;
     }
 
     public void recordError(String error) {
-        this.retryCount += 1;
+        if (this.retryCount < Integer.MAX_VALUE) this.retryCount += 1;
         this.lastError = error;
+    }
+
+    public void scheduleRetry(String error, Instant attemptedAt, Instant retryAt) {
+        recordError(error);
+        this.lastAttemptAt = attemptedAt;
+        this.nextAttemptAt = retryAt;
+    }
+
+    public void quarantine(String error, Instant attemptedAt) {
+        recordError(error);
+        this.lastAttemptAt = attemptedAt;
+        this.quarantinedAt = attemptedAt;
+        this.nextAttemptAt = null;
+        this.status = PaymentEventOutboxStatus.QUARANTINED;
     }
 }

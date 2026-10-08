@@ -66,6 +66,9 @@ kaipay:
   outbox:
     batch-size: 20
     poll-interval-ms: 500
+    retry-initial-delay-ms: 1000
+    retry-max-delay-ms: 60000
+    send-timeout-ms: 4000
 
 logging:
   level:

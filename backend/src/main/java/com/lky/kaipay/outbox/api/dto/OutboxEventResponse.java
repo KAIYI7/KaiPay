@@ -25,6 +25,9 @@ public class OutboxEventResponse {
     private final String lastError;
     private final Instant createdAt;
     private final Instant publishedAt;
+    private final Instant nextAttemptAt;
+    private final Instant lastAttemptAt;
+    private final Instant quarantinedAt;
 
     public static OutboxEventResponse fromEntity(PaymentEventOutbox outbox) {
         return OutboxEventResponse.builder()
@@ -39,6 +42,9 @@ public class OutboxEventResponse {
                 .lastError(outbox.getLastError())
                 .createdAt(outbox.getCreatedAt())
                 .publishedAt(outbox.getPublishedAt())
+                .nextAttemptAt(outbox.getNextAttemptAt())
+                .lastAttemptAt(outbox.getLastAttemptAt())
+                .quarantinedAt(outbox.getQuarantinedAt())
                 .build();
     }
 }
