@@ -66,9 +66,23 @@ public class PaymentProcessingConsumer {
 
             UUID eventId = rootNode.has("eventId") ? UUID.fromString(rootNode.get("eventId").asText()) : UUID.randomUUID();
             UUID paymentId = UUID.fromString(payloadNode.get("paymentId").asText());
+            String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : "PaymentInitiatedEvent";
+
+            switch (eventType) {
+                case "PaymentCapturedEvent", "PaymentRefundedEvent" -> {
+                    // State and accounting already committed in the synchronous capture/refund transaction.
+                    // This authorization group owns no side effect or deduplication record for notifications.
+                    log.info("Skipping lifecycle notification in authorization consumer: eventId={}, paymentId={}, eventType={}",
+                            eventId, paymentId, eventType);
+                    if (ack != null) ack.acknowledge();
+                    return;
+                }
+                case "PaymentInitiatedEvent" -> { }
+                default -> throw new IllegalArgumentException("Unsupported payment event type: " + eventType);
+            }
+
             long amountCents = payloadNode.get("amountCents").asLong();
             String currency = payloadNode.has("currency") ? payloadNode.get("currency").asText() : "USD";
-            String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : "PaymentInitiatedEvent";
 
             // Fast Pre-Check Deduplication
             if (consumerDeduplicationService.isEventConsumed(eventId, consumerGroup)) {

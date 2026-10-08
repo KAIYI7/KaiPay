@@ -44,7 +44,7 @@ public class EventEnvelope<T> {
 
 | Field Name | Type | Constraint | Description |
 | :--- | :--- | :--- | :--- |
-| `eventId` | `UUID` | Required, Unique | Global deduplication identifier. Recorded in `consumed_events` to prevent duplicate processing. |
+| `eventId` | `UUID` | Required, Unique | Event identity used for authorization deduplication and capture/refund journal correlation. Skipped notifications do not create authorization-group `consumed_events` records. |
 | `eventType` | `String` | Required, Non-blank | Canonical event discriminator (`PaymentInitiatedEvent`, `PaymentCapturedEvent`, `PaymentRefundedEvent`). |
 | `aggregateType` | `String` | Required, Non-blank | Bounded context entity type (`PAYMENT`, `REFUND`). |
 | `aggregateId` | `String` | Required, Non-blank | Primary identifier of the aggregate root (used as Kafka partition message key). |
@@ -59,15 +59,20 @@ public class EventEnvelope<T> {
 
 | Topic Name | Partitions | Replication | Cleanup Policy | Producer(s) | Consumer(s) | Partition Key |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `kaipay.payment.requests` | 3 | 1 (Dev) / 3 (Prod) | `delete` (7 days) | `OutboxEventPublisher` | `PaymentProcessingConsumer` | `aggregateId` (`paymentId`) |
-| `kaipay.payment.requests-retry` | 3 | 1 (Dev) / 3 (Prod) | `delete` (3 days) | Spring Kafka Retry Interceptor | `PaymentProcessingConsumer` | `aggregateId` (`paymentId`) |
-| `kaipay.payment.requests-dlt` | 3 | 1 (Dev) / 3 (Prod) | `delete` (30 days) | Spring Kafka Retry Interceptor | `@DltHandler` in `PaymentProcessingConsumer` | `aggregateId` (`paymentId`) |
+| `kaipay.payment.requests` | 3 | 1 (Dev) / 3 (Prod) | `delete` (7 days) | `OutboxEventPublisher` | `PaymentProcessingConsumer` | `aggregateId` (payment ID or refund ID) |
+| `kaipay.payment.requests-retry` | 3 | 1 (Dev) / 3 (Prod) | `delete` (3 days) | Spring Kafka Retry Interceptor | `PaymentProcessingConsumer` | Original record key |
+| `kaipay.payment.requests-dlt` | 3 | 1 (Dev) / 3 (Prod) | `delete` (30 days) | Spring Kafka Retry Interceptor | `@DltHandler` in `PaymentProcessingConsumer` | Original record key |
+
+### Authorization Consumer Ownership
+
+`PaymentProcessingConsumer`, in `kaipay-payment-processor-group`, authorizes only `PaymentInitiatedEvent`. For compatibility, a message without `eventType` follows the existing initiation path, including support for an unwrapped payload.
+
+Recognized `PaymentCapturedEvent` and `PaymentRefundedEvent` notifications are explicitly acknowledged and skipped before authorization fields are read. This consumer performs no gateway call, payment/refund state change, ledger posting, or consumption-record insertion for them. Accounting already committed in the synchronous service transaction. Their outbox records remain available for publication and operational observation; no webhook, settlement, or reconciliation consumer is implemented.
+
+Unknown event types fail with a controlled non-retryable error and use the existing DLT path. Malformed-message handling and gateway retries remain unchanged. With `MANUAL_IMMEDIATE` acknowledgment and auto-commit disabled, skipped notifications explicitly call `Acknowledgment.acknowledge()`; returning alone does not acknowledge them.
 
 ### Partition Key Routing Strategy
-To guarantee strict sequential ordering for all events pertaining to a specific payment aggregate, the **`aggregateId` (`paymentId.toString()`)** is used as the Kafka message record key. This ensures that:
-- All state changes for payment `P-12345` always land on the **exact same partition**.
-- Consumer threads process state transitions (`Initiated` $\to$ `Authorized` $\to$ `Captured`) in strict sequential order.
-- Partition scaling does not cause out-of-order race conditions.
+The publisher uses the outbox **`aggregateId`** as the Kafka record key. Initiation and capture use the payment ID; refunds use the refund ID. Refund notifications therefore have no guarantee of sharing their parent payment's partition. Capture/refund state transitions and journal posting happen in synchronous API service transactions, not through ordered processing by this authorization consumer.
 
 ---
 
@@ -118,7 +123,7 @@ Published immediately after a new payment is created via `POST /v1/payments` and
 ### 3.2. `PaymentCapturedEvent`
 
 #### Purpose
-Published when an authorized payment is captured by the merchant via `POST /v1/payments/{id}/capture`. Triggers financial ledger journal posting and settlement reconciliation.
+Published after an authorized payment is captured via `POST /v1/payments/{id}/capture`. `PaymentService.capturePayment` commits the capture state, ledger journal, and outbox notification together. The event records the completed operation for publication and observation; the authorization consumer acknowledges it without additional accounting or reconciliation.
 
 #### Java Class
 [`com.lky.kaipay.payment.domain.event.PaymentCapturedEvent`](../backend/src/main/java/com/lky/kaipay/payment/domain/event/PaymentCapturedEvent.java)
@@ -158,7 +163,7 @@ Published when an authorized payment is captured by the merchant via `POST /v1/p
 ### 3.3. `PaymentRefundedEvent`
 
 #### Purpose
-Published when a partial or full refund is successfully executed via `POST /v1/payments/{id}/refunds`. Triggers reversing ledger journal posting and merchant settlement balance adjustments.
+Published after a partial or full refund succeeds via `POST /v1/payments/{id}/refunds`. `RefundService.createRefund` commits the refund, payment state, reversing journal, and outbox notification together. The event records that completed operation; the authorization consumer acknowledges it without reading `amountCents`, authorizing, or posting additional entries. Merchant balances are projected from the committed database records.
 
 #### Java Class
 [`com.lky.kaipay.refund.domain.event.PaymentRefundedEvent`](../backend/src/main/java/com/lky/kaipay/refund/domain/event/PaymentRefundedEvent.java)

@@ -1,15 +1,18 @@
 package com.lky.kaipay.payment.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.lky.kaipay.common.event.EventEnvelope;
 import com.lky.kaipay.common.exception.GatewayTimeoutException;
 import com.lky.kaipay.common.exception.GatewayUnavailableException;
 import com.lky.kaipay.consumer.service.ConsumerDeduplicationService;
 import com.lky.kaipay.dlt.domain.DeadLetterEvent;
 import com.lky.kaipay.dlt.repository.DeadLetterEventRepository;
 import com.lky.kaipay.payment.domain.Payment;
+import com.lky.kaipay.payment.domain.event.PaymentCapturedEvent;
 import com.lky.kaipay.payment.service.PaymentService;
 import com.lky.kaipay.payment.service.acquirer.AcquirerAuthorizationResult;
 import com.lky.kaipay.payment.service.acquirer.MockBankAcquirerClient;
+import com.lky.kaipay.refund.domain.event.PaymentRefundedEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +24,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.support.Acknowledgment;
 
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,6 +36,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -49,7 +54,7 @@ class PaymentProcessingConsumerUnitTest {
     @Mock
     private Acknowledgment acknowledgment;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     private PaymentProcessingConsumer consumer;
 
@@ -112,6 +117,85 @@ class PaymentProcessingConsumerUnitTest {
                     eq("kaipay-payment-processor-group"),
                     eq("PaymentInitiatedEvent")
             );
+            verify(acknowledgment).acknowledge();
+        }
+
+        @Test
+        @DisplayName("Should explicitly acknowledge capture notifications without authorization or deduplication")
+        void acknowledgeCapturedNotification() throws Exception {
+            UUID paymentId = UUID.randomUUID();
+            EventEnvelope<PaymentCapturedEvent> envelope = EventEnvelope.of(
+                    "PaymentCapturedEvent", "PAYMENT", paymentId.toString(), UUID.randomUUID(),
+                    PaymentCapturedEvent.builder().paymentId(paymentId).amountCents(5000L).currency("USD").build()
+            );
+
+            consumer.processPaymentRequest(new ConsumerRecord<>("kaipay.payment.requests", 0, 1L,
+                    paymentId.toString(), objectMapper.writeValueAsString(envelope)), acknowledgment);
+
+            verify(acknowledgment).acknowledge();
+            verifyNoInteractions(paymentService, mockBankAcquirerClient, consumerDeduplicationService,
+                    deadLetterEventRepository);
+        }
+
+        @Test
+        @DisplayName("Should explicitly acknowledge refund notifications that have no amountCents field")
+        void acknowledgeRefundedNotification() throws Exception {
+            UUID paymentId = UUID.randomUUID();
+            UUID refundId = UUID.randomUUID();
+            EventEnvelope<PaymentRefundedEvent> envelope = EventEnvelope.of(
+                    "PaymentRefundedEvent", "REFUND", refundId.toString(), UUID.randomUUID(),
+                    PaymentRefundedEvent.builder().paymentId(paymentId).refundId(refundId)
+                            .refundAmountCents(2000L).currency("USD").build()
+            );
+            String payload = objectMapper.writeValueAsString(envelope);
+            assertThat(objectMapper.readTree(payload).get("payload").has("amountCents")).isFalse();
+
+            consumer.processPaymentRequest(new ConsumerRecord<>("kaipay.payment.requests", 0, 1L,
+                    refundId.toString(), payload), acknowledgment);
+
+            verify(acknowledgment).acknowledge();
+            verifyNoInteractions(paymentService, mockBankAcquirerClient, consumerDeduplicationService,
+                    deadLetterEventRepository);
+        }
+
+        @Test
+        @DisplayName("Should reject unknown event types before reading authorization fields")
+        void rejectUnknownEventType() throws Exception {
+            UUID paymentId = UUID.randomUUID();
+            EventEnvelope<Map<String, UUID>> envelope = EventEnvelope.of(
+                    "UnsupportedPaymentEvent", "PAYMENT", paymentId.toString(), UUID.randomUUID(),
+                    Map.of("paymentId", paymentId)
+            );
+            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests", 0, 1L,
+                    paymentId.toString(), objectMapper.writeValueAsString(envelope));
+
+            assertThatThrownBy(() -> consumer.processPaymentRequest(record, acknowledgment))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessage("Fatal payment event processing failed")
+                    .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                    .hasRootCauseMessage("Unsupported payment event type: UnsupportedPaymentEvent");
+
+            verifyNoInteractions(acknowledgment, paymentService, mockBankAcquirerClient,
+                    consumerDeduplicationService, deadLetterEventRepository);
+        }
+
+        @Test
+        @DisplayName("Should authorize legacy payloads without eventType, including unwrapped payloads")
+        void authorizeWhenEventTypeMissing() {
+            UUID eventId = UUID.randomUUID();
+            UUID paymentId = UUID.randomUUID();
+            String payload = String.format("{\"eventId\":\"%s\",\"paymentId\":\"%s\",\"amountCents\":5000}",
+                    eventId, paymentId);
+            AcquirerAuthorizationResult authResult = AcquirerAuthorizationResult.approved("AUTH-LEGACY");
+            when(mockBankAcquirerClient.authorize(paymentId, 5000L, "USD")).thenReturn(authResult);
+
+            consumer.processPaymentRequest(new ConsumerRecord<>("kaipay.payment.requests", 0, 1L,
+                    paymentId.toString(), payload), acknowledgment);
+
+            verify(paymentService).transitionToProcessing(paymentId);
+            verify(mockBankAcquirerClient).authorize(paymentId, 5000L, "USD");
+            verify(paymentService).completeAuthorizationWithDeduplication(paymentId, authResult,
+                    eventId, "kaipay-payment-processor-group", "PaymentInitiatedEvent");
             verify(acknowledgment).acknowledge();
         }
 

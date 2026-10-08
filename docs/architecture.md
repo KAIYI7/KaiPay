@@ -406,6 +406,9 @@ Payments transition through a deterministic finite-state automaton:
   4. On network exception, records error in `last_error` and increments `retry_count`.
 
 ### Boundary 3: Asynchronous Consumer Two-Phase Processing (`PaymentProcessingConsumer`)
+
+This boundary applies to `PaymentInitiatedEvent` authorization. The existing topic/group also receives capture/refund notifications, which are explicitly acknowledged and skipped before reading authorization-specific fields. They create no authorization-group consumption records and trigger no state changes or ledger writes. Unknown event types use the existing non-retryable DLT path; missing `eventType` retains the legacy initiation fallback.
+
 To avoid holding a database connection open during slow external bank HTTP calls, processing is split into two independent transactions:
 - **Pre-check**: Queries `consumed_events` (read-only).
 - **Transaction A (Tx 1)**: `PaymentService.transitionToProcessing(paymentId)` commits `status = PROCESSING`.
@@ -417,7 +420,7 @@ To avoid holding a database connection open during slow external bank HTTP calls
 - **Operations**:
   1. Verifies payment status is `AUTHORIZED`.
   2. Transitions status to `CAPTURED`.
-  3. Writes `PaymentCapturedEvent` to `payment_events_outbox`.
+  3. Writes a completed-operation `PaymentCapturedEvent` notification to `payment_events_outbox`.
   4. Calculates platform processing fee ($2.9\% + \$0.30$).
   5. Inserts `journals` row and 3 balanced `ledger_entries` rows (Debit Receivable, Credit Payable, Credit Revenue).
 
@@ -433,8 +436,10 @@ To avoid holding a database connection open during slow external bank HTTP calls
   3. Validates `requestedAmount <= (totalAmount - refundedAmount)`.
   4. Inserts `refunds` record.
   5. Updates payment status to `PARTIALLY_REFUNDED` or `REFUNDED`.
-  6. Writes `PaymentRefundedEvent` to `payment_events_outbox`.
+  6. Writes a completed-operation `PaymentRefundedEvent` notification to `payment_events_outbox`.
   7. Calls `ledgerService.recordPaymentRefund` to post reversing ledger journal.
+
+Capture/refund accounting remains synchronous and atomic with these service transactions. Outbox publication provides notification and operational visibility; no downstream accounting, webhook delivery, settlement, or reconciliation handler is implemented.
 
 ---
 
