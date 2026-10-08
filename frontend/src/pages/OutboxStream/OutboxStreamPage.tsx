@@ -58,6 +58,7 @@ export const OutboxStreamPage: React.FC = () => {
     { value: '', label: 'All Statuses' },
     { value: 'PENDING', label: 'PENDING' },
     { value: 'PUBLISHED', label: 'PUBLISHED' },
+    { value: 'QUARANTINED', label: 'QUARANTINED' },
   ];
 
   const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -106,7 +107,7 @@ export const OutboxStreamPage: React.FC = () => {
             </h1>
 
             <p className="text-xs text-slate-400 max-w-4xl leading-relaxed">
-              Guaranteed at-least-once event delivery preventing Dual-Write inconsistencies. Payment state transitions
+              Durable event publication with retries and operator recovery for quarantined records. Payment state transitions
               and outbox records are committed atomically within PostgreSQL ACID transactions before being relayed to
               Kafka by the asynchronous <code className="text-emerald-400 font-mono">OutboxEventPublisher</code> scheduler.
             </p>
@@ -256,6 +257,11 @@ export const OutboxStreamPage: React.FC = () => {
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
                             PENDING
+                          </span>
+                        ) : event.status === 'QUARANTINED' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            QUARANTINED
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
@@ -426,6 +432,12 @@ export const OutboxStreamPage: React.FC = () => {
               </div>
 
               {/* Error Alert if present */}
+              {selectedEvent.nextAttemptAt && (
+                <p className="text-xs text-slate-400">Next retry: {formatDate(selectedEvent.nextAttemptAt)}</p>
+              )}
+              {selectedEvent.status === 'QUARANTINED' && (
+                <p className="text-xs text-rose-300">Publication paused for operator remediation. This event has been retained.</p>
+              )}
               {selectedEvent.lastError && (
                 <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs space-y-1">
                   <div className="flex items-center gap-1.5 font-semibold text-rose-400">

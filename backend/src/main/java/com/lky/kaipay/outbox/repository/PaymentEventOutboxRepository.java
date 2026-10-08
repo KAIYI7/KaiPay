@@ -9,14 +9,18 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 @Repository
 public interface PaymentEventOutboxRepository extends JpaRepository<PaymentEventOutbox, UUID> {
 
-    @Query(value = "SELECT * FROM payment_events_outbox WHERE status = 'PENDING' ORDER BY created_at ASC LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
-    List<PaymentEventOutbox> findPendingEventsForUpdate(@Param("limit") int limit);
+    @Query(value = "SELECT * FROM payment_events_outbox WHERE status = 'PENDING' " +
+            "AND (next_attempt_at IS NULL OR next_attempt_at <= :now) " +
+            "ORDER BY COALESCE(next_attempt_at, created_at), created_at, id " +
+            "LIMIT :limit FOR UPDATE SKIP LOCKED", nativeQuery = true)
+    List<PaymentEventOutbox> findPendingEventsForUpdate(@Param("limit") int limit, @Param("now") Instant now);
 
     Page<PaymentEventOutbox> findAllByOrderByCreatedAtDesc(Pageable pageable);
 

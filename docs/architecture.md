@@ -94,7 +94,7 @@ com.lky.kaipay
 
 ---
 
-## 3. Database Schema Evolutions (Flyway Migrations V1–V5)
+## 3. Database Schema Evolutions (Flyway Migrations V1–V6)
 
 Database migrations are managed sequentially by Flyway.
 
@@ -117,6 +117,8 @@ V5__create_ledger_schema.sql
   ├── journals
   ├── ledger_entries
   └── refunds
+V6__add_outbox_retry_scheduling.sql
+  └── Persistent outbox retry/attempt/quarantine timestamps and eligibility index
 ```
 
 ### 3.1. Flyway V1: Core Relational Schema
@@ -394,16 +396,41 @@ Payments transition through a deterministic finite-state automaton:
 - **Concurrency Mechanism**:
   ```sql
   SELECT * FROM payment_events_outbox 
-  WHERE status = 'PENDING' 
-  ORDER BY created_at ASC 
+  WHERE status = 'PENDING'
+    AND (next_attempt_at IS NULL OR next_attempt_at <= :now)
+  ORDER BY COALESCE(next_attempt_at, created_at), created_at, id
   LIMIT :limit 
   FOR UPDATE SKIP LOCKED;
   ```
 - **Operations**:
   1. Claims batch of pending events without blocking competing worker threads.
-  2. Publishes to Kafka broker (`kafkaTemplate.send(...)` with synchronous 2-second timeout).
+  2. Publishes to Kafka broker (`kafkaTemplate.send(...)` with a configurable future wait, default 4 seconds).
   3. Updates row status to `PUBLISHED` with `published_at = NOW()`.
-  4. On network exception, records error in `last_error` and increments `retry_count`.
+  4. On send failure, retains the row, error class/message, attempt timestamp and cumulative failure count. It continues with the other eligible rows.
+
+Flyway V6 adds nullable `next_attempt_at`, `last_attempt_at`, and `quarantined_at`; existing V5 rows remain eligible without payload/status changes. The pending index follows the eligibility ordering. New events use their creation time; retries move to a future eligibility time, so a repeatedly failing older row cannot permanently occupy the front of the queue even with batch size one. Row locks are held through send completion and the batch's database commit. Competing workers skip locked claims; this does not prevent duplicates after rollback or a crash.
+
+**Retry policy:** Send timeouts (including ambiguous outcomes), broker outages, authorization/configuration failures, serialization failures, and unclassified errors remain `PENDING` with exponential backoff: 1s, 2s, 4s, ... capped at 60s by default. There is no finite retry budget for these errors. Delays and the positive send timeout are configured under `kaipay.outbox`; maximum retry delay must be at least the initial delay and at most 24h. Each failure's next deadline is persisted after the failed send. Eligibility uses the worker's UTC clock; worker clocks must be synchronized. No jitter, global outage circuit breaker, or distributed scheduler is introduced.
+
+Only `RecordTooLargeException` is classified as a record-specific permanent rejection. It immediately changes the retained row to `QUARANTINED`, records the error/time, and excludes it from automatic polling. Prior transient failures do not consume a quarantine budget. Quarantine requires operator remediation; it does not mean successful delivery or silent deletion. `GET /v1/events/outbox?status=QUARANTINED` exposes retained payloads/errors and the added timing fields; the Outbox Stream displays the new status explicitly. Other non-retriable Kafka errors may describe a repairable global configuration problem and deliberately remain scheduled for retry. Malformed event JSON is still the consumer's responsibility.
+
+**Recovery procedure:** Inspect the quarantined event by ID through the existing outbox API or database, save the original record/error in the incident record, and correct the demonstrated cause (for example, restore supported producer/broker size limits). Changing a financial event's meaning is not an automatic recovery strategy. Then use an operator database session:
+
+```sql
+BEGIN;
+SELECT id, status, payload, retry_count, last_error, quarantined_at
+FROM payment_events_outbox WHERE id = '<reviewed-event-uuid>' FOR UPDATE;
+UPDATE payment_events_outbox
+SET status = 'PENDING', next_attempt_at = NOW()
+WHERE id = '<reviewed-event-uuid>'
+  AND status = 'QUARANTINED' AND published_at IS NULL
+RETURNING id, status, next_attempt_at;
+COMMIT;
+```
+
+Confirm exactly one row was returned, then confirm it reaches `PUBLISHED` or investigate its new error. Requeue retains the original ID, payload, failure count, last error and last quarantine timestamp; a successful publish clears the active retry deadline. There is no new recovery API or DLT replay mechanism. Deploy the migration and updated publisher/UI together, with old publisher instances stopped: old code ignores deadlines and cannot deserialize the new status.
+
+**Delivery limits:** Kafka acknowledgment precedes database commit. If commit fails or the process crashes afterward, the row remains pending and may be sent again. A future timeout does not cancel the send and cannot establish non-delivery; late successes are not applied asynchronously to the JPA entity. Database persistence errors escape the send-failure classifier and roll back the batch. This remains an at-least-once relay with operator recovery for quarantined records, not exactly-once delivery. Backoff, quarantine and concurrent workers can change publication order, including within an aggregate. The synchronous Kafka `send` itself may wait for metadata up to the existing producer `max.block.ms`; the future wait is not a total invocation deadline. On thread interruption the worker retains retry state, restores the flag, and stops the batch.
 
 ### Boundary 3: Asynchronous Consumer Two-Phase Processing (`PaymentProcessingConsumer`)
 

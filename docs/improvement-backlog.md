@@ -8,6 +8,7 @@ This document outlines a realistic, prioritized engineering backlog for the KaiP
 
 | Item ID | Priority Tier | Feature / Architectural Enhancement | Target Area | Business / Technical Value |
 | :--- | :--- | :--- | :--- | :--- |
+| **`KP-TASK-01`** | **Implemented** | Persistent Outbox Backoff, Fair Eligibility & Quarantine | Outbox, Flyway V6, operational visibility | Failed rows retain retry/recovery information without indefinitely starving newer eligible deliveries. |
 | **`KP-A1`** | **Priority A (High-Value)** | Distributed Correlation ID & MDC Propagation | Ingress, Outbox, Kafka, Consumer | End-to-end distributed traceability across asynchronous threads and network hops. |
 | **`KP-A2`** | **Priority A (High-Value)** | DLT Redrive & Replay API (`POST /v1/events/dlt/{id}/replay`) | DLT Admin, Payment FSM, Kafka | Operational recovery and automated re-injection of quarantined payment events. |
 | **`KP-A3`** | **Priority A (High-Value)** | Autonomous Security Audit Logger (`REQUIRES_NEW`) | Common Security, Audit Schema | Guaranteed persistence of security, validation, and auth failure logs despite transaction rollbacks. |
@@ -21,6 +22,16 @@ This document outlines a realistic, prioritized engineering backlog for the KaiP
 ---
 
 ## 2. Priority A: High-Value Production Improvements
+
+---
+
+### Completed `KP-TASK-01`: Outbox Retry, Backoff, and Starvation Handling
+
+The relay now polls due `PENDING` rows in eligibility-time order using `FOR UPDATE SKIP LOCKED`. Failed sends no longer break ordinary batches. Persistent exponential backoff starts at 1s and caps at 60s; transient, ambiguous, configuration and unclassified failures retry indefinitely. `RecordTooLargeException` immediately quarantines the retained record for operator remediation. No finite outage retry budget discards deliveries.
+
+Flyway `V6__add_outbox_retry_scheduling.sql` preserves existing rows while adding retry/attempt/quarantine timestamps and replacing the pending index. The existing operational API exposes the new timing fields and supports the new status filter; the frontend no longer labels quarantined rows as published. The guarded database requeue procedure and coordinated deployment requirements are documented in [architecture.md](architecture.md#boundary-2-outbox-publishing-worker-outboxeventpublisher).
+
+Tests cover real Kafka oversized rejection and recovery, unavailable broker behavior, persisted backoff across publisher instances, batch-size-one fairness, competing PostgreSQL locks, V5-to-V6 migration, and rollback after broker acknowledgment. Payment/capture/refund transactions and the Direction A consumer are unchanged. At-least-once duplicates, publication reordering, long lock lifetimes during metadata waits, and manual recovery remain explicit limitations. This does not implement asynchronous batch dispatch, consumer DLT replay, or settlement.
 
 ---
 

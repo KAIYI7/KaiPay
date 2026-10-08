@@ -1,4 +1,4 @@
-export type OutboxEventStatus = 'PENDING' | 'PUBLISHED';
+export type OutboxEventStatus = 'PENDING' | 'PUBLISHED' | 'QUARANTINED';
 
 export interface OutboxEvent {
   id: string;
@@ -7,9 +7,12 @@ export interface OutboxEvent {
   eventType: string;
   payload: string;
   headers: Record<string, unknown>;
-  status: 'PENDING' | 'PUBLISHED';
+  status: OutboxEventStatus;
   retryCount: number;
   lastError?: string | null;
   createdAt: string;
   publishedAt?: string | null;
+  nextAttemptAt?: string | null;
+  lastAttemptAt?: string | null;
+  quarantinedAt?: string | null;
 }

@@ -138,4 +138,27 @@ class OutboxAdminControllerIntegrationTest extends AbstractPostgresIntegrationTe
             assertThat(node.get("status").asText()).isEqualTo(PaymentEventOutboxStatus.PUBLISHED.name());
         }
     }
+
+    @Test
+    void quarantinedEventsAreVisibleWithRetainedErrorAndAttemptMetadata() throws Exception {
+        PaymentEventOutbox quarantined = PaymentEventOutbox.builder().aggregateType("PAYMENT")
+                .aggregateId(UUID.randomUUID().toString()).eventType("PaymentCapturedEvent").payload("{\"retained\":true}").build();
+        quarantined.quarantine("RecordTooLargeException: test rejection", java.time.Instant.parse("2026-01-01T00:00:00Z"));
+        outboxRepository.save(quarantined);
+        outboxRepository.save(PaymentEventOutbox.builder().aggregateType("PAYMENT")
+                .aggregateId(UUID.randomUUID().toString()).eventType("PaymentCapturedEvent").payload("{}").build());
+        ResponseEntity<String> response = restTemplate.getForEntity("/v1/events/outbox?status=QUARANTINED", String.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        JsonNode data = objectMapper.readTree(response.getBody()).get("data");
+        assertThat(data.get("totalElements").asInt()).isEqualTo(1);
+        JsonNode retained = data.get("content").get(0);
+        assertThat(retained.get("id").asText()).isEqualTo(quarantined.getId().toString());
+        assertThat(retained.get("status").asText()).isEqualTo("QUARANTINED");
+        assertThat(retained.get("payload").asText()).contains("retained");
+        assertThat(retained.get("lastError").asText()).contains("RecordTooLargeException");
+        assertThat(retained.get("retryCount").asInt()).isEqualTo(1);
+        assertThat(java.time.Instant.parse(retained.get("lastAttemptAt").asText())).isEqualTo(quarantined.getLastAttemptAt());
+        assertThat(java.time.Instant.parse(retained.get("quarantinedAt").asText())).isEqualTo(quarantined.getQuarantinedAt());
+        assertThat(retained.has("publishedAt")).isFalse();
+    }
 }

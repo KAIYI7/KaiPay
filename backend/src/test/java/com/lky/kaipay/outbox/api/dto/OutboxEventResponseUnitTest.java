@@ -32,6 +32,9 @@ class OutboxEventResponseUnitTest {
                 .retryCount(2)
                 .lastError("Previous timeout")
                 .publishedAt(publishedAt)
+                .lastAttemptAt(publishedAt.minusSeconds(2))
+                .nextAttemptAt(publishedAt.plusSeconds(2))
+                .quarantinedAt(publishedAt.minusSeconds(3))
                 .build();
 
         OutboxEventResponse dto = OutboxEventResponse.fromEntity(entity);
@@ -46,5 +49,8 @@ class OutboxEventResponseUnitTest {
         assertThat(dto.getRetryCount()).isEqualTo(2);
         assertThat(dto.getLastError()).isEqualTo("Previous timeout");
         assertThat(dto.getPublishedAt()).isEqualTo(publishedAt);
+        assertThat(dto.getLastAttemptAt()).isEqualTo(publishedAt.minusSeconds(2));
+        assertThat(dto.getNextAttemptAt()).isEqualTo(publishedAt.plusSeconds(2));
+        assertThat(dto.getQuarantinedAt()).isEqualTo(publishedAt.minusSeconds(3));
     }
 }
