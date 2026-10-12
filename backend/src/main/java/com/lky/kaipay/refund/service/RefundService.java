@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.common.event.EventEnvelope;
 import com.lky.kaipay.common.exception.EntityNotFoundException;
+import com.lky.kaipay.common.exception.IdempotencyConflictException;
 import com.lky.kaipay.common.exception.InvalidRefundException;
 import com.lky.kaipay.ledger.service.LedgerService;
 import com.lky.kaipay.outbox.domain.PaymentEventOutbox;
@@ -20,13 +21,13 @@ import com.lky.kaipay.refund.domain.event.PaymentRefundedEvent;
 import com.lky.kaipay.refund.repository.RefundRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,9 +47,7 @@ public class RefundService {
         // 1. Idempotency check
         Optional<Refund> existingRefund = refundRepository.findByMerchantIdAndIdempotencyKey(merchantId, idempotencyKey);
         if (existingRefund.isPresent()) {
-            log.info("Idempotent refund request detected for merchant {} and idempotency key {}. Returning existing refund {}",
-                    merchantId, idempotencyKey, existingRefund.get().getId());
-            return RefundResponse.fromEntity(existingRefund.get());
+            return replayRefund(existingRefund.get(), paymentId, request);
         }
 
         // 2. Find payment by id and merchantId with pessimistic lock
@@ -56,6 +55,13 @@ public class RefundService {
                 .orElseThrow(() -> new EntityNotFoundException(
                         String.format("Payment %s not found for merchant %s", paymentId, merchantId)
                 ));
+
+        // A concurrent request for this payment may have committed while we waited for its lock.
+        // Recheck before status/balance validation, including after a completed full refund.
+        existingRefund = refundRepository.findByMerchantIdAndIdempotencyKey(merchantId, idempotencyKey);
+        if (existingRefund.isPresent()) {
+            return replayRefund(existingRefund.get(), paymentId, request);
+        }
 
         // 3. Validate status: must be CAPTURED or PARTIALLY_REFUNDED
         if (payment.getStatus() != PaymentStatus.CAPTURED && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
@@ -82,15 +88,9 @@ public class RefundService {
                 .idempotencyKey(idempotencyKey)
                 .build();
 
-        Refund savedRefund;
-        try {
-            savedRefund = refundRepository.save(refund);
-        } catch (DataIntegrityViolationException e) {
-            log.warn("Database unique constraint violation on refund idempotency key {} for merchant {}", idempotencyKey, merchantId);
-            return refundRepository.findByMerchantIdAndIdempotencyKey(merchantId, idempotencyKey)
-                    .map(RefundResponse::fromEntity)
-                    .orElseThrow(() -> e);
-        }
+        // Different payments do not share a lock. The merchant/key unique constraint remains
+        // the final guard; let violations roll back the whole transaction and map to HTTP 409.
+        Refund savedRefund = refundRepository.save(refund);
 
         // 6. Update payment status
         long newTotalRefunded = totalRefunded + request.getAmountCents();
@@ -143,6 +143,16 @@ public class RefundService {
         ledgerService.recordPaymentRefund(payment, savedRefund, envelope.getEventId());
 
         return RefundResponse.fromEntity(savedRefund);
+    }
+
+    private RefundResponse replayRefund(Refund refund, UUID paymentId, CreateRefundRequest request) {
+        if (!refund.getPayment().getId().equals(paymentId)
+                || refund.getAmountCents() != request.getAmountCents()
+                || !Objects.equals(refund.getReason(), request.getReason())) {
+            throw new IdempotencyConflictException("Refund idempotency key has already been used for a different request");
+        }
+        log.info("Idempotent refund request returning existing refund {}", refund.getId());
+        return RefundResponse.fromEntity(refund);
     }
 
     @Transactional(readOnly = true)

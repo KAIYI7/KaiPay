@@ -2,6 +2,7 @@ package com.lky.kaipay.refund;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.lky.kaipay.AbstractPostgresIntegrationTest;
 import com.lky.kaipay.customer.domain.Customer;
 import com.lky.kaipay.customer.repository.CustomerRepository;
@@ -24,13 +25,19 @@ import com.lky.kaipay.payment.domain.Payment;
 import com.lky.kaipay.payment.domain.PaymentStatus;
 import com.lky.kaipay.payment.repository.PaymentRepository;
 import com.lky.kaipay.refund.api.dto.CreateRefundRequest;
+import com.lky.kaipay.refund.api.dto.RefundResponse;
 import com.lky.kaipay.refund.domain.Refund;
 import com.lky.kaipay.refund.domain.RefundStatus;
 import com.lky.kaipay.refund.repository.RefundRepository;
+import com.lky.kaipay.refund.service.RefundService;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
@@ -39,11 +46,25 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Comparator;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 @DisplayName("Refund Endpoints & Ledger Integration Tests")
 class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
@@ -80,6 +101,18 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private RefundService refundService;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private Merchant testMerchant;
     private Customer testCustomer;
@@ -136,10 +169,14 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private Payment createCapturedPayment(long amountCents) {
+        return createCapturedPayment(testMerchant, testCustomer, amountCents);
+    }
+
+    private Payment createCapturedPayment(Merchant merchant, Customer customer, long amountCents) {
         Payment payment = paymentRepository.save(
                 Payment.builder()
-                        .merchant(testMerchant)
-                        .customer(testCustomer)
+                        .merchant(merchant)
+                        .customer(customer)
                         .amountCents(amountCents)
                         .currency("USD")
                         .status(PaymentStatus.CAPTURED)
@@ -360,6 +397,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
         );
         assertThat(response1.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         String refundId1 = objectMapper.readTree(response1.getBody()).get("data").get("id").asText();
+        EffectSnapshot beforeReplay = effectSnapshot();
 
         // Second call (same idempotency key)
         ResponseEntity<String> response2 = restTemplate.exchange(
@@ -372,9 +410,300 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
         String refundId2 = objectMapper.readTree(response2.getBody()).get("data").get("id").asText();
 
         assertThat(refundId1).isEqualTo(refundId2);
+        assertReplayResponse(objectMapper.readTree(response1.getBody()).get("data"),
+                objectMapper.readTree(response2.getBody()).get("data"));
         assertThat(refundRepository.count()).isEqualTo(1);
         assertThat(paymentEventOutboxRepository.count()).isEqualTo(1);
+        assertThat(effectSnapshot()).isEqualTo(beforeReplay);
     }
+
+    @Test
+    @DisplayName("Exact full-refund replay returns original 201 response despite REFUNDED payment state")
+    void testCreateRefund_FullRefundReplay_ReturnsOriginalWithoutSideEffects() throws Exception {
+        Payment payment = createCapturedPayment(10000L);
+        String key = "full_replay_" + UUID.randomUUID();
+        ResponseEntity<String> first = postRefund(payment, key, 10000L, "Return");
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertSingleRefundEffects();
+        assertThat(paymentRepository.findById(payment.getId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+        EffectSnapshot before = effectSnapshot();
+        ResponseEntity<String> replay = postRefund(payment, key, 10000L, "Return");
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertReplayResponse(objectMapper.readTree(first.getBody()).get("data"),
+                objectMapper.readTree(replay.getBody()).get("data"));
+        assertThat(effectSnapshot()).isEqualTo(before);
+    }
+
+    @ParameterizedTest(name = "reason equality: {0} versus {1}, replay={2}")
+    @MethodSource("reasonCases")
+    void testCreateRefund_ReasonUsesExactNullSafeEquality(String originalReason, String nextReason, boolean replay) throws Exception {
+        Payment payment = createCapturedPayment(10000L);
+        String key = "reason_" + UUID.randomUUID();
+        ResponseEntity<String> first = postRefund(payment, key, 3000L, originalReason);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertSingleRefundEffects();
+        EffectSnapshot before = effectSnapshot();
+        ResponseEntity<String> next = postRefund(payment, key, 3000L, nextReason);
+        assertThat(next.getStatusCode()).isEqualTo(replay ? HttpStatus.CREATED : HttpStatus.CONFLICT);
+        if (replay) {
+            assertReplayResponse(objectMapper.readTree(first.getBody()).get("data"),
+                    objectMapper.readTree(next.getBody()).get("data"));
+        }
+        assertThat(effectSnapshot()).isEqualTo(before);
+    }
+
+    private static Stream<Arguments> reasonCases() {
+        return Stream.of(Arguments.of(null, null, true), Arguments.of("", "", true),
+                Arguments.of("  ", "  ", true), Arguments.of(null, "", false),
+                Arguments.of(null, " ", false), Arguments.of("", " ", false),
+                Arguments.of(" Return ", "Return", false));
+    }
+
+    @Test
+    void testCreateRefund_OmittedAndExplicitNullReason_AreSameRequest() throws Exception {
+        Payment payment = createCapturedPayment(10000L);
+        String key = "null_reason_" + UUID.randomUUID();
+        HttpHeaders headers = createHeaders(testMerchant.getId(), key);
+        ResponseEntity<String> first = restTemplate.exchange("/v1/payments/" + payment.getId() + "/refunds",
+                HttpMethod.POST, new HttpEntity<>("{\"amountCents\":3000}", headers), String.class);
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertSingleRefundEffects();
+        EffectSnapshot before = effectSnapshot();
+        ResponseEntity<String> replay = restTemplate.exchange("/v1/payments/" + payment.getId() + "/refunds",
+                HttpMethod.POST, new HttpEntity<>("{\"amountCents\":3000,\"reason\":null}", headers), String.class);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertReplayResponse(objectMapper.readTree(first.getBody()).get("data"),
+                objectMapper.readTree(replay.getBody()).get("data"));
+        assertThat(effectSnapshot()).isEqualTo(before);
+    }
+
+    @Test
+    void testCreateRefund_MissingIdempotencyKey_Returns400WithoutSideEffects() {
+        Payment payment = createCapturedPayment(10000L);
+        EffectSnapshot before = effectSnapshot();
+        ResponseEntity<String> response = postRefund(payment, null, 3000L, "Return");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).contains("Missing required header: Idempotency-Key");
+        assertThat(effectSnapshot()).isEqualTo(before);
+    }
+
+    @Test
+    void testCreateRefund_SameKeyForDifferentMerchants_IsIndependent() throws Exception {
+        Merchant otherMerchant = merchantRepository.save(Merchant.builder().name("Independent Merchant")
+                .apiKeyHash("hash_independent_" + UUID.randomUUID()).status(MerchantStatus.ACTIVE).build());
+        Customer otherCustomer = customerRepository.save(Customer.builder().merchant(otherMerchant)
+                .email(UUID.randomUUID() + "@example.com").fullName("Independent Customer").build());
+        try {
+            Payment firstPayment = createCapturedPayment(10000L);
+            Payment secondPayment = createCapturedPayment(otherMerchant, otherCustomer, 10000L);
+            String key = "merchant_scoped_" + UUID.randomUUID();
+            ResponseEntity<String> first = postRefund(firstPayment, key, 3000L, "First");
+            ResponseEntity<String> second = postRefund(secondPayment, key, 4000L, "Second");
+            assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(second.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+            assertThat(objectMapper.readTree(first.getBody()).get("data").get("id"))
+                    .isNotEqualTo(objectMapper.readTree(second.getBody()).get("data").get("id"));
+            assertThat(refundRepository.findByMerchantIdAndIdempotencyKey(testMerchant.getId(), key).orElseThrow().getAmountCents())
+                    .isEqualTo(3000L);
+            assertThat(refundRepository.findByMerchantIdAndIdempotencyKey(otherMerchant.getId(), key).orElseThrow().getAmountCents())
+                    .isEqualTo(4000L);
+            assertThat(paymentEventOutboxRepository.count()).isEqualTo(2);
+            assertThat(journalRepository.findAll().stream().filter(j -> j.getSourceType() == JournalSourceType.PAYMENT_REFUND))
+                    .hasSize(2);
+        } finally {
+            cleanup();
+            customerRepository.deleteById(otherCustomer.getId());
+            merchantRepository.deleteById(otherMerchant.getId());
+        }
+    }
+
+    @Test
+    @DisplayName("Concurrent exact full refund waits for payment lock then replays original refund with HTTP 201")
+    void testCreateRefund_ConcurrentExactFullRefund_ReplaysAfterLock() throws Exception {
+        Payment payment = createCapturedPayment(10000L);
+        RefundRace race = runRefundRace(payment, payment, 10000L, 10000L, "Return", "Return");
+        assertThat(race.loser().getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertReplayResponse(objectMapper.readTree(objectMapper.writeValueAsString(race.winner())),
+                objectMapper.readTree(race.loser().getBody()).get("data"));
+        assertThat(paymentRepository.findById(payment.getId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+    }
+
+    @Test
+    @DisplayName("Concurrent conflicting refund waits for same payment then returns 409 without mutation")
+    void testCreateRefund_ConcurrentConflictingSamePayment_Returns409AfterLock() throws Exception {
+        Payment payment = createCapturedPayment(10000L);
+        RefundRace race = runRefundRace(payment, payment, 10000L, 3000L, "Return", "Different");
+        assertThat(race.loser().getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(race.loser().getBody()).contains("idempotency key");
+        assertThat(paymentRepository.findById(payment.getId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.REFUNDED);
+    }
+
+    @Test
+    @DisplayName("Concurrent conflicting different payment reaches unique constraint and rolls back to HTTP 409")
+    void testCreateRefund_ConcurrentConflictingDifferentPayment_Returns409AndRollsBack() throws Exception {
+        Payment first = createCapturedPayment(10000L);
+        Payment other = createCapturedPayment(10000L);
+        RefundRace race = runRefundRace(first, other, 3000L, 3000L, "Return", "Return");
+        assertThat(race.loser().getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(race.loser().getBody()).contains("Concurrent request conflict");
+        assertThat(paymentRepository.findById(first.getId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
+        assertThat(paymentRepository.findById(other.getId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.CAPTURED);
+        assertThat(refundRepository.findByPaymentId(other.getId())).isEmpty();
+    }
+
+    private RefundRace runRefundRace(Payment winnerPayment, Payment loserPayment, long winnerAmount,
+                                    long loserAmount, String winnerReason, String loserReason) throws Exception {
+        String key = "race_" + UUID.randomUUID();
+        CountDownLatch winnerFlushed = new CountDownLatch(1);
+        CountDownLatch allowCommit = new CountDownLatch(1);
+        AtomicInteger winnerBackendPid = new AtomicInteger();
+        AtomicReference<EffectSnapshot> winnerEffects = new AtomicReference<>();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<RefundResponse> winner = executor.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                RefundResponse response = refundService.createRefund(testMerchant.getId(), winnerPayment.getId(), key,
+                        CreateRefundRequest.builder().amountCents(winnerAmount).reason(winnerReason).build());
+                entityManager.flush();
+                winnerBackendPid.set(jdbcTemplate.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                winnerEffects.set(effectSnapshot());
+                winnerFlushed.countDown();
+                try {
+                    if (!allowCommit.await(20, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Timed out waiting to release winner transaction");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted winner transaction", e);
+                }
+                return response;
+            }));
+            assertThat(winnerFlushed.await(15, TimeUnit.SECONDS)).as("winner flushed refund before commit").isTrue();
+            Future<ResponseEntity<String>> loser = executor.submit(() -> postRefund(loserPayment, key, loserAmount, loserReason));
+            // Real PostgreSQL evidence that the HTTP transaction passed its initial lookup and
+            // is blocked by this winner, rather than a timing assumption based on thread startup.
+            await().atMost(Duration.ofSeconds(10)).until(() -> Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() "
+                            + "AND ? = ANY(pg_blocking_pids(pid)))", Boolean.class, winnerBackendPid.get())));
+            assertThat(loser.isDone()).as("loser cannot finish while winner holds its database lock").isFalse();
+            allowCommit.countDown();
+            RefundResponse winnerResponse = winner.get(15, TimeUnit.SECONDS);
+            ResponseEntity<String> loserResponse = loser.get(15, TimeUnit.SECONDS);
+            assertThat(refundRepository.count()).isEqualTo(1);
+            assertThat(refundRepository.sumRefundedAmountByPaymentId(winnerPayment.getId())).isEqualTo(winnerAmount);
+            assertThat(paymentEventOutboxRepository.count()).isEqualTo(1);
+            assertThat(journalRepository.findAll().stream().filter(j -> j.getSourceType() == JournalSourceType.PAYMENT_REFUND))
+                    .hasSize(1);
+            assertThat(effectSnapshot()).as("loser creates no payment/refund/outbox/accounting effects")
+                    .isEqualTo(winnerEffects.get());
+            return new RefundRace(winnerResponse, loserResponse);
+        } finally {
+            allowCommit.countDown();
+            executor.shutdown();
+            if (!executor.awaitTermination(20, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).as("refund worker cleanup").isTrue();
+            }
+        }
+    }
+
+    private record RefundRace(RefundResponse winner, ResponseEntity<String> loser) {}
+
+    @Test
+    @DisplayName("Idempotency conflict: same merchant key with a different payment returns 409 without side effects")
+    void testCreateRefund_SameKeyDifferentPayment_Returns409WithoutSideEffects() {
+        Payment original = createCapturedPayment(10000L);
+        Payment other = createCapturedPayment(10000L);
+        assertRefundConflictLeavesStateUnchanged(original, other, 3000L, "Damaged item");
+    }
+
+    @Test
+    @DisplayName("Idempotency conflict: same key with a different amount returns 409 without side effects")
+    void testCreateRefund_SameKeyDifferentAmount_Returns409WithoutSideEffects() {
+        Payment payment = createCapturedPayment(10000L);
+        assertRefundConflictLeavesStateUnchanged(payment, payment, 4000L, "Damaged item");
+    }
+
+    @Test
+    @DisplayName("Idempotency conflict: same key with a different reason returns 409 without side effects")
+    void testCreateRefund_SameKeyDifferentReason_Returns409WithoutSideEffects() {
+        Payment payment = createCapturedPayment(10000L);
+        assertRefundConflictLeavesStateUnchanged(payment, payment, 3000L, "Changed reason");
+    }
+
+    private void assertRefundConflictLeavesStateUnchanged(Payment original, Payment target, long amount, String reason) {
+        String key = "conflict_" + UUID.randomUUID();
+        ResponseEntity<String> first = postRefund(original, key, 3000L, "Damaged item");
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        Refund persisted = refundRepository.findByMerchantIdAndIdempotencyKey(testMerchant.getId(), key).orElseThrow();
+        assertThat(persisted.getAmountCents()).isEqualTo(3000L);
+        assertThat(persisted.getReason()).isEqualTo("Damaged item");
+        assertThat(persisted.getPayment().getId()).isEqualTo(original.getId());
+        EffectSnapshot before = effectSnapshot();
+
+        ResponseEntity<String> conflict = postRefund(target, key, amount, reason);
+
+        assertThat(conflict.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(conflict.getBody()).contains("idempotency key");
+        assertThat(effectSnapshot()).isEqualTo(before);
+    }
+
+    private ResponseEntity<String> postRefund(Payment payment, String key, long amount, String reason) {
+        CreateRefundRequest request = CreateRefundRequest.builder().amountCents(amount).reason(reason).build();
+        return restTemplate.exchange("/v1/payments/" + payment.getId() + "/refunds", HttpMethod.POST,
+                new HttpEntity<>(request, createHeaders(payment.getMerchant().getId(), key)), String.class);
+    }
+
+    private void assertSingleRefundEffects() {
+        assertThat(refundRepository.count()).isEqualTo(1);
+        assertThat(paymentEventOutboxRepository.count()).isEqualTo(1);
+        List<Journal> journals = journalRepository.findAll().stream()
+                .filter(j -> j.getSourceType() == JournalSourceType.PAYMENT_REFUND).toList();
+        assertThat(journals).hasSize(1);
+        assertThat(ledgerEntryRepository.findByJournalId(journals.getFirst().getId())).hasSize(3);
+    }
+
+    private void assertReplayResponse(JsonNode original, JsonNode replay) {
+        ObjectNode originalFields = original.deepCopy();
+        ObjectNode replayFields = replay.deepCopy();
+        // Existing deferred flushing can leave createdAt absent from the first response.
+        // Replay must preserve every business field and return the persisted timestamp.
+        originalFields.remove("createdAt");
+        replayFields.remove("createdAt");
+        assertThat(replayFields).isEqualTo(originalFields);
+        Refund persisted = refundRepository.findById(UUID.fromString(replay.get("id").asText())).orElseThrow();
+        assertThat(replay.get("createdAt")).isEqualTo(objectMapper.valueToTree(persisted.getCreatedAt()));
+        if (original.hasNonNull("createdAt")) {
+            assertThat(replay.get("createdAt")).isEqualTo(original.get("createdAt"));
+        }
+    }
+
+    private OutboxSnapshot outboxSnapshot(PaymentEventOutbox outbox) {
+        try {
+            // PostgreSQL JSONB may reorder object keys; compare the entire semantic payload.
+            return new OutboxSnapshot(outbox.getId(), objectMapper.readTree(outbox.getPayload()));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Invalid persisted outbox JSON", e);
+        }
+    }
+
+    private EffectSnapshot effectSnapshot() {
+        return new EffectSnapshot(
+                paymentRepository.findAll().stream().map(p -> p.getId() + ":" + p.getStatus()).sorted().toList(),
+                refundRepository.findAll().stream().map(r -> r.getId() + ":" + r.getPayment().getId() + ":"
+                        + r.getAmountCents() + ":" + r.getReason()).sorted().toList(),
+                paymentEventOutboxRepository.findAll().stream().map(this::outboxSnapshot)
+                        .sorted(Comparator.comparing(OutboxSnapshot::id)).toList(),
+                journalRepository.findAll().stream().map(j -> j.getId() + ":" + j.getSourceId()).sorted().toList(),
+                ledgerEntryRepository.findAll().stream().map(e -> e.getId() + ":" + e.getAccount().getId() + ":"
+                        + e.getEntryType() + ":" + e.getAmountCents()).sorted().toList(),
+                accountRepository.findAll().stream().map(a -> a.getId() + ":" + ledgerService.getAccountBalance(a.getId()))
+                        .sorted().toList());
+    }
+
+    private record OutboxSnapshot(UUID id, JsonNode payload) {}
+
+    private record EffectSnapshot(List<String> payments, List<String> refunds, List<OutboxSnapshot> outbox,
+                                  List<String> journals, List<String> entries, List<String> balances) {}
 
     @Test
     @DisplayName("GET /v1/payments/{paymentId}/refunds retrieves all refunds for the payment")
