@@ -36,3 +36,33 @@ HELP.md
 
 # Private Personal Learning Environment
 learning-lab/
+
+# Local-only AI-agent documentation (retain local files)
+/AGENTS.md
+/.agents/skills/kaipay-engineering/SKILL.md
+/docs/architecture.md
+/docs/improvement-backlog.md
+/docs/engineering/WORKFLOW.md
+/docs/engineering/INDEX.md
+/docs/engineering/QUEUE.md
+/docs/engineering/TASK_REPORT_TEMPLATE.md
+/docs/engineering/tasks/DIRECTION-A.md
+/docs/engineering/tasks/KP-TASK-01.md
+/docs/engineering/tasks/KP-TASK-02.md
+/docs/engineering/tasks/KP-DOC-FOUNDATION.md
+
+# Local-only personal and reference notes
+/docs/architecture-reference-review.md
+/docs/career-portfolio.md
+/docs/learning-roadmap.md
+/docs/reference-analysis/company-codebase-analysis.md
+/docs/reference-analysis/kaipay-gap-analysis.md
+/docs/reference-analysis/kaipay-improvement-roadmap.md
+/docs/reference-analysis/payD-deep-evidence-review.md
+/docs/reference-analysis/payD-pattern-validation.md
+/docs/reference-analysis/portfolio-reality-check.md
+
+# Protected local AI-agent handover documents
+/docs/CODEX_KAIPAY_ARCHITECTURE.md
+/docs/CODEX_KAIPAY_HANDOVER.md
+/docs/CODEX_KAIPAY_TASKS.md

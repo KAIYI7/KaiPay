@@ -403,11 +403,11 @@ KaiPay/
 │   └── vite.config.ts                   # Port 28081 configuration & proxy rules
 ├── docker-compose.yml                   # Postgres 16 (25432), Kafka 3.8 (29092), Kafka-UI (28048)
 ├── docs/                                # Technical documentation suite
-│   ├── architecture.md                  # Comprehensive architectural specification
+│   ├── architecture-reality-check.md    # Source-linked implementation review
 │   ├── event-catalog.md                 # Domain event schemas and topic topology
 │   ├── failure-handling-and-retries.md  # Non-blocking retries, DLT, and deduplication
 │   ├── double-entry-ledger.md           # Accounting proofs and balance projections
-│   ├── career-portfolio.md              # Master career reference & interview scenario bank
+│   ├── engineering-benchmark.md         # Architectural tradeoffs and improvement proposals
 │   ├── engineering-journal-...md        # Engineering post-mortem & distributed systems lessons
 │   └── screenshots/                     # 5 real high-resolution screenshots from live UI
 ├── .env.example                         # Environment variable configuration template
@@ -417,17 +417,17 @@ KaiPay/
 
 ---
 
-## 11. Complete Documentation Catalog
+## 11. Public Documentation Catalog
 
-For detailed architectural specifications, event contracts, failure handling models, and career reference guides, refer to the documents in [`docs/`](docs/):
+For implementation reviews, event contracts, accounting models, and engineering tradeoffs, refer to the public documents in [`docs/`](docs/):
 
 | Document | Description |
 | :--- | :--- |
-| **[Architecture & Database Schemas](docs/architecture.md)** | Modular bounded contexts, Flyway V1–V5 schemas, aggregate roots, transaction boundaries, and indexing. |
+| **[Architecture Reality Check](docs/architecture-reality-check.md)** | Source-linked review of implementation behavior, transaction boundaries, and limitations. |
 | **[Domain Event Catalog](docs/event-catalog.md)** | Formal schema specifications for `EventEnvelope<T>`, domain events, topic topologies, and serialization rules. |
 | **[Failure Handling & Non-Blocking Retries](docs/failure-handling-and-retries.md)** | Failure taxonomy, Spring Kafka `@RetryableTopic` + `@DltHandler` mechanics, and consumer deduplication algorithms. |
 | **[Double-Entry Financial Ledger](docs/double-entry-ledger.md)** | Chart of accounts, mathematical balance proofs ($\sum \text{Debits} = \sum \text{Credits}$), 3-way journals, and balance queries. |
-| **[Master Career & Technical Portfolio](docs/career-portfolio.md)** | 12 technical deep-dives, 16 in-depth interview scenarios, quantifiable metrics, and resume bullet points. |
+| **[Engineering Benchmark](docs/engineering-benchmark.md)** | Architectural tradeoffs, current limitations, and proposed improvements. |
 | **[Engineering Journal & Lessons Learned](docs/engineering-journal-lessons-learned.md)** | Detailed engineering post-mortem on dual-write traps, `SKIP LOCKED` tuning, and consumer crash recovery. |
 
 ---
