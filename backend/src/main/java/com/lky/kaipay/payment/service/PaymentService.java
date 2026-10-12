@@ -26,7 +26,6 @@ import com.lky.kaipay.payment.repository.PaymentRepository;
 import com.lky.kaipay.payment.service.acquirer.AcquirerAuthorizationResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -100,45 +99,37 @@ public class PaymentService {
                 .metadata(request.getMetadata() != null ? new HashMap<>(request.getMetadata()) : new HashMap<>())
                 .build();
 
-        Payment savedPayment;
+        Payment savedPayment = paymentRepository.save(payment);
+        log.info("Created payment {} with status CREATED for merchant {}", savedPayment.getId(), merchantId);
+
+        // 6. Build and Save Transactional Outbox Record for PaymentInitiatedEvent
+        PaymentInitiatedEvent initiatedEvent = PaymentInitiatedEvent.fromPayment(savedPayment);
+        EventEnvelope<PaymentInitiatedEvent> envelope = EventEnvelope.of(
+                "PaymentInitiatedEvent",
+                "PAYMENT",
+                savedPayment.getId().toString(),
+                merchantId,
+                initiatedEvent
+        );
+
+        String jsonPayload;
         try {
-            savedPayment = paymentRepository.save(payment);
-            log.info("Created payment {} with status CREATED for merchant {}", savedPayment.getId(), merchantId);
-
-            // 6. Build and Save Transactional Outbox Record for PaymentInitiatedEvent
-            PaymentInitiatedEvent initiatedEvent = PaymentInitiatedEvent.fromPayment(savedPayment);
-            EventEnvelope<PaymentInitiatedEvent> envelope = EventEnvelope.of(
-                    "PaymentInitiatedEvent",
-                    "PAYMENT",
-                    savedPayment.getId().toString(),
-                    merchantId,
-                    initiatedEvent
-            );
-
-            String jsonPayload;
-            try {
-                jsonPayload = objectMapper.writeValueAsString(envelope);
-            } catch (JsonProcessingException e) {
-                log.error("Failed to serialize outbox event envelope for payment {}", savedPayment.getId(), e);
-                throw new IllegalStateException("Failed to serialize outbox event envelope", e);
-            }
-
-            PaymentEventOutbox outboxRecord = PaymentEventOutbox.builder()
-                    .aggregateType("PAYMENT")
-                    .aggregateId(savedPayment.getId().toString())
-                    .eventType("PaymentInitiatedEvent")
-                    .payload(jsonPayload)
-                    .headers(Map.of("merchantId", merchantId.toString()))
-                    .status(PaymentEventOutboxStatus.PENDING)
-                    .build();
-
-            paymentEventOutboxRepository.save(outboxRecord);
-        } catch (DataIntegrityViolationException e) {
-            // Concurrent race condition: another thread inserted the exact same (merchant_id, idempotency_key)
-            log.warn("Database unique constraint violation on idempotency key {} for merchant {}", idempotencyKey, merchantId);
-            return idempotencyService.getExistingResponse(merchantId, idempotencyKey, requestHash)
-                    .orElseThrow(() -> e);
+            jsonPayload = objectMapper.writeValueAsString(envelope);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize outbox event envelope for payment {}", savedPayment.getId(), e);
+            throw new IllegalStateException("Failed to serialize outbox event envelope", e);
         }
+
+        PaymentEventOutbox outboxRecord = PaymentEventOutbox.builder()
+                .aggregateType("PAYMENT")
+                .aggregateId(savedPayment.getId().toString())
+                .eventType("PaymentInitiatedEvent")
+                .payload(jsonPayload)
+                .headers(Map.of("merchantId", merchantId.toString()))
+                .status(PaymentEventOutboxStatus.PENDING)
+                .build();
+
+        paymentEventOutboxRepository.save(outboxRecord);
 
         PaymentResponse response = PaymentResponse.fromDomain(savedPayment);
 

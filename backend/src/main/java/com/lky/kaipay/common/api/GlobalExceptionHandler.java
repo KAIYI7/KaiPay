@@ -1,5 +1,6 @@
 package com.lky.kaipay.common.api;
 
+import com.lky.kaipay.common.exception.DatabaseIntegrityClassifier;
 import com.lky.kaipay.common.exception.EntityNotFoundException;
 import com.lky.kaipay.common.exception.IdempotencyConflictException;
 import com.lky.kaipay.common.exception.InvalidJournalException;
@@ -145,7 +146,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleDataIntegrityViolationException(DataIntegrityViolationException ex, HttpServletRequest request) {
-        log.warn("Database constraint violation on {}: {}", request.getRequestURI(), ex.getMessage());
+        if (!DatabaseIntegrityClassifier.isIdempotencyConflict(ex)) {
+            return handleGenericException(ex, request);
+        }
+        log.warn("Database idempotency conflict on {}", request.getRequestURI());
         ErrorResponse response = ErrorResponse.builder()
                 .status(HttpStatus.CONFLICT.value())
                 .error(HttpStatus.CONFLICT.getReasonPhrase())
