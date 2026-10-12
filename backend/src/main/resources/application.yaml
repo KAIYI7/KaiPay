@@ -71,6 +71,8 @@ kaipay:
     send-timeout-ms: 4000
 
 logging:
+  pattern:
+    level: "%5p [traceId=%X{traceId:-}]"
   level:
     com.lky.kaipay: DEBUG
     org.springframework.web: INFO

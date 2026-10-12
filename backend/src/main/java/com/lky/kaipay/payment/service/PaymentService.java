@@ -3,6 +3,7 @@ package com.lky.kaipay.payment.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.common.event.EventEnvelope;
+import com.lky.kaipay.common.observability.CorrelationContext;
 import com.lky.kaipay.common.exception.EntityNotFoundException;
 import com.lky.kaipay.common.exception.InvalidRequestException;
 import com.lky.kaipay.consumer.service.ConsumerDeduplicationService;
@@ -31,7 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -125,7 +125,7 @@ public class PaymentService {
                 .aggregateId(savedPayment.getId().toString())
                 .eventType("PaymentInitiatedEvent")
                 .payload(jsonPayload)
-                .headers(Map.of("merchantId", merchantId.toString()))
+                .headers(CorrelationContext.outboxHeaders(merchantId, envelope.getEventId()))
                 .status(PaymentEventOutboxStatus.PENDING)
                 .build();
 
@@ -322,7 +322,7 @@ public class PaymentService {
                 .aggregateId(savedPayment.getId().toString())
                 .eventType("PaymentCapturedEvent")
                 .payload(jsonPayload)
-                .headers(Map.of("merchantId", merchantId.toString()))
+                .headers(CorrelationContext.outboxHeaders(merchantId, envelope.getEventId()))
                 .status(PaymentEventOutboxStatus.PENDING)
                 .build();
 

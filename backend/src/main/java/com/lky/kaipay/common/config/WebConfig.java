@@ -12,8 +12,8 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addMapping("/v1/**")
                 .allowedOrigins("http://localhost:28081", "http://127.0.0.1:28081")
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
-                .allowedHeaders("X-Merchant-Id", "Idempotency-Key", "Content-Type", "Authorization")
-                .exposedHeaders("X-Merchant-Id", "Idempotency-Key")
+                .allowedHeaders("X-Merchant-Id", "Idempotency-Key", "Content-Type", "Authorization", "X-Correlation-Id")
+                .exposedHeaders("X-Merchant-Id", "Idempotency-Key", "X-Correlation-Id")
                 .allowCredentials(true)
                 .maxAge(3600);
     }

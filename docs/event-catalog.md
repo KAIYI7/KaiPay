@@ -210,13 +210,27 @@ When messages are transported across Kafka and forwarded to Retry or DLT topics,
 
 | Header Name | Type | Injected By | Description |
 | :--- | :--- | :--- | :--- |
-| `merchantId` | `String` | KaiPay Outbox Publisher | Tenant merchant ID string for fast partition filtering. |
+| `X-Correlation-Id` | UTF-8 ASCII string | KaiPay Outbox Publisher / consumer normalization | Validated operation correlation identifier; the consumer normalizes missing/invalid values before retry/DLT forwarding. |
 | `kafka_original-topic` | `String` | Spring Kafka Retry | The original source topic name before retry routing. |
 | `kafka_original-partition` | `int` (4 bytes) | Spring Kafka Retry | Original source partition index. |
 | `kafka_original-offset` | `long` (8 bytes) | Spring Kafka Retry | Original source offset. |
 | `kafka_exception-fqcn` | `String` | Spring Kafka Retry / DLT | Fully Qualified Class Name of the thrown exception. |
 | `kafka_exception-cause-fqcn` | `String` | Spring Kafka Retry / DLT | Root cause FQCN if wrapped inside nested runtime exceptions. |
 | `kafka_exception-message` | `String` | Spring Kafka Retry / DLT | Detailed exception message. |
+
+`merchantId` remains persisted in outbox JSONB headers and the event envelope; the publisher does not attach it as a Kafka header. The earlier table's transport claim was not supported by the source.
+
+### Correlation continuity (KP-A1)
+
+HTTP requests may supply `X-Correlation-Id`: 1–64 ASCII characters, starting with an alphanumeric character and then containing only alphanumerics, `.`, `_`, or `-`. Missing, invalid, or repeated HTTP values receive a generated UUID; the effective value is returned in the response header. The existing CORS origins may send/read it. IDs are diagnostic metadata, not credentials or idempotency keys.
+
+Payment creation, capture, and refund creation persist this value as `headers.correlationId` alongside `merchantId` in the same transaction as the event. Direct service calls without valid context use the event UUID. Envelope and domain payload shapes remain unchanged. The publisher carries the stored value as a single `X-Correlation-Id` Kafka header. Legacy rows accept a valid `headers.traceId` only when canonical metadata is absent; otherwise missing/invalid metadata falls back to the stable outbox row UUID and is normalized in the persisted header map.
+
+The main and DLT consumers validate the last Kafka correlation header and replace all occurrences with one effective value before processing. Missing/invalid metadata falls back to a deterministic UUID from the received topic, partition and offset. Forwarding retains that normalized header across retries/DLT; DLT audit headers retain it as a string even for four/eight-character identifiers. Application HTTP, per-record publisher and consumer scopes set MDC `traceId`, then restore prior owned context on every exit while preserving unrelated MDC fields.
+
+Each operation has its own correlation chain; later capture/refund requests share it only if the caller reuses the ID. An idempotent HTTP replay returns that request's effective ID while the original event retains its creation ID; replay does not rewrite events or create new ones. Old events cannot recover an absent original ingress ID. This covers application scopes and registered servlet redispatches, not arbitrary executor tasks, every framework/producer-callback log, external bank tracing, or W3C trace/span semantics. See [KP-A1 evidence](engineering/tasks/KP-A1.md) for verification and delivery state.
+
+The metadata is additive and older consumers retain existing business behavior. Complete continuity requires all applicable publishers/consumers to use the correlation implementation; mixed-version deployments can lose context at an older component.
 
 ---
 

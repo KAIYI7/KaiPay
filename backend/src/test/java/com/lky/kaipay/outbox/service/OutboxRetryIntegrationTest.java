@@ -5,6 +5,7 @@ import com.lky.kaipay.outbox.domain.PaymentEventOutbox;
 import com.lky.kaipay.outbox.domain.PaymentEventOutboxStatus;
 import com.lky.kaipay.outbox.repository.PaymentEventOutboxRepository;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,7 @@ import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -86,7 +87,7 @@ class OutboxRetryIntegrationTest extends AbstractPostgresIntegrationTest {
     void retryEligibilityAndBackoffPersistAcrossPublisherInstances() {
         PaymentEventOutbox retry = notification();
         KafkaTemplate<String, String> failingKafka = mock(KafkaTemplate.class);
-        when(failingKafka.send(anyString(), anyString(), anyString())).thenReturn(
+        when(failingKafka.send(any(ProducerRecord.class))).thenReturn(
                 CompletableFuture.failedFuture(new TimeoutException("Broker offline")));
         OutboxEventPublisher first = publisher(failingKafka);
         assertThat(publish(first)).isZero();
@@ -95,7 +96,7 @@ class OutboxRetryIntegrationTest extends AbstractPostgresIntegrationTest {
 
         OutboxEventPublisher restarted = publisher(failingKafka);
         assertThat(publish(restarted)).isZero();
-        verify(failingKafka, times(1)).send(anyString(), anyString(), anyString());
+        verify(failingKafka, times(1)).send(any(ProducerRecord.class));
         clock.now = clock.now.plusSeconds(1);
         assertThat(publish(restarted)).isZero();
         assertThat(reload(retry).getNextAttemptAt()).isEqualTo(clock.now.plusSeconds(2));
@@ -123,8 +124,9 @@ class OutboxRetryIntegrationTest extends AbstractPostgresIntegrationTest {
         KafkaTemplate<String, String> controlledKafka = mock(KafkaTemplate.class);
         CountDownLatch firstSend = new CountDownLatch(1);
         CompletableFuture<SendResult<String, String>> heldAck = new CompletableFuture<>();
-        when(controlledKafka.send(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
-            if (first.getAggregateId().equals(invocation.getArgument(1))) {
+        when(controlledKafka.send(any(ProducerRecord.class))).thenAnswer(invocation -> {
+            ProducerRecord<String, String> message = invocation.getArgument(0);
+            if (first.getAggregateId().equals(message.key())) {
                 firstSend.countDown();
                 return heldAck;
             }
@@ -148,8 +150,8 @@ class OutboxRetryIntegrationTest extends AbstractPostgresIntegrationTest {
             assertThat(firstResult.get(5, TimeUnit.SECONDS)).isEqualTo(1);
         }
         assertThat(repository.findAll()).allMatch(row -> row.getStatus() == PaymentEventOutboxStatus.PUBLISHED);
-        verify(controlledKafka, times(1)).send(anyString(), org.mockito.ArgumentMatchers.eq(first.getAggregateId()), anyString());
-        verify(controlledKafka, times(1)).send(anyString(), org.mockito.ArgumentMatchers.eq(second.getAggregateId()), anyString());
+        verify(controlledKafka, times(1)).send(argThat((ProducerRecord<String, String> record) -> first.getAggregateId().equals(record.key())));
+        verify(controlledKafka, times(1)).send(argThat((ProducerRecord<String, String> record) -> second.getAggregateId().equals(record.key())));
     }
 
     @Test

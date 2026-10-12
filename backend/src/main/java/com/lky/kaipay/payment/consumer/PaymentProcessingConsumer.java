@@ -1,5 +1,6 @@
 package com.lky.kaipay.payment.consumer;
 
+import com.lky.kaipay.common.observability.CorrelationContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,59 +58,61 @@ public class PaymentProcessingConsumer {
             groupId = "${spring.kafka.consumer.group-id:kaipay-payment-processor-group}"
     )
     public void processPaymentRequest(ConsumerRecord<String, String> record, Acknowledgment ack) {
-        try {
-            JsonNode rootNode = objectMapper.readTree(record.value());
-            JsonNode payloadNode = rootNode.has("payload") ? rootNode.get("payload") : rootNode;
-            if (!payloadNode.has("paymentId")) {
-                throw new IllegalArgumentException("Unresolvable poison pill: missing paymentId");
-            }
+        try (var ignored = CorrelationContext.open(CorrelationContext.normalizeKafka(record))) {
+            try {
+                JsonNode rootNode = objectMapper.readTree(record.value());
+                JsonNode payloadNode = rootNode.has("payload") ? rootNode.get("payload") : rootNode;
+                if (!payloadNode.has("paymentId")) {
+                    throw new IllegalArgumentException("Unresolvable poison pill: missing paymentId");
+                }
 
-            UUID eventId = rootNode.has("eventId") ? UUID.fromString(rootNode.get("eventId").asText()) : UUID.randomUUID();
-            UUID paymentId = UUID.fromString(payloadNode.get("paymentId").asText());
-            String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : "PaymentInitiatedEvent";
+                UUID eventId = rootNode.has("eventId") ? UUID.fromString(rootNode.get("eventId").asText()) : UUID.randomUUID();
+                UUID paymentId = UUID.fromString(payloadNode.get("paymentId").asText());
+                String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : "PaymentInitiatedEvent";
 
-            switch (eventType) {
-                case "PaymentCapturedEvent", "PaymentRefundedEvent" -> {
-                    // State and accounting already committed in the synchronous capture/refund transaction.
-                    // This authorization group owns no side effect or deduplication record for notifications.
-                    log.info("Skipping lifecycle notification in authorization consumer: eventId={}, paymentId={}, eventType={}",
-                            eventId, paymentId, eventType);
+                switch (eventType) {
+                    case "PaymentCapturedEvent", "PaymentRefundedEvent" -> {
+                        // State and accounting already committed in the synchronous capture/refund transaction.
+                        // This authorization group owns no side effect or deduplication record for notifications.
+                        log.info("Skipping lifecycle notification in authorization consumer: eventId={}, paymentId={}, eventType={}",
+                                eventId, paymentId, eventType);
+                        if (ack != null) ack.acknowledge();
+                        return;
+                    }
+                    case "PaymentInitiatedEvent" -> { }
+                    default -> throw new IllegalArgumentException("Unsupported payment event type: " + eventType);
+                }
+
+                long amountCents = payloadNode.get("amountCents").asLong();
+                String currency = payloadNode.has("currency") ? payloadNode.get("currency").asText() : "USD";
+
+                // Fast Pre-Check Deduplication
+                if (consumerDeduplicationService.isEventConsumed(eventId, consumerGroup)) {
+                    log.info("Consumer event deduplication hit: eventId {} already processed by {}", eventId, consumerGroup);
                     if (ack != null) ack.acknowledge();
                     return;
                 }
-                case "PaymentInitiatedEvent" -> { }
-                default -> throw new IllegalArgumentException("Unsupported payment event type: " + eventType);
-            }
 
-            long amountCents = payloadNode.get("amountCents").asLong();
-            String currency = payloadNode.has("currency") ? payloadNode.get("currency").asText() : "USD";
+                // Tx 1: Persist and commit observable PROCESSING state (idempotent if already PROCESSING)
+                paymentService.transitionToProcessing(paymentId);
 
-            // Fast Pre-Check Deduplication
-            if (consumerDeduplicationService.isEventConsumed(eventId, consumerGroup)) {
-                log.info("Consumer event deduplication hit: eventId {} already processed by {}", eventId, consumerGroup);
+                // Non-transactional external gateway call
+                AcquirerAuthorizationResult authResult = mockBankAcquirerClient.authorize(paymentId, amountCents, currency);
+
+                // Tx 2: Persist final AUTHORIZED/DECLINED state + ConsumedEvent atomically
+                paymentService.completeAuthorizationWithDeduplication(paymentId, authResult, eventId, consumerGroup, eventType);
+
                 if (ack != null) ack.acknowledge();
-                return;
+            } catch (GatewayTimeoutException | GatewayUnavailableException e) {
+                log.warn("Transient gateway error during event processing [key={}]: {}", record.key(), e.getMessage());
+                throw e; // Rethrow to trigger @RetryableTopic
+            } catch (NonRetryableGatewayException e) {
+                log.error("Non-retryable gateway error during event processing [key={}]: {}", record.key(), e.getMessage(), e);
+                throw e;
+            } catch (Exception e) {
+                log.error("Fatal error during event processing [key={}]: {}", record.key(), e.getMessage(), e);
+                throw new RuntimeException("Fatal payment event processing failed", e);
             }
-
-            // Tx 1: Persist and commit observable PROCESSING state (idempotent if already PROCESSING)
-            paymentService.transitionToProcessing(paymentId);
-
-            // Non-transactional external gateway call
-            AcquirerAuthorizationResult authResult = mockBankAcquirerClient.authorize(paymentId, amountCents, currency);
-
-            // Tx 2: Persist final AUTHORIZED/DECLINED state + ConsumedEvent atomically
-            paymentService.completeAuthorizationWithDeduplication(paymentId, authResult, eventId, consumerGroup, eventType);
-
-            if (ack != null) ack.acknowledge();
-        } catch (GatewayTimeoutException | GatewayUnavailableException e) {
-            log.warn("Transient gateway error during event processing [key={}]: {}", record.key(), e.getMessage());
-            throw e; // Rethrow to trigger @RetryableTopic
-        } catch (NonRetryableGatewayException e) {
-            log.error("Non-retryable gateway error during event processing [key={}]: {}", record.key(), e.getMessage(), e);
-            throw e;
-        } catch (Exception e) {
-            log.error("Fatal error during event processing [key={}]: {}", record.key(), e.getMessage(), e);
-            throw new RuntimeException("Fatal payment event processing failed", e);
         }
     }
 
@@ -121,91 +124,98 @@ public class PaymentProcessingConsumer {
             @Header(value = KafkaHeaders.EXCEPTION_MESSAGE, required = false) String exceptionMessage,
             Acknowledgment ack
     ) {
-        log.error("Handling Dead Letter message from topic={}, partition={}, offset={}, key={}",
-                record.topic(), record.partition(), record.offset(), record.key());
+        String correlationId = CorrelationContext.normalizeKafka(record);
+        try (var ignored = CorrelationContext.open(correlationId)) {
+            log.error("Handling Dead Letter message from topic={}, partition={}, offset={}, key={}",
+                    record.topic(), record.partition(), record.offset(), record.key());
 
-        String resolvedExceptionClass = (exceptionCauseFqcn != null && !exceptionCauseFqcn.isBlank())
-                ? exceptionCauseFqcn
-                : (exceptionFqcn != null ? exceptionFqcn : "UnknownException");
+            String resolvedExceptionClass = (exceptionCauseFqcn != null && !exceptionCauseFqcn.isBlank())
+                    ? exceptionCauseFqcn
+                    : (exceptionFqcn != null ? exceptionFqcn : "UnknownException");
 
-        UUID paymentId = null;
-        UUID eventId = null;
-        try {
-            JsonNode rootNode = objectMapper.readTree(record.value());
-            if (rootNode.has("eventId")) {
-                eventId = UUID.fromString(rootNode.get("eventId").asText());
-            }
-            JsonNode payloadNode = rootNode.has("payload") ? rootNode.get("payload") : rootNode;
-            if (payloadNode.has("paymentId")) {
-                paymentId = UUID.fromString(payloadNode.get("paymentId").asText());
-            }
-        } catch (Exception parseEx) {
-            log.warn("Could not parse payload for DLT message: {}", parseEx.getMessage());
-        }
-
-        if (paymentId != null) {
+            UUID paymentId = null;
+            UUID eventId = null;
             try {
-                paymentService.markPaymentFailed(paymentId, "DLT_ROUTED", exceptionMessage != null ? exceptionMessage : "Exhausted retries or fatal poison pill");
+                JsonNode rootNode = objectMapper.readTree(record.value());
+                if (rootNode.has("eventId")) {
+                    eventId = UUID.fromString(rootNode.get("eventId").asText());
+                }
+                JsonNode payloadNode = rootNode.has("payload") ? rootNode.get("payload") : rootNode;
+                if (payloadNode.has("paymentId")) {
+                    paymentId = UUID.fromString(payloadNode.get("paymentId").asText());
+                }
+            } catch (Exception parseEx) {
+                log.warn("Could not parse payload for DLT message: {}", parseEx.getMessage());
+            }
+
+            if (paymentId != null) {
+                try {
+                    paymentService.markPaymentFailed(paymentId, "DLT_ROUTED", exceptionMessage != null ? exceptionMessage : "Exhausted retries or fatal poison pill");
+                } catch (Exception e) {
+                    log.error("Failed to mark payment {} as FAILED in DLT handler", paymentId, e);
+                }
+            }
+
+            String rawPayload = record.value();
+            String jsonPayload = rawPayload;
+            try {
+                objectMapper.readTree(rawPayload);
             } catch (Exception e) {
-                log.error("Failed to mark payment {} as FAILED in DLT handler", paymentId, e);
+                try {
+                    jsonPayload = objectMapper.writeValueAsString(rawPayload);
+                } catch (Exception ex) {
+                    jsonPayload = "\"" + (rawPayload != null ? rawPayload.replace("\"", "\\\"").replace("\u0000", "") : "") + "\"";
+                }
             }
-        }
 
-        String rawPayload = record.value();
-        String jsonPayload = rawPayload;
-        try {
-            objectMapper.readTree(rawPayload);
-        } catch (Exception e) {
-            try {
-                jsonPayload = objectMapper.writeValueAsString(rawPayload);
-            } catch (Exception ex) {
-                jsonPayload = "\"" + (rawPayload != null ? rawPayload.replace("\"", "\\\"").replace("\u0000", "") : "") + "\"";
-            }
-        }
-
-        java.util.Map<String, Object> headersMap = new java.util.HashMap<>();
-        if (record.headers() != null) {
-            for (org.apache.kafka.common.header.Header h : record.headers()) {
-                if (h.value() != null) {
-                    byte[] val = h.value();
-                    if (val.length == 4) {
-                        try {
-                            headersMap.put(h.key(), java.nio.ByteBuffer.wrap(val).getInt());
-                        } catch (Exception e) {
-                            headersMap.put(h.key(), new String(val, java.nio.charset.StandardCharsets.UTF_8).replace("\u0000", ""));
+            java.util.Map<String, Object> headersMap = new java.util.HashMap<>();
+            if (record.headers() != null) {
+                for (org.apache.kafka.common.header.Header h : record.headers()) {
+                    if (CorrelationContext.HEADER_NAME.equals(h.key())) continue;
+                    if (h.value() != null) {
+                        byte[] val = h.value();
+                        if (val.length == 4) {
+                            try {
+                                headersMap.put(h.key(), java.nio.ByteBuffer.wrap(val).getInt());
+                            } catch (Exception e) {
+                                headersMap.put(h.key(), new String(val, java.nio.charset.StandardCharsets.UTF_8).replace("\u0000", ""));
+                            }
+                        } else if (val.length == 8) {
+                            try {
+                                headersMap.put(h.key(), java.nio.ByteBuffer.wrap(val).getLong());
+                            } catch (Exception e) {
+                                headersMap.put(h.key(), new String(val, java.nio.charset.StandardCharsets.UTF_8).replace("\u0000", ""));
+                            }
+                        } else {
+                            String strVal = new String(val, java.nio.charset.StandardCharsets.UTF_8).replace("\u0000", "");
+                            headersMap.put(h.key(), strVal);
                         }
-                    } else if (val.length == 8) {
-                        try {
-                            headersMap.put(h.key(), java.nio.ByteBuffer.wrap(val).getLong());
-                        } catch (Exception e) {
-                            headersMap.put(h.key(), new String(val, java.nio.charset.StandardCharsets.UTF_8).replace("\u0000", ""));
-                        }
-                    } else {
-                        String strVal = new String(val, java.nio.charset.StandardCharsets.UTF_8).replace("\u0000", "");
-                        headersMap.put(h.key(), strVal);
                     }
                 }
             }
-        }
 
-        try {
-            DeadLetterEvent dltEvent = DeadLetterEvent.builder()
-                    .originalTopic(record.topic())
-                    .originalPartition(record.partition())
-                    .originalOffset(record.offset())
-                    .eventId(eventId)
-                    .paymentId(paymentId)
-                    .exceptionClass(resolvedExceptionClass)
-                    .failureMessage(exceptionMessage != null ? exceptionMessage : "DLT routed")
-                    .payload(jsonPayload)
-                    .headers(headersMap)
-                    .build();
-            deadLetterEventRepository.save(dltEvent);
-            log.info("Saved dead letter event record with id {}", dltEvent.getId());
-        } catch (Exception e) {
-            log.error("Failed to persist dead letter event record", e);
-        }
+            // This text header must never pass through the generic 4/8-byte numeric decoder.
+            headersMap.put(CorrelationContext.HEADER_NAME, correlationId);
 
-        if (ack != null) ack.acknowledge();
+            try {
+                DeadLetterEvent dltEvent = DeadLetterEvent.builder()
+                        .originalTopic(record.topic())
+                        .originalPartition(record.partition())
+                        .originalOffset(record.offset())
+                        .eventId(eventId)
+                        .paymentId(paymentId)
+                        .exceptionClass(resolvedExceptionClass)
+                        .failureMessage(exceptionMessage != null ? exceptionMessage : "DLT routed")
+                        .payload(jsonPayload)
+                        .headers(headersMap)
+                        .build();
+                deadLetterEventRepository.save(dltEvent);
+                log.info("Saved dead letter event record with id {}", dltEvent.getId());
+            } catch (Exception e) {
+                log.error("Failed to persist dead letter event record", e);
+            }
+
+            if (ack != null) ack.acknowledge();
+        }
     }
 }

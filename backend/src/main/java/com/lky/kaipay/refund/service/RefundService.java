@@ -3,6 +3,7 @@ package com.lky.kaipay.refund.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.common.event.EventEnvelope;
+import com.lky.kaipay.common.observability.CorrelationContext;
 import com.lky.kaipay.common.exception.EntityNotFoundException;
 import com.lky.kaipay.common.exception.IdempotencyConflictException;
 import com.lky.kaipay.common.exception.InvalidRefundException;
@@ -26,7 +27,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -133,7 +133,7 @@ public class RefundService {
                 .aggregateId(savedRefund.getId().toString())
                 .eventType("PaymentRefundedEvent")
                 .payload(jsonPayload)
-                .headers(Map.of("merchantId", merchantId.toString()))
+                .headers(CorrelationContext.outboxHeaders(merchantId, envelope.getEventId()))
                 .status(PaymentEventOutboxStatus.PENDING)
                 .build();
 

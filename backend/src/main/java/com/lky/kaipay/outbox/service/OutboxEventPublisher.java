@@ -1,9 +1,11 @@
 package com.lky.kaipay.outbox.service;
 
+import com.lky.kaipay.common.observability.CorrelationContext;
 import com.lky.kaipay.outbox.domain.PaymentEventOutbox;
 import com.lky.kaipay.outbox.repository.PaymentEventOutboxRepository;
 import jakarta.annotation.PostConstruct;
 import org.apache.kafka.common.errors.RecordTooLargeException;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,7 +16,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -71,39 +76,55 @@ public class OutboxEventPublisher {
 
         int publishedCount = 0;
         for (PaymentEventOutbox record : pendingRecords) {
-            Instant attemptedAt = clock.instant();
-            try {
-                String key = record.getAggregateId();
-                kafkaTemplate.send(topic, key, record.getPayload()).get(sendTimeoutMs, TimeUnit.MILLISECONDS);
-            } catch (Exception e) {
-                Throwable failure = unwrapSendFailure(e);
-                log.error("Failed to publish outbox event [id={}, aggregateId={}]: {}",
-                        record.getId(), record.getAggregateId(), failure.getMessage(), e);
-                String error = failure.getClass().getName() + ": " + failure.getMessage();
-                // Only this record-specific rejection proves it cannot be delivered unchanged.
-                // Timeouts, auth/config failures and unknown errors retain indefinite retry eligibility.
-                if (failure instanceof RecordTooLargeException) {
-                    record.quarantine(error, attemptedAt);
-                    log.error("Quarantined outbox event [id={}] for operator remediation", record.getId());
-                } else {
-                    record.scheduleRetry(error, attemptedAt, clock.instant().plusMillis(retryDelayMs(record.getRetryCount())));
+            String correlationId = prepareCorrelation(record);
+            try (var ignored = CorrelationContext.open(correlationId)) {
+                Instant attemptedAt = clock.instant();
+                try {
+                    String key = record.getAggregateId();
+                    ProducerRecord<String, String> message = new ProducerRecord<>(topic, key, record.getPayload());
+                    message.headers().add(CorrelationContext.HEADER_NAME, correlationId.getBytes(StandardCharsets.US_ASCII));
+                    kafkaTemplate.send(message).get(sendTimeoutMs, TimeUnit.MILLISECONDS);
+                } catch (Exception e) {
+                    Throwable failure = unwrapSendFailure(e);
+                    log.error("Failed to publish outbox event [id={}, aggregateId={}]: {}",
+                            record.getId(), record.getAggregateId(), failure.getMessage(), e);
+                    String error = failure.getClass().getName() + ": " + failure.getMessage();
+                    // Only this record-specific rejection proves it cannot be delivered unchanged.
+                    // Timeouts, auth/config failures and unknown errors retain indefinite retry eligibility.
+                    if (failure instanceof RecordTooLargeException) {
+                        record.quarantine(error, attemptedAt);
+                        log.error("Quarantined outbox event [id={}] for operator remediation", record.getId());
+                    } else {
+                        record.scheduleRetry(error, attemptedAt, clock.instant().plusMillis(retryDelayMs(record.getRetryCount())));
+                    }
+                    outboxRepository.save(record);
+                    if (e instanceof InterruptedException) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    continue;
                 }
+                // Persistence errors must escape and roll back, never be classified as Kafka send errors.
+                record.setLastAttemptAt(attemptedAt);
+                record.markPublished(clock.instant());
                 outboxRepository.save(record);
-                if (e instanceof InterruptedException) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-                continue;
+                publishedCount++;
+                log.info("Published outbox event [id={}, aggregateId={}, eventType={}] to topic [{}]",
+                        record.getId(), record.getAggregateId(), record.getEventType(), topic);
             }
-            // Persistence errors must escape and roll back, never be classified as Kafka send errors.
-            record.setLastAttemptAt(attemptedAt);
-            record.markPublished(clock.instant());
-            outboxRepository.save(record);
-            publishedCount++;
-            log.info("Published outbox event [id={}, aggregateId={}, eventType={}] to topic [{}]",
-                    record.getId(), record.getAggregateId(), record.getEventType(), topic);
         }
         return publishedCount;
+    }
+
+    private String prepareCorrelation(PaymentEventOutbox record) {
+        Map<String, Object> headers = record.getHeaders() == null ? new HashMap<>() : new HashMap<>(record.getHeaders());
+        Object candidate = headers.containsKey(CorrelationContext.OUTBOX_KEY)
+                ? headers.get(CorrelationContext.OUTBOX_KEY) : headers.get(CorrelationContext.MDC_KEY);
+        String correlationId = candidate instanceof String value && CorrelationContext.isValid(value)
+                ? value : record.getId().toString();
+        headers.put(CorrelationContext.OUTBOX_KEY, correlationId);
+        record.setHeaders(headers);
+        return correlationId;
     }
 
     private Throwable unwrapSendFailure(Throwable failure) {
