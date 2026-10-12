@@ -9,6 +9,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -230,6 +232,62 @@ class OutboxEventPublisherUnitTest {
             assertThat(record.getNextAttemptAt()).isEqualTo(now.plusSeconds(1));
             assertThat(MDC.get("traceId")).isEqualTo("scheduler-context");
             verify(kafkaTemplate, never()).send(messageWithKey("untouched"));
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"kafka", "future-kafka", "wrapped-kafka", "wrapped-java"})
+    void sendInterruptionStopsBeforeTouchingLaterRows(String path) {
+        PaymentEventOutbox interrupted = createSampleOutbox("interrupted");
+        interrupted.setHeaders(Map.of("correlationId", "interrupted-request"));
+        PaymentEventOutbox untouched = createSampleOutbox("untouched");
+        Map<String, Object> originalHeaders = Map.of("merchantId", "merchant-1");
+        untouched.setHeaders(originalHeaders);
+        MDC.put("traceId", "scheduler-context");
+        MDC.put("user", "retained");
+        when(outboxRepository.findPendingEventsForUpdate(20, now)).thenReturn(List.of(interrupted, untouched));
+        when(kafkaTemplate.send(any(ProducerRecord.class))).thenAnswer(invocation -> {
+            ProducerRecord<String, String> message = invocation.getArgument(0);
+            if (!message.key().equals("interrupted")) return CompletableFuture.completedFuture(null);
+            assertThat(MDC.get("traceId")).isEqualTo("interrupted-request");
+            if (path.equals("kafka")) {
+                throw new org.apache.kafka.common.errors.InterruptException("Metadata wait interrupted");
+            }
+            Throwable failure = path.equals("wrapped-java")
+                    ? new InterruptedException("Acknowledgement wait interrupted")
+                    : new org.apache.kafka.common.errors.InterruptException("Metadata wait interrupted");
+            if (path.startsWith("wrapped")) {
+                failure = new java.util.concurrent.CompletionException(
+                        new org.springframework.kafka.KafkaException("Send failed", failure));
+            }
+            return CompletableFuture.failedFuture(failure);
+        });
+
+        try {
+            assertThat(outboxEventPublisher.publishPendingEvents()).isZero();
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            assertThat(interrupted.getStatus()).isEqualTo(PaymentEventOutboxStatus.PENDING);
+            assertThat(interrupted.getRetryCount()).isEqualTo(1);
+            assertThat(interrupted.getLastAttemptAt()).isEqualTo(now);
+            assertThat(interrupted.getNextAttemptAt()).isEqualTo(now.plusSeconds(1));
+            assertThat(interrupted.getPublishedAt()).isNull();
+            assertThat(interrupted.getQuarantinedAt()).isNull();
+            assertThat(interrupted.getLastError()).contains(path.equals("wrapped-java")
+                    ? "java.lang.InterruptedException" : "org.apache.kafka.common.errors.InterruptException");
+            verify(kafkaTemplate, times(1)).send(any(ProducerRecord.class));
+            verify(outboxRepository).save(interrupted);
+            verify(outboxRepository, never()).save(untouched);
+            assertThat(untouched.getHeaders()).isSameAs(originalHeaders);
+            assertThat(untouched.getStatus()).isEqualTo(PaymentEventOutboxStatus.PENDING);
+            assertThat(untouched.getRetryCount()).isZero();
+            assertThat(untouched.getLastAttemptAt()).isNull();
+            assertThat(untouched.getNextAttemptAt()).isNull();
+            assertThat(untouched.getLastError()).isNull();
+            assertThat(untouched.getPublishedAt()).isNull();
+            assertThat(MDC.get("traceId")).isEqualTo("scheduler-context");
+            assertThat(MDC.get("user")).isEqualTo("retained");
         } finally {
             Thread.interrupted();
         }

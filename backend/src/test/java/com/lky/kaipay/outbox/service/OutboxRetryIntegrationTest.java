@@ -17,6 +17,7 @@ import org.springframework.kafka.support.SendResult;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.slf4j.MDC;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -30,6 +31,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -177,6 +180,83 @@ class OutboxRetryIntegrationTest extends AbstractPostgresIntegrationTest {
             assertThat(failed.getQuarantinedAt()).isNull();
             assertThat(publish(publisher(unavailable))).isZero();
             assertThat(reload(pending).getRetryCount()).isEqualTo(1);
+        } finally {
+            factory.destroy();
+        }
+    }
+
+    @Test
+    void realProducerMetadataInterruptionStopsBatchAndRetainsRetryForRecovery() throws Exception {
+        PaymentEventOutbox interrupted = notification();
+        PaymentEventOutbox untouched = notification();
+        jdbc.update("UPDATE payment_events_outbox SET created_at = NOW() - INTERVAL '1 minute' WHERE id = ?",
+                interrupted.getId());
+        Map<String, Object> properties = Map.of(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "127.0.0.1:1",
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
+                ProducerConfig.MAX_BLOCK_MS_CONFIG, 1000);
+        var factory = new DefaultKafkaProducerFactory<String, String>(properties);
+        AtomicInteger sends = new AtomicInteger();
+        AtomicReference<RuntimeException> observedFailure = new AtomicReference<>();
+        try {
+            // Initialize the actual producer before interruption so the exercised failure is send's metadata wait.
+            factory.createProducer();
+            KafkaTemplate<String, String> interruptingKafka = new KafkaTemplate<>(factory) {
+                @Override
+                public CompletableFuture<SendResult<String, String>> send(ProducerRecord<String, String> message) {
+                    if (sends.incrementAndGet() == 1) Thread.currentThread().interrupt();
+                    try {
+                        return super.send(message);
+                    } catch (RuntimeException failure) {
+                        observedFailure.compareAndSet(null, failure);
+                        throw failure;
+                    }
+                }
+            };
+            OutboxEventPublisher worker = publisher(interruptingKafka);
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                var result = executor.submit(() -> {
+                    MDC.put("traceId", "scheduler-context");
+                    MDC.put("user", "retained");
+                    try {
+                        int published = publish(worker);
+                        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+                        assertThat(MDC.get("traceId")).isEqualTo("scheduler-context");
+                        assertThat(MDC.get("user")).isEqualTo("retained");
+                        return published;
+                    } finally {
+                        Thread.interrupted();
+                        MDC.clear();
+                    }
+                });
+                assertThat(result.get(10, TimeUnit.SECONDS)).isZero();
+            }
+            assertThat(observedFailure.get()).isInstanceOf(org.apache.kafka.common.errors.InterruptException.class);
+            assertThat(sends).hasValue(1);
+            PaymentEventOutbox retained = reload(interrupted);
+            assertThat(retained.getStatus()).isEqualTo(PaymentEventOutboxStatus.PENDING);
+            assertThat(retained.getRetryCount()).isEqualTo(1);
+            assertThat(retained.getLastError()).contains("InterruptException");
+            assertThat(retained.getLastAttemptAt()).isEqualTo(clock.now);
+            assertThat(retained.getNextAttemptAt()).isEqualTo(clock.now.plusSeconds(1));
+            assertThat(retained.getPublishedAt()).isNull();
+            assertThat(retained.getQuarantinedAt()).isNull();
+            PaymentEventOutbox later = reload(untouched);
+            assertThat(later.getStatus()).isEqualTo(PaymentEventOutboxStatus.PENDING);
+            assertThat(later.getRetryCount()).isZero();
+            assertThat(later.getLastError()).isNull();
+            assertThat(later.getLastAttemptAt()).isNull();
+            assertThat(later.getNextAttemptAt()).isNull();
+            assertThat(later.getPublishedAt()).isNull();
+            assertThat(later.getHeaders()).isEqualTo(untouched.getHeaders());
+
+            clock.now = clock.now.plusSeconds(1);
+            assertThat(publish(publisher(realKafka))).isEqualTo(2);
+            assertThat(reload(interrupted).getStatus()).isEqualTo(PaymentEventOutboxStatus.PUBLISHED);
+            assertThat(reload(interrupted).getRetryCount()).isEqualTo(1);
+            assertThat(reload(untouched).getStatus()).isEqualTo(PaymentEventOutboxStatus.PUBLISHED);
+            assertThat(reload(untouched).getRetryCount()).isZero();
         } finally {
             factory.destroy();
         }

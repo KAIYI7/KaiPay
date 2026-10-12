@@ -5,6 +5,7 @@ import com.lky.kaipay.outbox.domain.PaymentEventOutbox;
 import com.lky.kaipay.outbox.repository.PaymentEventOutboxRepository;
 import jakarta.annotation.PostConstruct;
 import org.apache.kafka.common.errors.RecordTooLargeException;
+import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import lombok.extern.slf4j.Slf4j;
@@ -98,7 +99,8 @@ public class OutboxEventPublisher {
                         record.scheduleRetry(error, attemptedAt, clock.instant().plusMillis(retryDelayMs(record.getRetryCount())));
                     }
                     outboxRepository.save(record);
-                    if (e instanceof InterruptedException) {
+                    // Kafka wraps interrupted metadata/buffer waits; future failures may wrap either type.
+                    if (failure instanceof InterruptedException || failure instanceof InterruptException) {
                         Thread.currentThread().interrupt();
                         break;
                     }
