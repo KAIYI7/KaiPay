@@ -37,19 +37,12 @@ HELP.md
 # Private Personal Learning Environment
 learning-lab/
 
-# Local-only AI-agent documentation (retain local files)
-/AGENTS.md
-/.agents/skills/kaipay-engineering/SKILL.md
+# Local-only documentation (retain local files).
+# Root AGENTS.md and the engineering skill contain public-safe instructions.
 /docs/architecture.md
 /docs/improvement-backlog.md
-/docs/engineering/WORKFLOW.md
-/docs/engineering/INDEX.md
-/docs/engineering/QUEUE.md
-/docs/engineering/TASK_REPORT_TEMPLATE.md
-/docs/engineering/tasks/DIRECTION-A.md
-/docs/engineering/tasks/KP-TASK-01.md
-/docs/engineering/tasks/KP-TASK-02.md
-/docs/engineering/tasks/KP-DOC-FOUNDATION.md
+# Cover all present and future internal reports, policies, queues, and templates.
+/docs/engineering/
 
 # Local-only personal and reference notes
 /docs/architecture-reference-review.md
