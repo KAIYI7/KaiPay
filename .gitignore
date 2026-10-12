@@ -38,7 +38,8 @@ HELP.md
 learning-lab/
 
 # Local-only documentation (retain local files).
-# Root AGENTS.md and the engineering skill contain public-safe instructions.
+/AGENTS.md
+/.agents/skills/
 /docs/architecture.md
 /docs/improvement-backlog.md
 # Cover all present and future internal reports, policies, queues, and templates.
