@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KaiPay feasibility probe</string>
+    <string name="probe_explanation">EXPERIMENTAL — TNG compatibility UNVERIFIED\nThis local probe cannot verify payments. No network, raw-content display or financial action.\nAndroid grants broad notification access; this app discards other packages immediately.\nEnable is temporary until process exit. Disable clears diagnostics; revoke OS access in settings.</string>
+    <string name="open_notification_settings">Open notification access settings</string>
+    <string name="enable_detection">Enable local detection</string>
+    <string name="disable_and_clear">Disable and clear</string>
+    <string name="clear_diagnostics">Clear diagnostics</string>
+    <string name="refresh_status">Refresh status</string>
+    <string name="notification_settings_unavailable">Notification settings unavailable on this device.\n</string>
+    <string name="redacted_event">%1$s: %2$s; title=%3$b, text=%4$b, expanded=%5$b</string>
+    <string name="probe_status">%1$sOS access: %2$b\nDetection enabled: %3$b\nListener connected: %4$b\nRedacted events: %5$d / 32\n%6$s\nUNKNOWN does not identify an incoming transfer. Content changes with identical metadata may appear duplicate.</string>
+</resources>
