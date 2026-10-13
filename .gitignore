@@ -60,3 +60,14 @@ learning-lab/
 /docs/CODEX_KAIPAY_ARCHITECTURE.md
 /docs/CODEX_KAIPAY_HANDOVER.md
 /docs/CODEX_KAIPAY_TASKS.md
+
+# Experimental bridge: local state, SDK paths, binaries and private device evidence
+.local/
+.gradle/
+local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
+/android-bridge/device-evidence/
+/experimental-bridge/device-evidence/
