@@ -9,11 +9,13 @@ export const refundApi = {
   async createRefund(
     paymentId: string,
     payload: CreateRefundPayload,
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    merchantId?: string
   ): Promise<Refund> {
     const key = idempotencyKey || generateIdempotencyKey();
     return apiRequest<Refund>(`/v1/payments/${paymentId}/refunds`, {
       method: 'POST',
+      merchantId,
       idempotencyKey: key,
       body: JSON.stringify(payload),
     });
@@ -22,9 +24,10 @@ export const refundApi = {
   /**
    * Fetch all refunds recorded for a given payment ID
    */
-  async listPaymentRefunds(paymentId: string): Promise<Refund[]> {
+  async listPaymentRefunds(paymentId: string, merchantId?: string): Promise<Refund[]> {
     return apiRequest<Refund[]>(`/v1/payments/${paymentId}/refunds`, {
       method: 'GET',
+      merchantId,
     });
   },
 };

@@ -30,8 +30,8 @@ export const paymentsApi = {
   /**
    * Get single payment by ID
    */
-  async getPayment(paymentId: string): Promise<Payment> {
-    return apiRequest<Payment>(`/v1/payments/${paymentId}`, { method: 'GET' });
+  async getPayment(paymentId: string, merchantId?: string): Promise<Payment> {
+    return apiRequest<Payment>(`/v1/payments/${paymentId}`, { method: 'GET', merchantId });
   },
 
   /**
@@ -48,10 +48,11 @@ export const paymentsApi = {
   /**
    * Capture an authorized payment, moving funds to settled state and writing double-entry ledger entries
    */
-  async capturePayment(paymentId: string, idempotencyKey?: string): Promise<Payment> {
+  async capturePayment(paymentId: string, idempotencyKey?: string, merchantId?: string): Promise<Payment> {
     const key = idempotencyKey || generateIdempotencyKey();
     return apiRequest<Payment>(`/v1/payments/${paymentId}/capture`, {
       method: 'POST',
+      merchantId,
       idempotencyKey: key,
     });
   },

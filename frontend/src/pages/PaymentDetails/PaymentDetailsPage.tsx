@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsApi } from '../../api/paymentsApi';
 import { refundApi } from '../../api/refundApi';
 import { dltApi } from '../../api/dltApi';
+import { useMerchant } from '../../context/MerchantContext';
 import { RefundStatus } from '../../models/refund';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
@@ -34,7 +35,39 @@ import {
 
 export const PaymentDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const { activeMerchant } = useMerchant();
+
+  // A new view lifetime resets every form, modal and action result on a context switch.
+  return <MerchantPaymentDetails key={JSON.stringify([activeMerchant.id, id])} merchantId={activeMerchant.id} id={id} />;
+};
+
+interface PaymentAction {
+  merchantId: string;
+  paymentId: string;
+  key: string;
+}
+
+const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({ merchantId, id }) => {
   const queryClient = useQueryClient();
+  const isCurrentView = useRef(true);
+  useEffect(() => {
+    isCurrentView.current = true;
+    return () => { isCurrentView.current = false; };
+  }, []);
+
+  const invalidateActionQueries = ({ merchantId: originMerchant, paymentId }: PaymentAction) => {
+    // Completion still refreshes the originating merchant's cache after the view unmounts.
+    for (const queryKey of [
+      ['payment', originMerchant, paymentId],
+      ['payment-refunds', originMerchant, paymentId],
+      ['payments', originMerchant],
+      ['ledger-balance', originMerchant],
+      ['ledger-journals', originMerchant],
+      ['ledger-journals-summary', originMerchant],
+    ]) {
+      void queryClient.invalidateQueries({ queryKey });
+    }
+  };
 
   // Modals & Action States
   const [isCaptureModalOpen, setIsCaptureModalOpen] = useState(false);
@@ -53,8 +86,8 @@ export const PaymentDetailsPage: React.FC = () => {
     isError: isPaymentError,
     error: paymentError,
   } = useQuery({
-    queryKey: ['payment', id],
-    queryFn: () => paymentsApi.getPayment(id!),
+    queryKey: ['payment', merchantId, id],
+    queryFn: () => paymentsApi.getPayment(id!, merchantId),
     enabled: !!id,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
@@ -80,8 +113,8 @@ export const PaymentDetailsPage: React.FC = () => {
     isLoading: isRefundsLoading,
     refetch: refetchRefunds,
   } = useQuery({
-    queryKey: ['payment-refunds', id],
-    queryFn: () => refundApi.listPaymentRefunds(id!),
+    queryKey: ['payment-refunds', merchantId, id],
+    queryFn: () => refundApi.listPaymentRefunds(id!, merchantId),
     enabled: !!id,
   });
 
@@ -96,10 +129,12 @@ export const PaymentDetailsPage: React.FC = () => {
 
   // 4. Capture Mutation
   const captureMutation = useMutation({
-    mutationFn: async (key: string) => {
-      return paymentsApi.capturePayment(id!, key);
+    mutationFn: async ({ merchantId: originMerchant, paymentId, key }: PaymentAction) => {
+      return paymentsApi.capturePayment(paymentId, key, originMerchant);
     },
-    onSuccess: (updatedPayment) => {
+    onSuccess: (updatedPayment, action) => {
+      invalidateActionQueries(action);
+      if (!isCurrentView.current) return;
       setIsCaptureModalOpen(false);
       setActionErrorMessage(null);
       setActionSuccessMessage(
@@ -108,12 +143,9 @@ export const PaymentDetailsPage: React.FC = () => {
           updatedPayment.currency
         )} to double-entry ledger.`
       );
-      queryClient.invalidateQueries({ queryKey: ['payment', id] });
-      queryClient.invalidateQueries({ queryKey: ['payments'] });
-      queryClient.invalidateQueries({ queryKey: ['ledger-balance'] });
-      queryClient.invalidateQueries({ queryKey: ['ledger-journals'] });
     },
     onError: (err: Error) => {
+      if (!isCurrentView.current) return;
       setActionErrorMessage(err.message || 'Failed to capture payment');
     },
   });
@@ -124,14 +156,17 @@ export const PaymentDetailsPage: React.FC = () => {
       amountCents,
       reason,
       key,
-    }: {
+      merchantId: originMerchant,
+      paymentId,
+    }: PaymentAction & {
       amountCents: number;
       reason?: string;
-      key: string;
     }) => {
-      return refundApi.createRefund(id!, { amountCents, reason }, key);
+      return refundApi.createRefund(paymentId, { amountCents, reason }, key, originMerchant);
     },
-    onSuccess: (refund) => {
+    onSuccess: (refund, action) => {
+      invalidateActionQueries(action);
+      if (!isCurrentView.current) return;
       setIsRefundModalOpen(false);
       setActionErrorMessage(null);
       setActionSuccessMessage(
@@ -142,13 +177,9 @@ export const PaymentDetailsPage: React.FC = () => {
       );
       setRefundAmountDollars('');
       setRefundReason('');
-      queryClient.invalidateQueries({ queryKey: ['payment', id] });
-      queryClient.invalidateQueries({ queryKey: ['payment-refunds', id] });
-      queryClient.invalidateQueries({ queryKey: ['payments'] });
-      queryClient.invalidateQueries({ queryKey: ['ledger-balance'] });
-      queryClient.invalidateQueries({ queryKey: ['ledger-journals'] });
     },
     onError: (err: Error) => {
+      if (!isCurrentView.current) return;
       setActionErrorMessage(err.message || 'Failed to create refund');
     },
   });
@@ -171,7 +202,7 @@ export const PaymentDetailsPage: React.FC = () => {
 
   // Submit Capture
   const handleConfirmCapture = () => {
-    captureMutation.mutate(captureIdempotencyKey);
+    captureMutation.mutate({ merchantId, paymentId: id!, key: captureIdempotencyKey });
   };
 
   // Submit Refund
@@ -194,6 +225,8 @@ export const PaymentDetailsPage: React.FC = () => {
     }
 
     refundMutation.mutate({
+      merchantId,
+      paymentId: id!,
       amountCents,
       reason: refundReason.trim() || undefined,
       key: refundIdempotencyKey,
