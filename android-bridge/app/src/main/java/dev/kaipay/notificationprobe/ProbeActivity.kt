@@ -6,6 +6,8 @@ import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.view.View
@@ -15,10 +17,16 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.math.BigDecimal
+import dev.kaipay.probe.RedactedEvent
 
 class ProbeActivity : Activity() {
     private lateinit var status: TextView
     private var settingsUnavailable = false
+    private val handler = Handler(Looper.getMainLooper())
+    private val foregroundRefresh = object : Runnable {
+        override fun run() { refresh(); handler.postDelayed(this, 1_000) }
+    }
     private val listener get() = ComponentName(this, TngNotificationListener::class.java)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,7 +51,7 @@ class ProbeActivity : Activity() {
                 if (!ProbeRuntime.session.snapshot().connected) NotificationListenerService.requestRebind(listener)
             }
         }
-        button(R.string.disable_and_clear) { ProbeRuntime.session.setEnabled(false) }
+        button(R.string.disable_and_clear) { ProbeRuntime.disable() }
         button(R.string.clear_diagnostics) { ProbeRuntime.session.clear() }
         button(R.string.refresh_status) { }
         status = TextView(this)
@@ -61,7 +69,16 @@ class ProbeActivity : Activity() {
         refresh()
     }
 
-    override fun onResume() { super.onResume(); if (::status.isInitialized) refresh() }
+    override fun onResume() {
+        super.onResume()
+        if (::status.isInitialized) { refresh(); handler.removeCallbacks(foregroundRefresh); handler.postDelayed(foregroundRefresh, 1_000) }
+    }
+    override fun onPause() {
+        handler.removeCallbacks(foregroundRefresh)
+        if (::status.isInitialized) status.setText(R.string.content_hidden_while_paused)
+        super.onPause()
+    }
+    override fun onDestroy() { handler.removeCallbacks(foregroundRefresh); super.onDestroy() }
 
     @Suppress("DEPRECATION")
     private fun configureContentInsets() {
@@ -96,14 +113,33 @@ class ProbeActivity : Activity() {
 
     private fun refresh() {
         val granted = notificationAccessGranted()
-        if (!granted) ProbeRuntime.session.setEnabled(false)
+        if (!granted) ProbeRuntime.disable()
         val snapshot = ProbeRuntime.session.snapshot()
-        val events = snapshot.events.joinToString("\n") {
-            getString(R.string.redacted_event, it.delivery, it.diagnostic.disposition,
-                it.diagnostic.titlePresent, it.diagnostic.textPresent, it.diagnostic.bigTextPresent)
-        }
+        val events = snapshot.events.joinToString("\n\n") { describe(it) }
         status.text = getString(R.string.probe_status,
             if (settingsUnavailable) getString(R.string.notification_settings_unavailable) else "",
-            granted, snapshot.enabled, snapshot.connected, snapshot.events.size, events)
+            granted, snapshot.enabled, snapshot.connected, snapshot.events.size,
+            snapshot.removals, snapshot.ignoredLateCallbacks, events)
+    }
+
+    private fun describe(event: RedactedEvent): String = buildString {
+        append(getString(R.string.redacted_event, event.delivery, event.diagnostic.disposition,
+            event.diagnostic.titlePresent, event.diagnostic.textPresent, event.diagnostic.bigTextPresent))
+        event.metadata?.let { meta ->
+            append(getString(R.string.event_metadata, meta.sourceAlias, meta.postTime,
+                meta.notificationTime?.toString() ?: getString(R.string.not_available),
+                meta.channelAlias ?: getString(R.string.not_available), meta.grouped, meta.groupSummary))
+        }
+        event.inspection?.let { inspection ->
+            val result = inspection.classification
+            val amount = result.amountMinor?.let { BigDecimal.valueOf(it, 2).toPlainString() }
+                ?: getString(R.string.not_available)
+            append(getString(R.string.classification_result, result.outcome, result.direction, amount,
+                result.currency ?: getString(R.string.not_available), result.confidence,
+                result.reference ?: getString(R.string.not_available), result.ruleId ?: getString(R.string.not_available),
+                result.explanation))
+            inspection.fields.forEach { (name, value) -> append(getString(R.string.inspected_field, name, value)) }
+            inspection.textLines.forEachIndexed { index, value -> append(getString(R.string.inspected_line, index, value)) }
+        }
     }
 }

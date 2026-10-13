@@ -73,7 +73,7 @@ class ProbeActivityTest {
         assertTrue(uiText().contains("Listener connected: true"))
     }
 
-    @Test fun `redacted UI omits transient contents and disable clears diagnostics`() {
+    @Test fun `local UI displays permitted text without raw keys and disable clears diagnostics`() {
         grantAccess(activity)
         ProbeRuntime.session.setConnected(true)
         click("Enable local detection")
@@ -81,16 +81,62 @@ class ProbeActivityTest {
         try {
             listener.get().onNotificationPosted(syntheticNotification())
             click("Refresh status")
-            assertTrue(uiText().contains("Redacted events: 1 / 32"))
+            assertTrue(uiText().contains("Local observations: 1 / 32"))
             assertTrue(uiText().contains("UNKNOWN"))
-            assertFalse(uiText().contains(SYNTHETIC_PRIVATE))
+            assertTrue(uiText().contains(SYNTHETIC_PRIVATE))
             assertFalse(uiText().contains("SYNTHETIC_TAG"))
             assertFalse(uiText().contains(ProbeParser.OFFICIAL_PACKAGE))
             click("Disable and clear")
             assertFalse(ProbeRuntime.session.snapshot().enabled)
             assertTrue(ProbeRuntime.session.snapshot().events.isEmpty())
-            assertTrue(uiText().contains("Redacted events: 0 / 32"))
+            assertTrue(uiText().contains("Local observations: 0 / 32"))
+            assertFalse(uiText().contains(SYNTHETIC_PRIVATE))
         } finally { listener.destroy() }
+    }
+
+    @Test fun `pause scrubs rendered notification text and resume respects revocation`() {
+        grantAccess(activity)
+        ProbeRuntime.session.setConnected(true)
+        click("Enable local detection")
+        ProbeRuntime.session.posted(ProbeParser.OFFICIAL_PACKAGE, "SYNTHETIC_KEY", 100) {
+            dev.kaipay.probe.Fields(text = SYNTHETIC_PRIVATE)
+        }
+        click("Refresh status")
+        assertTrue(uiText().contains(SYNTHETIC_PRIVATE))
+        controller.pause()
+        assertFalse(uiText().contains(SYNTHETIC_PRIVATE))
+        grantAccess(activity, false)
+        controller.resume()
+        assertFalse(uiText().contains(SYNTHETIC_PRIVATE))
+        assertTrue(ProbeRuntime.session.snapshot().events.isEmpty())
+    }
+
+    @Test fun `foreground refresh erases expired text without a manual button press`() {
+        grantAccess(activity)
+        ProbeRuntime.session.setConnected(true)
+        click("Enable local detection")
+        ProbeRuntime.session.posted(ProbeParser.OFFICIAL_PACKAGE, "SYNTHETIC_KEY", 100) {
+            dev.kaipay.probe.Fields(text = SYNTHETIC_PRIVATE)
+        }
+        click("Refresh status")
+        assertTrue(uiText().contains(SYNTHETIC_PRIVATE))
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(301_000))
+        assertFalse(uiText().contains(SYNTHETIC_PRIVATE))
+        assertTrue(ProbeRuntime.session.snapshot().events.isEmpty())
+    }
+
+    @Test fun `foreground refresh checks OS revocation without a manual button press`() {
+        grantAccess(activity)
+        ProbeRuntime.session.setConnected(true)
+        click("Enable local detection")
+        ProbeRuntime.session.posted(ProbeParser.OFFICIAL_PACKAGE, "SYNTHETIC_KEY", 100) {
+            dev.kaipay.probe.Fields(text = SYNTHETIC_PRIVATE)
+        }
+        click("Refresh status")
+        grantAccess(activity, false)
+        shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        assertFalse(uiText().contains(SYNTHETIC_PRIVATE))
+        assertFalse(ProbeRuntime.session.snapshot().enabled)
     }
 
     @Test fun `resume after revoke clears diagnostics and regrant does not auto enable`() {

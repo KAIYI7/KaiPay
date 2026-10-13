@@ -68,13 +68,14 @@ class TngNotificationListenerTest {
         assertTrue(events().isEmpty())
     }
 
-    @Test fun `Android styled text adapted transiently and only presence retained`() {
+    @Test fun `Android styled text retained locally but default object rendering stays redacted`() {
         enable()
         listener.onNotificationPosted(syntheticNotification(extras = Bundle().apply {
             putCharSequence(Notification.EXTRA_TITLE, SpannableString(SYNTHETIC_PRIVATE))
             putCharSequence(Notification.EXTRA_TEXT, StringBuilder(SYNTHETIC_PRIVATE))
         }))
         assertEquals(Diagnostic(Disposition.UNKNOWN, true, true, false), events().single().diagnostic)
+        assertEquals(SYNTHETIC_PRIVATE, events().single().inspection?.fields?.get("text"))
         assertFalse(ProbeRuntime.session.snapshot().toString().contains(SYNTHETIC_PRIVATE))
     }
 
@@ -99,7 +100,8 @@ class TngNotificationListenerTest {
             putCharSequence(Notification.EXTRA_TEXT, content)
         }))
         assertTrue(content.reads > 0)
-        assertTrue(events().isEmpty())
+        assertEquals(Disposition.MALFORMED, events().single().diagnostic.disposition)
+        assertTrue(events().single().inspection!!.fields.isEmpty())
         assertTrue(ShadowLog.getLogs().isEmpty())
     }
 

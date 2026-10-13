@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">KaiPay feasibility probe</string>
-    <string name="probe_explanation">EXPERIMENTAL — TNG compatibility UNVERIFIED\nThis local probe cannot verify payments. No network, raw-content display or financial action.\nAndroid grants broad notification access; this app discards other packages immediately.\nEnable is temporary until process exit. Disable clears diagnostics; revoke OS access in settings.</string>
+    <string name="probe_explanation">EXPERIMENTAL — TNG compatibility UNVERIFIED\nLOCAL TEXT INSPECTION: permitted TNG text is displayed temporarily, never uploaded. Candidates do not verify payments.\nAndroid grants broad notification access; other packages are discarded immediately.\nUp to 32 observations, five-minute expiry. Disable, revoke, removal or process exit clears text. Potential credentials are suppressed.\nRefresh to inspect updates; foreground display also refreshes. Enable is temporary until process exit.</string>
     <string name="open_notification_settings">Open notification access settings</string>
     <string name="enable_detection">Enable local detection</string>
     <string name="disable_and_clear">Disable and clear</string>
@@ -9,5 +9,11 @@
     <string name="refresh_status">Refresh status</string>
     <string name="notification_settings_unavailable">Notification settings unavailable on this device.\n</string>
     <string name="redacted_event">%1$s: %2$s; title=%3$b, text=%4$b, expanded=%5$b</string>
-    <string name="probe_status">%1$sOS access: %2$b\nDetection enabled: %3$b\nListener connected: %4$b\nRedacted events: %5$d / 32\n%6$s\nUNKNOWN does not identify an incoming transfer. Content changes with identical metadata may appear duplicate.</string>
+    <string name="probe_status">%1$sOS access: %2$b\nDetection enabled: %3$b\nListener connected: %4$b\nLocal observations: %5$d / 32\nRemovals: %6$d\nIgnored removed callbacks: %7$d\n%8$s\nClassification is notification evidence only. UNKNOWN does not identify an incoming transfer or settlement.</string>
+    <string name="content_hidden_while_paused">Diagnostic text hidden while this screen is paused.</string>
+    <string name="not_available">unavailable</string>
+    <string name="event_metadata">\nSource alias: %1$s; posted: %2$d; provider time: %3$s; channel alias: %4$s; grouped: %5$b; summary: %6$b</string>
+    <string name="classification_result">\nClassification: %1$s; direction: %2$s\nAmount: %3$s %4$s; evidence: %5$s\nReference: %6$s; rule: %7$s\n%8$s</string>
+    <string name="inspected_field">\n%1$s: %2$s</string>
+    <string name="inspected_line">\ntextLines[%1$d]: %2$s</string>
 </resources>
