@@ -194,13 +194,53 @@ class PaymentConsumerCorrelationUnitTest {
     }
 
     @Test
-    void dltCaughtServiceAndDatabaseFailuresRemainScopedAndAckFailureStillRestoresMdc() {
+    void dltPersistenceFailurePropagatesWithoutAcknowledgmentAndRestoresMdc() {
         ConsumerRecord<String, String> record = initiated();
         addHeader(record, "dlt-request");
         when(paymentService.markPaymentFailed(any(), any(), any())).thenThrow(new IllegalStateException("payment unavailable"));
+        IllegalStateException failure = new IllegalStateException("database unavailable");
         when(dltRepository.save(any())).thenAnswer(invocation -> {
             assertContext("dlt-request");
-            throw new IllegalStateException("database unavailable");
+            throw failure;
+        });
+
+        assertThatThrownBy(() -> consumer.handleDltMessage(record, "Failure", null, "failed", acknowledgment))
+                .isSameAs(failure);
+
+        verify(acknowledgment, never()).acknowledge();
+        assertThat(loggedIds).containsOnly("dlt-request");
+        assertRestored();
+    }
+
+    @Test
+    void dltPaymentFailureRemainsBestEffortWhenEvidenceCanBePersisted() {
+        ConsumerRecord<String, String> record = initiated();
+        addHeader(record, "dlt-request");
+        when(paymentService.markPaymentFailed(any(), any(), any())).thenAnswer(invocation -> {
+            assertContext("dlt-request");
+            throw new IllegalStateException("payment unavailable");
+        });
+        when(dltRepository.save(any())).thenAnswer(invocation -> {
+            assertContext("dlt-request");
+            return invocation.getArgument(0);
+        });
+        assertAcknowledgmentContext("dlt-request");
+
+        consumer.handleDltMessage(record, "Failure", null, "failed", acknowledgment);
+
+        verify(dltRepository).save(any());
+        verify(acknowledgment).acknowledge();
+        assertThat(loggedIds).containsOnly("dlt-request");
+        assertRestored();
+    }
+
+    @Test
+    void dltAcknowledgmentFailureAfterSuccessfulPersistenceRestoresMdc() {
+        ConsumerRecord<String, String> record = initiated();
+        addHeader(record, "dlt-request");
+        when(dltRepository.save(any())).thenAnswer(invocation -> {
+            assertContext("dlt-request");
+            return invocation.getArgument(0);
         });
         doAnswer(invocation -> {
             assertContext("dlt-request");
@@ -210,6 +250,7 @@ class PaymentConsumerCorrelationUnitTest {
         assertThatThrownBy(() -> consumer.handleDltMessage(record, "Failure", null, "failed", acknowledgment))
                 .isInstanceOf(IllegalStateException.class).hasMessage("ack failed");
 
+        verify(dltRepository).save(any());
         assertThat(loggedIds).containsOnly("dlt-request");
         assertRestored();
     }

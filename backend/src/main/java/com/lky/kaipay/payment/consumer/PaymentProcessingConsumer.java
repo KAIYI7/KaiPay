@@ -213,6 +213,7 @@ public class PaymentProcessingConsumer {
                 log.info("Saved dead letter event record with id {}", dltEvent.getId());
             } catch (Exception e) {
                 log.error("Failed to persist dead letter event record", e);
+                throw e;
             }
 
             if (ack != null) ack.acknowledge();
