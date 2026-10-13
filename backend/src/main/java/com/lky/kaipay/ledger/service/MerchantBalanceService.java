@@ -4,6 +4,7 @@ import com.lky.kaipay.common.exception.EntityNotFoundException;
 import com.lky.kaipay.ledger.api.dto.MerchantBalanceResponse;
 import com.lky.kaipay.ledger.domain.Account;
 import com.lky.kaipay.ledger.domain.AccountType;
+import com.lky.kaipay.ledger.repository.AccountRepository;
 import com.lky.kaipay.ledger.repository.LedgerEntryRepository;
 import com.lky.kaipay.merchant.domain.Merchant;
 import com.lky.kaipay.merchant.repository.MerchantRepository;
@@ -22,7 +23,7 @@ import java.util.UUID;
 public class MerchantBalanceService {
 
     private final MerchantRepository merchantRepository;
-    private final AccountProvisioningService accountProvisioningService;
+    private final AccountRepository accountRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
     private final PaymentRepository paymentRepository;
     private final RefundRepository refundRepository;
@@ -34,11 +35,10 @@ public class MerchantBalanceService {
         Merchant merchant = merchantRepository.findById(merchantId)
                 .orElseThrow(() -> new EntityNotFoundException("Merchant not found with ID: " + merchantId));
 
-        Account payableAccount = accountProvisioningService.getOrCreateMerchantAccount(
-                merchant, AccountType.LIABILITY, "USD"
-        );
+        Account payableAccount = accountRepository.findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY)
+                .orElse(null);
 
-        Long balance = ledgerEntryRepository.calculateAccountBalance(payableAccount.getId());
+        Long balance = payableAccount != null ? ledgerEntryRepository.calculateAccountBalance(payableAccount.getId()) : null;
         long availableBalanceCents = balance != null ? balance : 0L;
 
         Long pendingSettlement = paymentRepository.sumPendingSettlementByMerchantId(merchantId);
@@ -53,7 +53,7 @@ public class MerchantBalanceService {
         Long refunds = refundRepository.sumRefundsByMerchantId(merchantId);
         long totalRefundsCents = refunds != null ? refunds : 0L;
 
-        String currency = payableAccount.getCurrency() != null ? payableAccount.getCurrency() : "USD";
+        String currency = payableAccount != null && payableAccount.getCurrency() != null ? payableAccount.getCurrency() : "USD";
 
         log.debug("Merchant balance calculated: merchantId={}, availableBalance={}, pendingSettlement={}, totalVolume={}, totalFees={}, totalRefunds={}",
                 merchantId, availableBalanceCents, pendingSettlementCents, totalVolumeCents, totalFeesCents, totalRefundsCents);

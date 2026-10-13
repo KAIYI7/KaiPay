@@ -4,6 +4,7 @@ import com.lky.kaipay.common.exception.EntityNotFoundException;
 import com.lky.kaipay.ledger.api.dto.MerchantBalanceResponse;
 import com.lky.kaipay.ledger.domain.Account;
 import com.lky.kaipay.ledger.domain.AccountType;
+import com.lky.kaipay.ledger.repository.AccountRepository;
 import com.lky.kaipay.ledger.repository.LedgerEntryRepository;
 import com.lky.kaipay.merchant.domain.Merchant;
 import com.lky.kaipay.merchant.domain.MerchantStatus;
@@ -24,7 +25,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,7 +38,7 @@ class MerchantBalanceServiceUnitTest {
     private MerchantRepository merchantRepository;
 
     @Mock
-    private AccountProvisioningService accountProvisioningService;
+    private AccountRepository accountRepository;
 
     @Mock
     private LedgerEntryRepository ledgerEntryRepository;
@@ -82,8 +84,8 @@ class MerchantBalanceServiceUnitTest {
         @DisplayName("Should return complete and accurate merchant balance projection")
         void shouldReturnCompleteMerchantBalanceProjection() {
             when(merchantRepository.findById(merchantId)).thenReturn(Optional.of(merchant));
-            when(accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD"))
-                    .thenReturn(payableAccount);
+            when(accountRepository.findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY))
+                    .thenReturn(Optional.of(payableAccount));
             when(ledgerEntryRepository.calculateAccountBalance(payableAccount.getId())).thenReturn(9680L);
             when(paymentRepository.sumPendingSettlementByMerchantId(merchantId)).thenReturn(5000L);
             when(paymentRepository.sumSuccessfulVolumeByMerchantId(merchantId)).thenReturn(10000L);
@@ -102,7 +104,7 @@ class MerchantBalanceServiceUnitTest {
             assertThat(response.getCurrency()).isEqualTo("USD");
 
             verify(merchantRepository).findById(merchantId);
-            verify(accountProvisioningService).getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD");
+            verify(accountRepository).findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY);
             verify(ledgerEntryRepository).calculateAccountBalance(payableAccount.getId());
             verify(paymentRepository).sumPendingSettlementByMerchantId(merchantId);
             verify(paymentRepository).sumSuccessfulVolumeByMerchantId(merchantId);
@@ -114,8 +116,8 @@ class MerchantBalanceServiceUnitTest {
         @DisplayName("Should default null repository aggregates to 0L")
         void shouldDefaultNullAggregatesToZero() {
             when(merchantRepository.findById(merchantId)).thenReturn(Optional.of(merchant));
-            when(accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD"))
-                    .thenReturn(payableAccount);
+            when(accountRepository.findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY))
+                    .thenReturn(Optional.of(payableAccount));
             when(ledgerEntryRepository.calculateAccountBalance(payableAccount.getId())).thenReturn(null);
             when(paymentRepository.sumPendingSettlementByMerchantId(merchantId)).thenReturn(null);
             when(paymentRepository.sumSuccessfulVolumeByMerchantId(merchantId)).thenReturn(null);
@@ -158,14 +160,38 @@ class MerchantBalanceServiceUnitTest {
                     .build();
 
             when(merchantRepository.findById(merchantId)).thenReturn(Optional.of(merchant));
-            when(accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD"))
-                    .thenReturn(eurAccount);
+            when(accountRepository.findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY))
+                    .thenReturn(Optional.of(eurAccount));
             when(ledgerEntryRepository.calculateAccountBalance(eurAccount.getId())).thenReturn(25000L);
 
             MerchantBalanceResponse response = merchantBalanceService.getMerchantBalance(merchantId);
 
             assertThat(response.getCurrency()).isEqualTo("EUR");
             assertThat(response.getAvailableBalanceCents()).isEqualTo(25000L);
+        }
+
+        @Test
+        @DisplayName("Should read absent liability as zero without provisioning or dropping other aggregates")
+        void shouldReadMissingAccountWithoutProvisioning() {
+            when(merchantRepository.findById(merchantId)).thenReturn(Optional.of(merchant));
+            when(accountRepository.findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY))
+                    .thenReturn(Optional.empty());
+            when(paymentRepository.sumPendingSettlementByMerchantId(merchantId)).thenReturn(5000L);
+            when(paymentRepository.sumSuccessfulVolumeByMerchantId(merchantId)).thenReturn(10000L);
+            when(ledgerEntryRepository.calculateMerchantFees(merchantId)).thenReturn(320L);
+            when(refundRepository.sumRefundsByMerchantId(merchantId)).thenReturn(3000L);
+
+            MerchantBalanceResponse response = merchantBalanceService.getMerchantBalance(merchantId);
+
+            assertThat(response.getMerchantId()).isEqualTo(merchantId);
+            assertThat(response.getAvailableBalanceCents()).isZero();
+            assertThat(response.getCurrency()).isEqualTo("USD");
+            assertThat(response.getPendingSettlementCents()).isEqualTo(5000L);
+            assertThat(response.getTotalVolumeCents()).isEqualTo(10000L);
+            assertThat(response.getTotalFeesCents()).isEqualTo(320L);
+            assertThat(response.getTotalRefundsCents()).isEqualTo(3000L);
+            verify(ledgerEntryRepository, never()).calculateAccountBalance(any());
+            verify(accountRepository, never()).save(any());
         }
     }
 }

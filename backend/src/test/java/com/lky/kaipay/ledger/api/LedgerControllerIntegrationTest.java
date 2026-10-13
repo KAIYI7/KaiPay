@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.AbstractPostgresIntegrationTest;
 import com.lky.kaipay.customer.domain.Customer;
 import com.lky.kaipay.customer.repository.CustomerRepository;
+import com.lky.kaipay.ledger.domain.Account;
+import com.lky.kaipay.ledger.domain.AccountType;
 import com.lky.kaipay.ledger.domain.Journal;
 import com.lky.kaipay.ledger.repository.AccountRepository;
 import com.lky.kaipay.ledger.repository.JournalRepository;
@@ -129,6 +131,59 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
             headers.set("X-Merchant-Id", merchantId.toString());
         }
         return headers;
+    }
+
+    @Test
+    @DisplayName("Both balance routes repeatedly return zero for a fresh merchant without creating ledger records")
+    void testFreshMerchantBalance_DoesNotProvisionAccounts() throws Exception {
+        assertThat(accountRepository.count()).isZero();
+        assertThat(journalRepository.count()).isZero();
+        assertThat(ledgerEntryRepository.count()).isZero();
+
+        HttpEntity<Void> entity = new HttpEntity<>(createHeaders(merchantA.getId()));
+        for (int attempt = 0; attempt < 2; attempt++) {
+            for (String route : new String[]{"/v1/ledger/balance", "/v1/merchants/balance"}) {
+                ResponseEntity<String> response = restTemplate.exchange(route, HttpMethod.GET, entity, String.class);
+                assertThat(response.getStatusCode()).as("%s attempt %s", route, attempt).isEqualTo(HttpStatus.OK);
+                JsonNode root = objectMapper.readTree(response.getBody());
+                assertThat(root.get("success").asBoolean()).isTrue();
+                JsonNode data = root.get("data");
+                assertThat(data.get("merchantId").asText()).isEqualTo(merchantA.getId().toString());
+                assertThat(data.get("availableBalanceCents").asLong()).isZero();
+                assertThat(data.get("pendingSettlementCents").asLong()).isZero();
+                assertThat(data.get("totalVolumeCents").asLong()).isZero();
+                assertThat(data.get("totalFeesCents").asLong()).isZero();
+                assertThat(data.get("totalRefundsCents").asLong()).isZero();
+                assertThat(data.get("currency").asText()).isEqualTo("USD");
+                assertThat(accountRepository.count()).isZero();
+                assertThat(journalRepository.count()).isZero();
+                assertThat(ledgerEntryRepository.count()).isZero();
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Both balance routes preserve the existing liability account currency without creating records")
+    void testExistingLiabilityBalance_PreservesCurrency() throws Exception {
+        Account existing = accountRepository.save(Account.builder()
+                .merchant(merchantA)
+                .accountNumber("2000-MERCHANT-" + merchantA.getId() + "-LIABILITY")
+                .accountName("Alpha EUR Liability")
+                .accountType(AccountType.LIABILITY)
+                .currency("EUR")
+                .build());
+
+        HttpEntity<Void> entity = new HttpEntity<>(createHeaders(merchantA.getId()));
+        for (String route : new String[]{"/v1/ledger/balance", "/v1/merchants/balance"}) {
+            ResponseEntity<String> response = restTemplate.exchange(route, HttpMethod.GET, entity, String.class);
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            JsonNode data = objectMapper.readTree(response.getBody()).get("data");
+            assertThat(data.get("currency").asText()).isEqualTo("EUR");
+            assertThat(data.get("availableBalanceCents").asLong()).isZero();
+            assertThat(accountRepository.findAll()).extracting(Account::getId).containsExactly(existing.getId());
+            assertThat(journalRepository.count()).isZero();
+            assertThat(ledgerEntryRepository.count()).isZero();
+        }
     }
 
     @Test
