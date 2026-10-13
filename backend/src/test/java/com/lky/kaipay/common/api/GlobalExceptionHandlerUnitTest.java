@@ -71,6 +71,18 @@ class GlobalExceptionHandlerUnitTest {
                 .andExpect(jsonPath("$.message").value("Idempotency key reused with different request parameters"));
     }
 
+    @Test
+    void unrelatedIllegalArgumentFailureRetainsSanitizedInternalError() throws Exception {
+        String body = mvcFor(new IllegalArgumentException(SECRET))
+                .perform(get("/failure"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.status").value(500))
+                .andExpect(jsonPath("$.message").value(INTERNAL_MESSAGE))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain(SECRET, "IllegalArgumentException");
+    }
+
     private DataIntegrityViolationException integrityFailure(String state, String constraint) {
         ConstraintViolationException cause = new ConstraintViolationException(SECRET,
                 new SQLException(SECRET, state), "insert into sensitive_table values ('" + SECRET + "')", constraint);
