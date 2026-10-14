@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">KaiPay feasibility probe</string>
-    <string name="probe_explanation">EXPERIMENTAL — TNG compatibility UNVERIFIED\nLOCAL TEXT INSPECTION: permitted TNG text is displayed temporarily, never uploaded. Candidates do not verify payments.\nAndroid grants broad notification access; other packages are discarded immediately.\nUp to 32 observations, five-minute expiry. Disable, revoke, removal or process exit clears text. Potential credentials are suppressed.\nRefresh to inspect updates; foreground display also refreshes. Enable is temporary until process exit.</string>
+    <string name="probe_explanation">EXPERIMENTAL — complete TNG compatibility UNVERIFIED; one English receipt structure observed\nLOCAL TEXT INSPECTION: permitted TNG text is displayed temporarily, never uploaded. Candidates do not verify payments.\nAndroid grants broad notification access; other packages are discarded immediately.\nUp to 32 observations, five-minute expiry. Disable, revoke, removal or process exit clears text. Potential credentials are suppressed.\nRefresh to inspect updates; foreground display also refreshes. Enable is temporary until process exit.</string>
     <string name="open_notification_settings">Open notification access settings</string>
     <string name="enable_detection">Enable local detection</string>
     <string name="disable_and_clear">Disable and clear</string>
