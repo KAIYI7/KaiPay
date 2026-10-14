@@ -1,10 +1,11 @@
+# Local development dependencies only; management/data ports stay on loopback.
 services:
   postgres:
     image: postgres:16-alpine
     container_name: kaipay-postgres
     restart: unless-stopped
     ports:
-      - "25432:5432"
+      - "127.0.0.1:25432:5432"
     environment:
       POSTGRES_DB: kaipay
       POSTGRES_USER: kaipay
@@ -22,7 +23,7 @@ services:
     container_name: kaipay-kafka
     restart: unless-stopped
     ports:
-      - "29092:9092"
+      - "127.0.0.1:29092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -42,7 +43,7 @@ services:
     container_name: kaipay-kafka-ui
     restart: unless-stopped
     ports:
-      - "28048:8080"
+      - "127.0.0.1:28048:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: kaipay-local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092

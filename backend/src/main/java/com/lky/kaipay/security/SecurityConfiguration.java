@@ -14,6 +14,9 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.core.env.Environment;
+import org.springframework.boot.convert.DurationStyle;
 
 import java.io.IOException;
 
@@ -23,10 +26,27 @@ public class SecurityConfiguration {
     @Bean public DaoAuthenticationProvider authenticationProvider(DemoIdentityStore identities, PasswordEncoder encoder) {
         var provider = new DaoAuthenticationProvider(identities);
         provider.setPasswordEncoder(encoder);
+        // Disabled users must take the same password-work path as bad/unknown users.
+        // Preserve all account-state checks, but perform them only after verification.
+        provider.setPreAuthenticationChecks(user -> {});
+        provider.setPostAuthenticationChecks(user -> {
+            if (!user.isEnabled() || !user.isAccountNonLocked() || !user.isAccountNonExpired()
+                    || !user.isCredentialsNonExpired()) {
+                throw new org.springframework.security.authentication.BadCredentialsException("Invalid credentials");
+            }
+        });
         return provider;
     }
+    @Bean public LoginAdmission loginAdmission(Environment environment) {
+        String prefix = "kaipay.security.login.";
+        return new LoginAdmission(environment.getProperty(prefix + "peer-attempts", Integer.class, 10),
+                environment.getProperty(prefix + "total-attempts", Integer.class, 120),
+                environment.getProperty(prefix + "concurrent-attempts", Integer.class, 4),
+                environment.getProperty(prefix + "peer-capacity", Integer.class, 4096),
+                DurationStyle.detectAndParse(environment.getProperty(prefix + "window", "1m")));
+    }
     @Bean public SecurityFilterChain securityFilterChain(HttpSecurity http, DemoIdentityStore identities,
-                                                        ObjectMapper mapper) throws Exception {
+                                                        ObjectMapper mapper, LoginAdmission admission) throws Exception {
         http.cors(cors -> {})
             .csrf(csrf -> csrf.csrfTokenRepository(new HttpSessionCsrfTokenRepository())
                     .csrfTokenRequestHandler(new XorCsrfTokenRequestAttributeHandler()))
@@ -69,6 +89,7 @@ public class SecurityConfiguration {
             .requestCache(cache -> cache.disable())
             .httpBasic(basic -> basic.disable());
         http.addFilterBefore(new SessionIdentityFilter(identities), CsrfFilter.class);
+        http.addFilterBefore(new LoginAdmissionFilter(admission, mapper), UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
     private static boolean authenticated() {

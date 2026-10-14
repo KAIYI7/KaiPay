@@ -1,3 +1,9 @@
 logging:
   level:
     com.lky.kaipay: DEBUG
+kaipay:
+  security:
+    login:
+      # Broad HTTP/financial suites share one loopback peer; enforcement is covered separately.
+      peer-attempts: 10000
+      total-attempts: 100000

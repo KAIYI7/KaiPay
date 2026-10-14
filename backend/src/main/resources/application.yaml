@@ -10,9 +10,15 @@
 
 server:
   port: ${PORT:28080}
+  # Trust no proxy headers until a specific ingress boundary is reviewed.
+  forward-headers-strategy: none
+  tomcat:
+    # Only form parameter parsing; financial API JSON bodies are unchanged.
+    max-http-form-post-size: 8KB
   servlet:
     session:
       timeout: ${SESSION_IDLE_TIMEOUT:20m}
+      persistent: false
       tracking-modes: cookie
       cookie:
         http-only: true

@@ -41,4 +41,47 @@ class SecurityConfigurationGuardUnitTest {
         environment.setActiveProfiles("local", "public-demo");
         assertThatThrownBy(() -> new SecurityConfigurationGuard(environment).afterPropertiesSet()).isInstanceOf(IllegalStateException.class);
     }
+    @Test void forwardedHeadersCannotBeEnabledWithoutReviewedProxyBoundary() {
+        for (String strategy : new String[]{"native", "framework", ""}) {
+            var environment = new MockEnvironment().withProperty("server.forward-headers-strategy", strategy);
+            assertThatThrownBy(() -> new SecurityConfigurationGuard(environment).afterPropertiesSet())
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("trusted proxy");
+        }
+        // Native headers independently enable Tomcat's valve, including when strategy is NONE.
+        for (String header : new String[]{"remote-ip-header", "protocol-header"}) {
+            var environment = new MockEnvironment().withProperty("server.forward-headers-strategy", "NONE")
+                    .withProperty("server.tomcat.remoteip." + header, "X-Client-Header");
+            assertThatThrownBy(() -> new SecurityConfigurationGuard(environment).afterPropertiesSet())
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("trusted proxy");
+        }
+        var environment = new MockEnvironment().withProperty("server.forward-headers-strategy", "NONE")
+                .withProperty("spring.main.cloud-platform", "CLOUD_FOUNDRY");
+        assertThatCode(() -> new SecurityConfigurationGuard(environment).afterPropertiesSet()).doesNotThrowAnyException();
+    }
+    @Test void sessionCookiesRemainHostOnlyAndSessionsAreNeverPersisted() {
+        var domain = new MockEnvironment().withProperty("server.servlet.session.cookie.domain", ".example.com");
+        assertThatThrownBy(() -> new SecurityConfigurationGuard(domain).afterPropertiesSet())
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("host-only");
+        var persistent = new MockEnvironment().withProperty("server.servlet.session.persistent", "true");
+        assertThatThrownBy(() -> new SecurityConfigurationGuard(persistent).afterPropertiesSet())
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("memory");
+    }
+    @Test void sessionTimeoutCannotOverflowContainerSecondsAndDisableExpiry() {
+        var overflow = new MockEnvironment().withProperty("server.servlet.session.timeout", "2147483648s");
+        assertThatThrownBy(() -> new SecurityConfigurationGuard(overflow).afterPropertiesSet())
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("container seconds");
+        for (String timeout : new String[]{"60s", "20m", "2147483647s"}) {
+            var environment = new MockEnvironment().withProperty("server.servlet.session.timeout", timeout);
+            assertThatCode(() -> new SecurityConfigurationGuard(environment).afterPropertiesSet()).doesNotThrowAnyException();
+        }
+    }
+    @Test void formParameterParsingCannotBeUnboundedOrExceedLoginResourceCap() {
+        for (String size : new String[]{"0B", "-1B", "9KB", "2097152B"}) {
+            var environment = new MockEnvironment().withProperty("server.tomcat.max-http-form-post-size", size);
+            assertThatThrownBy(() -> new SecurityConfigurationGuard(environment).afterPropertiesSet())
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("8KB");
+        }
+        var bounded = new MockEnvironment().withProperty("server.tomcat.max-http-form-post-size", "8KB");
+        assertThatCode(() -> new SecurityConfigurationGuard(bounded).afterPropertiesSet()).doesNotThrowAnyException();
+    }
 }

@@ -4,17 +4,31 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
+import org.springframework.util.unit.DataSize;
 
 import java.net.URI;
 import java.util.Set;
 import org.springframework.boot.convert.DurationStyle;
 
-/** Prevent the local HTTP convenience profile from binding a public interface. */
+/** Fail closed on browser-session and unreviewed proxy configuration. */
 @Component
 public class SecurityConfigurationGuard implements InitializingBean {
     private final Environment environment;
     public SecurityConfigurationGuard(Environment environment) { this.environment = environment; }
     @Override public void afterPropertiesSet() {
+        long formBytes = DataSize.parse(environment.getProperty("server.tomcat.max-http-form-post-size", "8KB")).toBytes();
+        if (formBytes <= 0 || formBytes > 8192) {
+            throw new IllegalStateException("Form parameter parsing requires a positive limit of at most 8KB");
+        }
+        if (!"none".equalsIgnoreCase(environment.getProperty("server.forward-headers-strategy", "none"))) {
+            throw new IllegalStateException("Forwarded headers require a separately reviewed trusted proxy boundary");
+        }
+        // Boot can enable RemoteIpValve from either header even when the strategy is NONE.
+        for (String header : new String[]{"remote-ip-header", "protocol-header"}) {
+            if (!environment.getProperty("server.tomcat.remoteip." + header, "").isBlank()) {
+                throw new IllegalStateException("Native forwarded headers require a separately reviewed trusted proxy boundary");
+            }
+        }
         boolean local = environment.acceptsProfiles(Profiles.of("local"));
         if (local && environment.acceptsProfiles(Profiles.of("prod", "production", "public", "public-demo"))) {
             throw new IllegalStateException("Local HTTP cannot be combined with deployment profiles");
@@ -34,8 +48,16 @@ public class SecurityConfigurationGuard implements InitializingBean {
         if (!"cookie".equalsIgnoreCase(environment.getProperty("server.servlet.session.tracking-modes", "cookie"))) {
             throw new IllegalStateException("Only cookie session tracking is allowed");
         }
-        if (DurationStyle.detectAndParse(environment.getProperty("server.servlet.session.timeout", "20m")).toSeconds() < 60) {
-            throw new IllegalStateException("Session idle timeout must be at least one minute");
+        if (!environment.getProperty("server.servlet.session.cookie.domain", "").isBlank()) {
+            throw new IllegalStateException("Session cookies must be host-only");
+        }
+        if (Boolean.parseBoolean(environment.getProperty("server.servlet.session.persistent", "false"))) {
+            throw new IllegalStateException("Demo sessions must remain in memory only");
+        }
+        long timeoutSeconds = DurationStyle.detectAndParse(environment.getProperty("server.servlet.session.timeout", "20m")).toSeconds();
+        // Tomcat exposes the idle timeout as signed integer seconds; overflow can disable expiry.
+        if (timeoutSeconds < 60 || timeoutSeconds > Integer.MAX_VALUE) {
+            throw new IllegalStateException("Session idle timeout must fit positive container seconds and be at least one minute");
         }
         for (String origin : environment.getProperty("kaipay.security.allowed-origins", "").split(",")) {
             if (origin.isBlank()) continue;

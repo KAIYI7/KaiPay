@@ -334,12 +334,18 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
                 .build();
 
         int threadCount = 10;
+        // Authenticate each client before racing payments; login has its own concurrency limit.
+        List<HttpHeaders> authenticatedHeaders = new ArrayList<>();
+        for (int i = 0; i < threadCount; i++) {
+            authenticatedHeaders.add(createHeaders(testMerchant.getId(), idempotencyKey));
+        }
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         List<CompletableFuture<ResponseEntity<String>>> futures = new ArrayList<>();
 
         for (int i = 0; i < threadCount; i++) {
+            HttpHeaders headers = authenticatedHeaders.get(i);
             futures.add(CompletableFuture.supplyAsync(() -> {
-                HttpEntity<CreatePaymentRequest> entity = new HttpEntity<>(request, createHeaders(testMerchant.getId(), idempotencyKey));
+                HttpEntity<CreatePaymentRequest> entity = new HttpEntity<>(request, headers);
                 return restTemplate.exchange("/v1/payments", HttpMethod.POST, entity, String.class);
             }, executor));
         }
