@@ -10,14 +10,22 @@
 
 server:
   port: ${PORT:28080}
+  servlet:
+    session:
+      timeout: ${SESSION_IDLE_TIMEOUT:20m}
+      tracking-modes: cookie
+      cookie:
+        http-only: true
+        secure: true
+        same-site: strict
 
 spring:
   application:
     name: KaiPay
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:25432/kaipay}
-    username: ${DB_USERNAME:kaipay}
-    password: ${DB_PASSWORD:kaipay_secret}
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20
@@ -42,7 +50,7 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -60,6 +68,8 @@ spring:
       ack-mode: manual_immediate
 
 kaipay:
+  security:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
   kafka:
     topics:
       payment-requests: kaipay.payment.requests
@@ -74,6 +84,6 @@ logging:
   pattern:
     level: "%5p [traceId=%X{traceId:-}]"
   level:
-    com.lky.kaipay: DEBUG
+    com.lky.kaipay: INFO
     org.springframework.web: INFO
     org.hibernate.SQL: INFO

@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class OutboxAdminController {
 
+    private final com.lky.kaipay.security.ResourceAccess access;
     private final PaymentEventOutboxRepository outboxRepository;
 
     @GetMapping
@@ -33,6 +34,7 @@ public class OutboxAdminController {
             @RequestParam(name = "page", defaultValue = "0") int page,
             @RequestParam(name = "size", defaultValue = "10") int size
     ) {
+        access.admin();
         log.info("Fetching operational outbox events with status filter: {}, page: {}, size: {}", status, page, size);
         Pageable pageable = PageRequest.of(page, size);
         Page<PaymentEventOutbox> events = (status != null)

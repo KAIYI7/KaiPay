@@ -3,7 +3,7 @@ package com.lky.kaipay.payment.api;
 import com.lky.kaipay.common.api.ApiResponse;
 import com.lky.kaipay.payment.api.dto.CreatePaymentRequest;
 import com.lky.kaipay.payment.api.dto.PaymentResponse;
-import com.lky.kaipay.payment.service.PaymentService;
+import com.lky.kaipay.security.MerchantApplicationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,7 +25,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PaymentController {
 
-    private final PaymentService paymentService;
+    private final MerchantApplicationService paymentService;
 
     @PostMapping
     public ResponseEntity<ApiResponse<PaymentResponse>> createPayment(

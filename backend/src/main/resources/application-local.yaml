@@ -1,0 +1,17 @@
+# Explicit local HTTP development only. Authentication and CSRF remain mandatory.
+server:
+  address: 127.0.0.1
+  servlet:
+    session:
+      cookie:
+        secure: false
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:25432/kaipay}
+    username: ${DB_USERNAME:kaipay}
+    password: ${DB_PASSWORD:kaipay_secret}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+kaipay:
+  security:
+    allowed-origins: http://localhost:28081,http://127.0.0.1:28081

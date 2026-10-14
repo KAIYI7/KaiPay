@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MerchantProvider, useMerchant } from '../../context/MerchantContext';
+import { resetSessionTransport, setCsrfToken } from '../../api/fetchClient';
 import { DEV_MERCHANTS } from '../../config/devMerchants';
 import { Payment, PaymentStatus } from '../../models/payment';
 import { Refund } from '../../models/refund';
@@ -100,7 +101,7 @@ function mount(retry = 0) {
   } });
   clients.push(client);
   render(<QueryClientProvider client={client}>
-    <MerchantProvider>
+    <MerchantProvider memberships={DEV_MERCHANTS}>
       <MemoryRouter initialEntries={[`/payments/${paymentId}`]}
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <MerchantSwitch />
@@ -180,7 +181,7 @@ async function completeMutation(client: QueryClient, request: RequestRecord, res
   await waitFor(() => expect(client.getMutationCache().getAll()[0].state.status).not.toBe('pending'));
 }
 
-beforeEach(() => { localStorage.clear(); localStorage.setItem(storageKey, merchantA); });
+beforeEach(() => { resetSessionTransport(); setCsrfToken({ token: 'fixture-csrf', headerName: 'X-CSRF-TOKEN' }); localStorage.clear(); localStorage.setItem(storageKey, merchantA); });
 afterEach(() => { cleanup(); clients.splice(0).forEach((client) => client.clear()); });
 
 describe('merchant-scoped payment details', () => {
@@ -215,7 +216,7 @@ describe('merchant-scoped payment details', () => {
     const delayed = http.matching(path)[0];
     switchMerchant('B');
     await screen.findByText('Payment Not Found');
-    expect(localStorage.getItem(storageKey)).toBe(merchantB);
+    expect(localStorage.getItem(storageKey)).toBe(merchantA); // Selection is now memory-only.
     await act(async () => { delayed.resolve(response(resource === 'payment' ? payment() : [refund()])); });
     await waitFor(() => expect(client.getQueryData([
       resource === 'payment' ? 'payment' : 'payment-refunds', merchantA, paymentId,

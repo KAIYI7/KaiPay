@@ -113,7 +113,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private HttpHeaders createHeaders(UUID merchantId, String idempotencyKey) {
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(merchantId);
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Merchant-Id", merchantId.toString());
         headers.set("Idempotency-Key", idempotencyKey);
@@ -311,7 +311,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         String paymentId = objectMapper.readTree(createResponse.getBody()).get("data").get("id").asText();
 
         // Fetch via GET
-        HttpHeaders getHeaders = new HttpHeaders();
+        HttpHeaders getHeaders = security().merchantHeaders(testMerchant.getId());
         getHeaders.set("X-Merchant-Id", testMerchant.getId().toString());
         HttpEntity<Void> getEntity = new HttpEntity<>(getHeaders);
 
@@ -396,7 +396,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         }
 
         // Query GET /v1/payments with page=0, size=2
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(testMerchant.getId());
         headers.set("X-Merchant-Id", testMerchant.getId().toString());
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
@@ -430,7 +430,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         );
 
         // Query with Merchant B's header
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(merchantB.getId());
         headers.set("X-Merchant-Id", merchantB.getId().toString());
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 

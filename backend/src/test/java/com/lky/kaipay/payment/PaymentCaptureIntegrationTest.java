@@ -123,7 +123,7 @@ class PaymentCaptureIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private HttpHeaders createHeaders(UUID merchantId, String idempotencyKey) {
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(merchantId);
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Merchant-Id", merchantId.toString());
         if (idempotencyKey != null) {

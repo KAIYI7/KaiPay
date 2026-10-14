@@ -13,16 +13,17 @@ export const ledgerApi = {
   /**
    * Fetch current balance projection for the active merchant
    */
-  async getMerchantBalance(): Promise<MerchantBalance> {
+  async getMerchantBalance(merchantId: string): Promise<MerchantBalance> {
     return apiRequest<MerchantBalance>('/v1/ledger/balance', {
       method: 'GET',
+      merchantId,
     });
   },
 
   /**
    * List paginated double-entry financial journals
    */
-  async listJournals(params: ListJournalsParams = {}): Promise<PageResponse<Journal>> {
+  async listJournals(params: ListJournalsParams = {}, merchantId?: string): Promise<PageResponse<Journal>> {
     const query = new URLSearchParams();
     if (params.page !== undefined) query.set('page', params.page.toString());
     if (params.size !== undefined) query.set('size', params.size.toString());
@@ -33,15 +34,17 @@ export const ledgerApi = {
     const endpoint = `/v1/ledger/journals${queryString ? `?${queryString}` : ''}`;
     return apiRequest<PageResponse<Journal>>(endpoint, {
       method: 'GET',
+      merchantId,
     });
   },
 
   /**
    * Fetch a single journal by ID with all immutable ledger entries
    */
-  async getJournal(id: string): Promise<Journal> {
+  async getJournal(id: string, merchantId?: string): Promise<Journal> {
     return apiRequest<Journal>(`/v1/ledger/journals/${id}`, {
       method: 'GET',
+      merchantId,
     });
   },
 };

@@ -2,7 +2,7 @@ package com.lky.kaipay.merchant.api;
 
 import com.lky.kaipay.common.api.ApiResponse;
 import com.lky.kaipay.ledger.api.dto.MerchantBalanceResponse;
-import com.lky.kaipay.ledger.service.MerchantBalanceService;
+import com.lky.kaipay.security.MerchantApplicationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +19,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MerchantController {
 
-    private final MerchantBalanceService merchantBalanceService;
+    private final MerchantApplicationService merchantBalanceService;
 
     @GetMapping("/balance")
     public ResponseEntity<ApiResponse<MerchantBalanceResponse>> getBalance(

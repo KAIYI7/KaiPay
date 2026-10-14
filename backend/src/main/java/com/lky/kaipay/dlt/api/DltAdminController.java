@@ -26,6 +26,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DltAdminController {
 
+    private final com.lky.kaipay.security.ResourceAccess access;
     private final DeadLetterEventRepository deadLetterEventRepository;
 
     @GetMapping
@@ -34,6 +35,7 @@ public class DltAdminController {
             @RequestParam(name = "page", defaultValue = "0") int page,
             @RequestParam(name = "size", defaultValue = "10") int size
     ) {
+        access.admin();
         log.info("Fetching operational dead letter events with paymentId filter: {}, page: {}, size: {}", paymentId, page, size);
         Pageable pageable = PageRequest.of(page, size);
         Page<DeadLetterEvent> events = (paymentId != null)

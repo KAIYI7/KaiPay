@@ -60,7 +60,7 @@ class DltAdminControllerIntegrationTest extends AbstractPostgresIntegrationTest 
         ResponseEntity<String> response = restTemplate.exchange(
                 "/v1/events/dlt?page=0&size=2",
                 HttpMethod.GET,
-                null,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()),
                 String.class
         );
 
@@ -131,7 +131,7 @@ class DltAdminControllerIntegrationTest extends AbstractPostgresIntegrationTest 
         ResponseEntity<String> responseA = restTemplate.exchange(
                 "/v1/events/dlt?paymentId=" + paymentIdA,
                 HttpMethod.GET,
-                null,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()),
                 String.class
         );
         assertThat(responseA.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -145,7 +145,7 @@ class DltAdminControllerIntegrationTest extends AbstractPostgresIntegrationTest 
         ResponseEntity<String> responseB = restTemplate.exchange(
                 "/v1/events/dlt?paymentId=" + paymentIdB,
                 HttpMethod.GET,
-                null,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()),
                 String.class
         );
         assertThat(responseB.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -160,7 +160,7 @@ class DltAdminControllerIntegrationTest extends AbstractPostgresIntegrationTest 
         ResponseEntity<String> responseEmpty = restTemplate.exchange(
                 "/v1/events/dlt?paymentId=" + nonExistentPaymentId,
                 HttpMethod.GET,
-                null,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()),
                 String.class
         );
         assertThat(responseEmpty.getStatusCode()).isEqualTo(HttpStatus.OK);

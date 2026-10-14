@@ -27,6 +27,12 @@ import java.util.List;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.builder()
+                .status(403).error("Forbidden").message("Access denied").path(request.getRequestURI()).build());
+    }
+
     @ExceptionHandler(EntityNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleEntityNotFoundException(EntityNotFoundException ex, HttpServletRequest request) {
         log.warn("Entity not found: {}", ex.getMessage());

@@ -28,9 +28,15 @@
     <url/>
   </scm>
   <properties>
+    <!-- Patched compatible security line; Boot and Spring Framework remain unchanged. -->
+    <spring-security.version>6.5.11</spring-security.version>
     <java.version>21</java.version>
   </properties>
   <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-jpa</artifactId>

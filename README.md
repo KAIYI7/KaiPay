@@ -15,6 +15,8 @@ KaiPay is a distributed payment processing and financial accounting engine built
 
 ## 1. Project Overview
 
+KaiPay is a **simulated-payment demo**: no real provider or money movement is supported. Browser and API access requires individually provisioned accounts, server-side sessions and CSRF protection. Merchants are limited to assigned merchants; separate administrators can read operational diagnostics without impersonating merchants. See [demo authentication and access](docs/security.md) for the session handshake, roles and hosting prerequisites.
+
 In payment processing architectures, services must prevent data loss, prevent duplicate customer charges, provide observable lifecycle state, and maintain strict mathematical balance across all accounts—even during network partitions, bank partner outages, pod crash rebalances, and concurrent retries.
 
 KaiPay demonstrates production-style solutions to these engineering challenges:
@@ -115,7 +117,7 @@ flowchart TD
 | **Framework** | Spring Boot | 3.4.3 | Portfolio-grade DI container, Spring Data JPA, Spring Kafka, declarative transactions |
 | **Message Broker** | Apache Kafka | 3.8.0 (KRaft) | High-throughput distributed log, partition ordering, KRaft consensus (ZooKeeper-less) |
 | **Database** | PostgreSQL | 16-alpine | ACID relational integrity, `SKIP LOCKED` row queuing, partial indexes, atomic constraints |
-| **Schema Migration**| Flyway | 10.x | Deterministic, version-controlled relational database migrations (V1 through V5) |
+| **Schema Migration**| Flyway | 10.x | Version-controlled relational database migrations (V1 through V7) |
 | **Integration Testing**| Testcontainers | 1.20.4 | Ephemeral, production-identical Docker containers for PostgreSQL 16 and Kafka 3.8 |
 | **Frontend Framework**| React | 18.3.1 | Declarative component UI for operational payments, double-entry ledger, outbox & DLT views |
 | **Build Tool** | Vite | 6.1.0 | Fast ESM development server and optimized TypeScript bundling |
@@ -137,7 +139,7 @@ flowchart TD
   - **`$6,666.00`**: Fatal non-retryable gateway error routing immediately to DLT.
   - **`$9,999.00`**: Business decline (`INSUFFICIENT_FUNDS`), transitioning payment to `DECLINED`.
 - **Double-Entry Financial Ledger**: Multi-tenant chart of accounts, 3-way capture journal posting, reversing refund journals, Stripe-style pro-rata fee retention ($0.30 fixed fee retained on full refunds).
-- **Multi-Tenant Isolation**: Merchant tenant scoping on all queries, accounts, payments, and refunds via foreign key references and API authentication headers.
+- **Merchant Access**: Persisted user memberships authorize requested merchant context; resource ownership checks scope payments, refunds, balances and journals. Administrators have separate diagnostic access.
 - **Interactive Operations UI**: Real-time management dashboards, visual state machine steppers, outbox queue inspectors, DLT payload viewers, and double-entry ledger explorers.
 
 ---
@@ -308,9 +310,9 @@ docker compose ps
 ### Step 2: Build & Start Backend Application
 ```bash
 cd backend
-./mvnw clean spring-boot:run
+./mvnw clean spring-boot:run -Dspring-boot.run.profiles=local
 ```
-*The API service starts on port `28080`. Flyway automatically runs database migrations V1 through V5 on initial startup.*
+*The explicit local profile binds the API to loopback on port `28080` for HTTP development, while keeping authentication and CSRF enabled. Flyway runs V1–V7. No login accounts are seeded: provision individual accounts using [operator commands](backend/README.md) before signing in. Ordinary deployment configuration requires explicit database/broker settings and Secure cookies.*
 
 ---
 
@@ -327,9 +329,9 @@ npm run dev
 ### Step 4: Verify Live Operational Endpoints
 - **Frontend Dashboard**: [http://localhost:28081](http://localhost:28081)
 - **Kafka-UI Management Console**: [http://localhost:28048](http://localhost:28048)
-- **Merchant Balance Endpoint**: `GET http://localhost:28080/v1/ledger/balance` (requires `X-Merchant-Id` header)
-- **Transactional Outbox Event Stream**: `GET http://localhost:28080/v1/events/outbox`
-- **Dead Letter Topic (DLT) Events**: `GET http://localhost:28080/v1/events/dlt`
+- **Merchant Balance Endpoint**: `GET http://localhost:28080/v1/ledger/balance` (requires an authenticated merchant session and assigned `X-Merchant-Id`)
+- **Transactional Outbox Event Stream**: `GET http://localhost:28080/v1/events/outbox` (ADMIN session)
+- **Dead Letter Topic (DLT) Events**: `GET http://localhost:28080/v1/events/dlt` (ADMIN session)
 
 ---
 

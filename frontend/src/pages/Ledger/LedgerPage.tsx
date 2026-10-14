@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ledgerApi } from '../../api/ledgerApi';
+import { useAuth } from '../../context/AuthContext';
 import { useMerchant } from '../../context/MerchantContext';
 import { Journal, AccountType, EntryType, JournalSourceType } from '../../models/ledger';
 import { Card } from '../../components/common/Card';
@@ -29,6 +30,13 @@ import {
 
 export const LedgerPage: React.FC = () => {
   const { activeMerchant } = useMerchant();
+  return <LedgerExplorer key={activeMerchant.id} />;
+};
+const LedgerExplorer: React.FC = () => {
+  const { user } = useAuth();
+  const { activeMerchant } = useMerchant();
+  const isAdmin = !!user?.roles.includes('ADMIN');
+  const merchantId = isAdmin ? undefined : activeMerchant.id;
   const [page, setPage] = useState<number>(0);
   const [selectedJournal, setSelectedJournal] = useState<Journal | null>(null);
   const size = 10;
@@ -41,8 +49,9 @@ export const LedgerPage: React.FC = () => {
     refetch: refetchBalance,
     isFetching: isBalanceFetching,
   } = useQuery({
-    queryKey: ['ledger-balance', activeMerchant.id],
-    queryFn: () => ledgerApi.getMerchantBalance(),
+    queryKey: ['ledger-balance', merchantId],
+    queryFn: () => ledgerApi.getMerchantBalance(merchantId!),
+    enabled: !isAdmin && !!merchantId,
   });
 
   // 2. Fetch paginated double-entry financial journals
@@ -54,20 +63,20 @@ export const LedgerPage: React.FC = () => {
     refetch: refetchJournals,
     isFetching: isJournalsFetching,
   } = useQuery({
-    queryKey: ['ledger-journals', activeMerchant.id, page, size],
+    queryKey: ['ledger-journals', merchantId || 'global', page, size],
     queryFn: () =>
       ledgerApi.listJournals({
         page,
         size,
         sortBy: 'postedAt',
         direction: 'desc',
-      }),
+      }, merchantId),
   });
 
   const isRefreshing = isBalanceFetching || isJournalsFetching;
 
   const handleRefreshAll = () => {
-    refetchBalance();
+    if (!isAdmin) refetchBalance();
     refetchJournals();
   };
 
@@ -171,7 +180,7 @@ export const LedgerPage: React.FC = () => {
           </div>
           <p className="text-sm text-slate-400 mt-1">
             Real-time balance projections and immutable double-entry journal records for{' '}
-            <span className="text-emerald-400 font-semibold">{activeMerchant.name}</span>
+            <span className="text-emerald-400 font-semibold">{isAdmin ? 'All merchants (operator diagnostics)' : activeMerchant.name}</span>
           </p>
         </div>
 
@@ -212,14 +221,14 @@ export const LedgerPage: React.FC = () => {
           <div className="flex items-center gap-2 text-[11px] font-mono bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 shrink-0 self-start lg:self-auto">
             <Building className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-slate-400">Tenant:</span>
-            <span className="text-slate-200">{activeMerchant.name}</span>
+            <span className="text-slate-200">{isAdmin ? 'All merchants (operator diagnostics)' : activeMerchant.name}</span>
             <span className="text-slate-500">({truncateId(activeMerchant.id, 8)})</span>
           </div>
         </div>
       </div>
 
       {/* Real-time Merchant Financial Balance Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {!isAdmin && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Available Payout Balance */}
         <Card className="relative overflow-hidden border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
@@ -323,7 +332,7 @@ export const LedgerPage: React.FC = () => {
             </div>
           )}
         </Card>
-      </div>
+      </div>}
 
       {/* Financial Journals Table */}
       <Card

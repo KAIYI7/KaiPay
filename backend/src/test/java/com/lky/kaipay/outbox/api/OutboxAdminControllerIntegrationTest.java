@@ -56,7 +56,7 @@ class OutboxAdminControllerIntegrationTest extends AbstractPostgresIntegrationTe
         ResponseEntity<String> response = restTemplate.exchange(
                 "/v1/events/outbox?page=0&size=2",
                 HttpMethod.GET,
-                null,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()),
                 String.class
         );
 
@@ -114,7 +114,7 @@ class OutboxAdminControllerIntegrationTest extends AbstractPostgresIntegrationTe
         ResponseEntity<String> pendingResponse = restTemplate.exchange(
                 "/v1/events/outbox?status=PENDING",
                 HttpMethod.GET,
-                null,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()),
                 String.class
         );
         assertThat(pendingResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -128,7 +128,7 @@ class OutboxAdminControllerIntegrationTest extends AbstractPostgresIntegrationTe
         ResponseEntity<String> publishedResponse = restTemplate.exchange(
                 "/v1/events/outbox?status=PUBLISHED",
                 HttpMethod.GET,
-                null,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()),
                 String.class
         );
         assertThat(publishedResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -147,7 +147,7 @@ class OutboxAdminControllerIntegrationTest extends AbstractPostgresIntegrationTe
         outboxRepository.save(quarantined);
         outboxRepository.save(PaymentEventOutbox.builder().aggregateType("PAYMENT")
                 .aggregateId(UUID.randomUUID().toString()).eventType("PaymentCapturedEvent").payload("{}").build());
-        ResponseEntity<String> response = restTemplate.getForEntity("/v1/events/outbox?status=QUARANTINED", String.class);
+        ResponseEntity<String> response = restTemplate.exchange("/v1/events/outbox?status=QUARANTINED", HttpMethod.GET, new org.springframework.http.HttpEntity<>(security().adminHeaders()), String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         JsonNode data = objectMapper.readTree(response.getBody()).get("data");
         assertThat(data.get("totalElements").asInt()).isEqualTo(1);

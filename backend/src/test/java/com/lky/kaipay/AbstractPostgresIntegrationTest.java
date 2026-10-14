@@ -10,8 +10,22 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@ActiveProfiles("test")
+@ActiveProfiles({"test", "local"})
 public abstract class AbstractPostgresIntegrationTest {
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.boot.test.web.client.TestRestTemplate securityHttp;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.jdbc.core.JdbcTemplate securityJdbc;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.fasterxml.jackson.databind.ObjectMapper securityMapper;
+
+    protected com.lky.kaipay.security.SecurityHttpFixtures security() {
+        return new com.lky.kaipay.security.SecurityHttpFixtures(securityHttp, securityJdbc, securityMapper);
+    }
+
+    @org.junit.jupiter.api.BeforeEach
+    void clearIdentityFixtures() { securityJdbc.update("DELETE FROM demo_users"); }
 
     protected static final PostgreSQLContainer<?> postgres;
 

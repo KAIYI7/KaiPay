@@ -1,15 +1,19 @@
 import React from 'react';
+import { useAuth } from '../../context/AuthContext';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, CreditCard, FlaskConical, Layers, AlertOctagon, BookOpen } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.roles.includes('ADMIN');
+  const isMerchant = user?.roles.includes('MERCHANT');
   const paymentCoreItems = [
     { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { label: 'Payments', path: '/payments', icon: CreditCard },
     { label: 'Testing Sandbox', path: '/sandbox', icon: FlaskConical },
     { label: 'Outbox Stream', path: '/events/outbox', icon: Layers },
     { label: 'DLT Explorer', path: '/events/dlt', icon: AlertOctagon },
-  ];
+  ].filter((item) => item.path.startsWith('/events') ? isAdmin : isMerchant);
 
   const financialCoreItems = [
     { label: 'Ledger & Accounts', path: '/ledger', icon: BookOpen },

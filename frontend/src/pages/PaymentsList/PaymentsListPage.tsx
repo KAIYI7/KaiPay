@@ -35,7 +35,7 @@ export const PaymentsListPage: React.FC = () => {
         status: statusFilter || undefined,
         sortBy: 'createdAt',
         direction: 'desc',
-      }),
+      }, activeMerchant.id),
   });
 
   const payments = paymentsPage?.content || [];

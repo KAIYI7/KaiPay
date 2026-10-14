@@ -76,10 +76,13 @@ class OutboxRetryIntegrationTest extends AbstractPostgresIntegrationTest {
 
         // Guarded requeue after a test-only correction of this synthetic oversized payload.
         // Operators must preserve real financial event semantics when remediating records.
+        // Make this fixture due using the publisher's JVM clock; PostgreSQL NOW() can
+        // differ in precision or offset and make an immediate eligibility check race.
         int requeued = jdbc.update("UPDATE payment_events_outbox SET payload = ?::jsonb, status = 'PENDING', " +
-                "next_attempt_at = NOW() WHERE id = ? AND status = 'QUARANTINED' AND published_at IS NULL",
-                healthy.getPayload(), oversized.getId());
+                "next_attempt_at = ? WHERE id = ? AND status = 'QUARANTINED' AND published_at IS NULL",
+                healthy.getPayload(), java.sql.Timestamp.from(Instant.now().minusSeconds(60)), oversized.getId());
         assertThat(requeued).isEqualTo(1);
+        assertThat(reload(oversized).getNextAttemptAt()).isBefore(Instant.now());
         assertThat(realPublisher.publishPendingEvents()).isEqualTo(1);
         assertThat(reload(oversized).getStatus()).isEqualTo(PaymentEventOutboxStatus.PUBLISHED);
         assertThat(reload(oversized).getRetryCount()).isEqualTo(1);

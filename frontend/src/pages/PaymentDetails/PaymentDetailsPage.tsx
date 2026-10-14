@@ -3,7 +3,6 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsApi } from '../../api/paymentsApi';
 import { refundApi } from '../../api/refundApi';
-import { dltApi } from '../../api/dltApi';
 import { useMerchant } from '../../context/MerchantContext';
 import { RefundStatus } from '../../models/refund';
 import { Card } from '../../components/common/Card';
@@ -24,7 +23,6 @@ import {
   Radio,
   AlertOctagon,
   RotateCw,
-  ExternalLink,
   CheckCircle2,
   RotateCcw,
   DollarSign,
@@ -96,16 +94,6 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
   });
 
   const isInFlight = payment?.status === 'CREATED' || payment?.status === 'PROCESSING';
-
-  // 2. Fetch DLT Events (if any)
-  const { data: dltEventsPage } = useQuery({
-    queryKey: ['dlt-events-for-payment', id],
-    queryFn: () => dltApi.listDeadLetterEvents({ paymentId: id }),
-    enabled: !!id,
-    refetchInterval: () => (isInFlight ? 1000 : false),
-  });
-
-  const dltEvent = dltEventsPage?.content?.[0];
 
   // 3. Fetch Refunds History
   const {
@@ -371,69 +359,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
         </div>
       )}
 
-      {/* DLT Failure Warning Card for FAILED Status */}
-      {payment.status === 'FAILED' && (
-        <div className="bg-rose-950/30 border-2 border-rose-500/50 rounded-xl p-5 shadow-lg relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-80 h-80 bg-rose-500/10 rounded-full blur-3xl pointer-events-none -mr-16 -mt-16"></div>
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
-            <div className="flex items-start gap-3.5">
-              <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-400 shrink-0">
-                <AlertOctagon className="w-6 h-6" />
-              </div>
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-base font-bold text-rose-300">
-                    Non-Blocking Retries Exhausted • Dead Letter Topic (DLT) Routed
-                  </h3>
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-rose-900/60 text-rose-300 border border-rose-700/60">
-                    Retries: {dltEvent ? dltEvent.retryCount : 'Exhausted (3)'}
-                  </span>
-                </div>
-
-                <div className="space-y-1 text-xs">
-                  <div>
-                    <span className="text-slate-400 font-medium">Exception Class: </span>
-                    <code className="font-mono text-rose-300 bg-rose-950/80 px-2 py-0.5 rounded border border-rose-800/60">
-                      {dltEvent?.exceptionClass || payment.failureCode || 'AcquirerTransientFailureException'}
-                    </code>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-400 font-medium">Failure Message: </span>
-                    <span className="text-rose-200 font-sans">
-                      {dltEvent?.failureMessage ||
-                        payment.failureMessage ||
-                        'Exhausted non-blocking retries after maximum attempts.'}
-                    </span>
-                  </div>
-
-                  {dltEvent && (
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      Topic: <span className="text-rose-300">{dltEvent.originalTopic}</span> (Partition{' '}
-                      {dltEvent.originalPartition}, Offset {dltEvent.originalOffset}) • Intercepted at{' '}
-                      {formatDate(dltEvent.createdAt)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="shrink-0 self-end md:self-center">
-              <Link to={`/events/dlt?paymentId=${payment.id}`}>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs font-semibold bg-rose-900/40 border-rose-500/50 hover:bg-rose-900/70 text-rose-200"
-                >
-                  <AlertOctagon className="w-4 h-4 text-rose-400" />
-                  <span>Inspect in DLT Explorer</span>
-                  <ExternalLink className="w-3.5 h-3.5 text-rose-400" />
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
+      {payment.status === 'FAILED' && <Card title="Payment failed"><p className="text-sm text-rose-300">{payment.failureCode || 'Payment processing failed'}</p></Card>}
 
       {/* In-Flight Active Processing Banner */}
       {isInFlight && (

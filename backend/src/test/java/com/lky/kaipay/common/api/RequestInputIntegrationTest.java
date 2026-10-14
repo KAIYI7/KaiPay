@@ -91,7 +91,7 @@ class RequestInputIntegrationTest extends AbstractPostgresIntegrationTest {
     })
     void invalidPathOrQueryTypeReturnsSanitizedBadRequestWithoutWrites(String route) throws Exception {
         ResponseEntity<String> response = restTemplate.exchange(route, HttpMethod.GET,
-                new HttpEntity<Void>(headers()), String.class);
+                new HttpEntity<Void>(route.startsWith("/v1/events/") ? security().adminHeaders() : headers()), String.class);
 
         assertBadRequest(response, "Request parameter has an invalid value", route.split("\\?")[0]);
     }
@@ -119,7 +119,7 @@ class RequestInputIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private HttpHeaders headers() {
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(merchant.getId());
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Merchant-Id", merchant.getId().toString());
         headers.set("Idempotency-Key", "request-input-" + UUID.randomUUID());

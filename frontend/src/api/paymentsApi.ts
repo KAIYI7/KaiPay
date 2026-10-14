@@ -14,7 +14,7 @@ export const paymentsApi = {
   /**
    * List paginated payments for the active merchant
    */
-  async listPayments(params: ListPaymentsParams = {}): Promise<PageResponse<Payment>> {
+  async listPayments(params: ListPaymentsParams = {}, merchantId?: string): Promise<PageResponse<Payment>> {
     const query = new URLSearchParams();
     if (params.page !== undefined) query.set('page', params.page.toString());
     if (params.size !== undefined) query.set('size', params.size.toString());
@@ -24,7 +24,7 @@ export const paymentsApi = {
 
     const queryString = query.toString();
     const endpoint = `/v1/payments${queryString ? `?${queryString}` : ''}`;
-    return apiRequest<PageResponse<Payment>>(endpoint, { method: 'GET' });
+    return apiRequest<PageResponse<Payment>>(endpoint, { method: 'GET', merchantId });
   },
 
   /**
@@ -37,9 +37,10 @@ export const paymentsApi = {
   /**
    * Create a new payment with explicit idempotency key
    */
-  async createPayment(idempotencyKey: string, payload: CreatePaymentRequest): Promise<Payment> {
+  async createPayment(idempotencyKey: string, payload: CreatePaymentRequest, merchantId?: string): Promise<Payment> {
     return apiRequest<Payment>('/v1/payments', {
       method: 'POST',
+      merchantId,
       idempotencyKey,
       body: JSON.stringify(payload),
     });

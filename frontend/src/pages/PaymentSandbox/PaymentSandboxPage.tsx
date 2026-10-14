@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsApi } from '../../api/paymentsApi';
+import { DEV_MERCHANTS } from '../../config/devMerchants';
 import { useMerchant } from '../../context/MerchantContext';
 import { Payment } from '../../models/payment';
 import { ApiError } from '../../models/api';
@@ -17,12 +18,14 @@ import { Link } from 'react-router-dom';
 export const PaymentSandboxPage: React.FC = () => {
   const { activeMerchant } = useMerchant();
   const queryClient = useQueryClient();
+  // Synthetic choices are hints for known seed data, never authorization.
+  const customers = DEV_MERCHANTS.find((merchant) => merchant.id === activeMerchant.id)?.defaultCustomers || [];
 
   // Form State
   const [dollars, setDollars] = useState<string>('50.00');
   const [currency, setCurrency] = useState<string>('USD');
   const [customerId, setCustomerId] = useState<string>(
-    activeMerchant.defaultCustomers[0]?.id || '22222222-2222-2222-2222-222222222221'
+    customers[0]?.id || ''
   );
   const [orderId, setOrderId] = useState<string>('ORD-' + Math.floor(10000 + Math.random() * 90000));
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() => generateIdempotencyKey());
@@ -32,13 +35,6 @@ export const PaymentSandboxPage: React.FC = () => {
   const [idempotencyMode, setIdempotencyMode] = useState<'initial' | 'replay' | 'conflict' | null>(null);
   const [lastError, setLastError] = useState<ApiError | null>(null);
 
-  // Update customer dropdown if merchant changes
-  React.useEffect(() => {
-    if (activeMerchant.defaultCustomers.length > 0) {
-      setCustomerId(activeMerchant.defaultCustomers[0].id);
-    }
-  }, [activeMerchant]);
-
   const createPaymentMutation = useMutation({
     mutationFn: async (params: { key: string; amountCents: number; custId: string; curr: string; order: string }) => {
       return paymentsApi.createPayment(params.key, {
@@ -46,7 +42,7 @@ export const PaymentSandboxPage: React.FC = () => {
         currency: params.curr,
         customerId: params.custId,
         metadata: { orderId: params.order },
-      });
+      }, activeMerchant.id);
     },
     onSuccess: (payment, variables) => {
       setLastError(null);
@@ -116,7 +112,7 @@ export const PaymentSandboxPage: React.FC = () => {
     setLastError(null);
   };
 
-  const customerOptions = activeMerchant.defaultCustomers.map((c) => ({
+  const customerOptions = customers.map((c) => ({
     value: c.id,
     label: `${c.name} (${c.email})`,
   }));
@@ -170,13 +166,8 @@ export const PaymentSandboxPage: React.FC = () => {
                 />
               </div>
 
-              <Select
-                label="Customer (Tenant Scoped)"
-                options={customerOptions}
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                helperText="Pre-seeded test customer belonging to active merchant"
-              />
+              {customers.length > 0 ? <Select label="Customer (Tenant Scoped)" options={customerOptions} value={customerId} onChange={(e) => setCustomerId(e.target.value)} helperText="Synthetic seed customer; backend validates merchant ownership" /> :
+                <Input label="Customer ID" value={customerId} onChange={(e) => setCustomerId(e.target.value)} required helperText="Enter a provisioned synthetic customer UUID belonging to this merchant" />}
 
               <Input
                 label="Order Reference (Metadata)"

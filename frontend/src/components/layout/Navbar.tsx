@@ -1,8 +1,10 @@
 import React from 'react';
+import { useAuth } from '../../context/AuthContext';
 import { useMerchant } from '../../context/MerchantContext';
 import { Building2, ShieldCheck, ChevronDown, Check } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
+  const { user, logout } = useAuth();
   const { activeMerchant, setActiveMerchant, availableMerchants } = useMerchant();
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
 
@@ -29,7 +31,7 @@ export const Navbar: React.FC = () => {
 
       <div className="flex items-center gap-3">
         {/* Merchant Context Switcher */}
-        <div className="relative">
+        {availableMerchants.length > 0 && <div className="relative">
           <button
             type="button"
             onClick={() => setDropdownOpen(!dropdownOpen)}
@@ -70,7 +72,7 @@ export const Navbar: React.FC = () => {
                         <div>
                           <div className="font-medium text-slate-100">{merchant.name}</div>
                           <div className="text-[10px] text-slate-400 font-mono mt-0.5">{merchant.id}</div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">{merchant.description}</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">{'Assigned membership'}</div>
                         </div>
                         {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />}
                       </button>
@@ -80,7 +82,9 @@ export const Navbar: React.FC = () => {
               </div>
             </>
           )}
-        </div>
+        </div>}
+        <span className="text-xs text-slate-300">{user?.username}</span>
+        <button className="text-xs text-emerald-400" onClick={() => void logout()}>Sign out</button>
       </div>
     </header>
   );

@@ -5,8 +5,8 @@ import com.lky.kaipay.common.exception.EntityNotFoundException;
 import com.lky.kaipay.ledger.api.dto.JournalResponse;
 import com.lky.kaipay.ledger.api.dto.MerchantBalanceResponse;
 import com.lky.kaipay.ledger.domain.Journal;
-import com.lky.kaipay.ledger.service.LedgerService;
-import com.lky.kaipay.ledger.service.MerchantBalanceService;
+import com.lky.kaipay.security.JournalApplicationService;
+import com.lky.kaipay.security.MerchantApplicationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -29,8 +29,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LedgerController {
 
-    private final MerchantBalanceService merchantBalanceService;
-    private final LedgerService ledgerService;
+    private final MerchantApplicationService merchantBalanceService;
+    private final JournalApplicationService journalApplicationService;
 
     @GetMapping("/balance")
     public ResponseEntity<ApiResponse<MerchantBalanceResponse>> getBalance(
@@ -57,11 +57,7 @@ public class LedgerController {
                 : Sort.by(sortBy).descending();
         Pageable pageable = PageRequest.of(page, size, sort);
 
-        Page<Journal> journals = (merchantId != null)
-                ? ledgerService.getMerchantJournals(merchantId, pageable)
-                : ledgerService.getAllJournals(pageable);
-
-        Page<JournalResponse> response = journals.map(JournalResponse::fromEntity);
+        Page<JournalResponse> response = journalApplicationService.list(merchantId, pageable);
         return ResponseEntity.ok(ApiResponse.success("Journals retrieved successfully", response));
     }
 
@@ -72,13 +68,6 @@ public class LedgerController {
     ) {
         log.info("Fetching journal {} with optional merchant filter {}", journalId, merchantId);
 
-        Journal journal = ledgerService.getJournal(journalId)
-                .orElseThrow(() -> new EntityNotFoundException("Journal not found with ID: " + journalId));
-
-        if (merchantId != null && journal.getMerchant() != null && !journal.getMerchant().getId().equals(merchantId)) {
-            throw new EntityNotFoundException(String.format("Journal %s not found for merchant %s", journalId, merchantId));
-        }
-
-        return ResponseEntity.ok(ApiResponse.success(JournalResponse.fromEntity(journal)));
+        return ResponseEntity.ok(ApiResponse.success(journalApplicationService.get(journalId, merchantId)));
     }
 }

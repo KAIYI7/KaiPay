@@ -126,7 +126,7 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private HttpHeaders createHeaders(UUID merchantId) {
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(merchantId);
         if (merchantId != null) {
             headers.set("X-Merchant-Id", merchantId.toString());
         }
@@ -270,19 +270,23 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("GET /v1/ledger/balance returns 404 Not Found for non-existent merchant")
+    @DisplayName("GET /v1/ledger/balance denies unknown merchant context before revealing existence")
     void testGetLedgerBalance_NotFound() {
         UUID unknownId = UUID.randomUUID();
-        HttpEntity<Void> entity = new HttpEntity<>(createHeaders(unknownId));
+        HttpHeaders headers = createHeaders(merchantA.getId());
+        headers.set("X-Merchant-Id", unknownId.toString());
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
         ResponseEntity<String> response = restTemplate.exchange("/v1/ledger/balance", HttpMethod.GET, entity, String.class);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
     @DisplayName("GET /v1/ledger/balance returns 400 Bad Request when X-Merchant-Id header is missing")
     void testGetLedgerBalance_MissingHeader() {
-        HttpEntity<Void> entity = new HttpEntity<>(new HttpHeaders());
+        HttpHeaders headers = createHeaders(merchantA.getId());
+        headers.remove("X-Merchant-Id");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
         ResponseEntity<String> response = restTemplate.exchange("/v1/ledger/balance", HttpMethod.GET, entity, String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);

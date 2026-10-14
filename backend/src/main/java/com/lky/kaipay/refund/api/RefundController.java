@@ -3,7 +3,7 @@ package com.lky.kaipay.refund.api;
 import com.lky.kaipay.common.api.ApiResponse;
 import com.lky.kaipay.refund.api.dto.CreateRefundRequest;
 import com.lky.kaipay.refund.api.dto.RefundResponse;
-import com.lky.kaipay.refund.service.RefundService;
+import com.lky.kaipay.security.MerchantApplicationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,7 +26,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class RefundController {
 
-    private final RefundService refundService;
+    private final MerchantApplicationService refundService;
 
     @PostMapping
     public ResponseEntity<ApiResponse<RefundResponse>> createRefund(

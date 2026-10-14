@@ -240,7 +240,7 @@ class CorrelationPropagationIntegrationTest extends AbstractPostgresIntegrationT
     }
 
     private HttpHeaders headers(String trace) {
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(merchant.getId());
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Merchant-Id", merchant.getId().toString());
         headers.set("Idempotency-Key", "correlation-" + UUID.randomUUID());

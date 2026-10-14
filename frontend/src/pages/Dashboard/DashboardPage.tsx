@@ -3,8 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { paymentsApi } from '../../api/paymentsApi';
 import { ledgerApi } from '../../api/ledgerApi';
-import { outboxApi } from '../../api/outboxApi';
-import { dltApi } from '../../api/dltApi';
 import { useMerchant } from '../../context/MerchantContext';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
@@ -16,9 +14,6 @@ import {
   TrendingUp,
   Receipt,
   RotateCcw,
-  Radio,
-  AlertOctagon,
-  BookOpen,
   PlusCircle,
   ArrowRight,
   ArrowUpRight,
@@ -26,7 +21,6 @@ import {
   Building,
   ShieldCheck,
   RefreshCw,
-  Zap,
 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
@@ -42,7 +36,7 @@ export const DashboardPage: React.FC = () => {
     isFetching: isBalanceFetching,
   } = useQuery({
     queryKey: ['ledger-balance', activeMerchant.id],
-    queryFn: () => ledgerApi.getMerchantBalance(),
+    queryFn: () => ledgerApi.getMerchantBalance(activeMerchant.id),
   });
 
   // 2. Fetch recent payment transactions
@@ -55,29 +49,10 @@ export const DashboardPage: React.FC = () => {
     isFetching: isPaymentsFetching,
   } = useQuery({
     queryKey: ['payments', activeMerchant.id, 'recent'],
-    queryFn: () => paymentsApi.listPayments({ page: 0, size: 5, sortBy: 'createdAt', direction: 'desc' }),
+    queryFn: () => paymentsApi.listPayments({ page: 0, size: 5, sortBy: 'createdAt', direction: 'desc' }, activeMerchant.id),
   });
 
-  // 3. Fetch operational telemetry counts
-  const { data: outboxPage, isFetching: isOutboxFetching } = useQuery({
-    queryKey: ['outbox-summary'],
-    queryFn: () => outboxApi.listOutboxEvents({ size: 1 }),
-    refetchInterval: 5000,
-  });
-
-  const { data: dltPage, isFetching: isDltFetching } = useQuery({
-    queryKey: ['dlt-summary'],
-    queryFn: () => dltApi.listDeadLetterEvents({ size: 1 }),
-    refetchInterval: 5000,
-  });
-
-  const { data: journalsPage, isFetching: isJournalsFetching } = useQuery({
-    queryKey: ['ledger-journals-summary', activeMerchant.id],
-    queryFn: () => ledgerApi.listJournals({ size: 1 }),
-  });
-
-  const isRefreshing =
-    isBalanceFetching || isPaymentsFetching || isOutboxFetching || isDltFetching || isJournalsFetching;
+  const isRefreshing = isBalanceFetching || isPaymentsFetching;
 
   const handleRefreshAll = () => {
     refetchBalance();
@@ -141,14 +116,14 @@ export const DashboardPage: React.FC = () => {
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base font-semibold text-slate-100">{activeMerchant.name}</h3>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium">
-                  {activeMerchant.status}
+                  {'Assigned'}
                 </span>
                 <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
                   Simulation Mode: Multi-Tenant Test Harness
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-1">{activeMerchant.description}</p>
+              <p className="text-xs text-slate-400 mt-1">{'Authenticated merchant membership'}</p>
               <div className="text-xs font-mono text-slate-400 mt-1.5 flex items-center gap-2">
                 <span>Tenant UUID:</span>
                 <span className="bg-slate-950 px-2 py-0.5 rounded border border-slate-800 text-slate-300 select-all">
@@ -280,146 +255,6 @@ export const DashboardPage: React.FC = () => {
             </div>
           )}
         </Card>
-      </div>
-
-      {/* Operational Architecture Status Cards */}
-      <div>
-        <div className="flex items-center justify-between mb-3 px-1">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">
-              Operational Architecture & Event Telemetry
-            </h2>
-          </div>
-          <span className="text-xs text-slate-500 font-mono">Phase 3 & 4 Core Systems</span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Outbox Buffer Card */}
-          <Link to="/events/outbox" className="group block focus:outline-none">
-            <Card className="h-full border-slate-700/80 hover:border-emerald-500/50 hover:bg-slate-800/95 transition-all duration-200 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 group-hover:scale-105 transition-transform">
-                      <Radio className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-100 group-hover:text-emerald-300 transition-colors">
-                        Transactional Outbox Buffer
-                      </h4>
-                      <span className="text-[10px] font-mono text-slate-400">/events/outbox</span>
-                    </div>
-                  </div>
-
-                  {/* Pulse Dot */}
-                  <div className="flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-800/50 px-2 py-0.5 rounded-full">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                    </span>
-                    <span className="text-[10px] font-mono text-emerald-400 font-medium">Streaming</span>
-                  </div>
-                </div>
-
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Decoupled PostgreSQL outbox publisher guaranteeing at-least-once Kafka event delivery without distributed 2PC locks.
-                </p>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs">
-                <div className="font-mono text-slate-300">
-                  <span className="text-emerald-400 font-bold">{outboxPage?.totalElements ?? 0}</span>
-                  <span className="text-slate-500 ml-1.5">events tracked</span>
-                </div>
-                <div className="text-emerald-400 flex items-center gap-1 font-medium group-hover:translate-x-0.5 transition-transform">
-                  <span>View Stream</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </div>
-              </div>
-            </Card>
-          </Link>
-
-          {/* DLT Graveyard Card */}
-          <Link to="/events/dlt" className="group block focus:outline-none">
-            <Card className="h-full border-slate-700/80 hover:border-amber-500/50 hover:bg-slate-800/95 transition-all duration-200 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/25 group-hover:scale-105 transition-transform">
-                      <AlertOctagon className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-100 group-hover:text-amber-300 transition-colors">
-                        DLT & Poison Pill Graveyard
-                      </h4>
-                      <span className="text-[10px] font-mono text-slate-400">/events/dlt</span>
-                    </div>
-                  </div>
-
-                  <span className="text-[10px] font-mono bg-amber-950/60 text-amber-400 border border-amber-800/50 px-2 py-0.5 rounded-full font-medium">
-                    Dead Letter Topic
-                  </span>
-                </div>
-
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Quarantine queue and diagnostic inspector for deserialization errors, poison pills, and consumer retry exhaustion.
-                </p>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs">
-                <div className="font-mono text-slate-300">
-                  <span className="text-amber-400 font-bold">{dltPage?.totalElements ?? 0}</span>
-                  <span className="text-slate-500 ml-1.5">dead letters</span>
-                </div>
-                <div className="text-amber-400 flex items-center gap-1 font-medium group-hover:translate-x-0.5 transition-transform">
-                  <span>Inspect Graveyard</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </div>
-              </div>
-            </Card>
-          </Link>
-
-          {/* Double-Entry Ledger Card */}
-          <Link to="/ledger" className="group block focus:outline-none">
-            <Card className="h-full border-slate-700/80 hover:border-sky-500/50 hover:bg-slate-800/95 transition-all duration-200 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-sky-500/15 text-sky-400 border border-sky-500/25 group-hover:scale-105 transition-transform">
-                      <BookOpen className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-100 group-hover:text-sky-300 transition-colors">
-                        Double-Entry Financial Ledger
-                      </h4>
-                      <span className="text-[10px] font-mono text-slate-400">/ledger</span>
-                    </div>
-                  </div>
-
-                  <span className="text-[10px] font-mono bg-sky-950/60 text-sky-400 border border-sky-800/50 px-2 py-0.5 rounded-full font-medium">
-                    Σ Debits = Σ Credits
-                  </span>
-                </div>
-
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Immutable double-entry journal records enforcing mathematical accounting invariants across asset and liability accounts.
-                </p>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-slate-700/60 flex items-center justify-between text-xs">
-                <div className="font-mono text-slate-300">
-                  <span className="text-sky-400 font-bold">{journalsPage?.totalElements ?? 0}</span>
-                  <span className="text-slate-500 ml-1.5">journals posted</span>
-                </div>
-                <div className="text-sky-400 flex items-center gap-1 font-medium group-hover:translate-x-0.5 transition-transform">
-                  <span>Explore Ledger</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </div>
-              </div>
-            </Card>
-          </Link>
-        </div>
       </div>
 
       {/* Activity Breakdown & Quick Links Bar */}

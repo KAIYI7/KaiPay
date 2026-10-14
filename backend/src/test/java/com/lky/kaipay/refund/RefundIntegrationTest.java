@@ -159,7 +159,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     private HttpHeaders createHeaders(UUID merchantId, String idempotencyKey) {
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(merchantId);
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Merchant-Id", merchantId.toString());
         if (idempotencyKey != null) {
@@ -720,7 +720,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
                 new HttpEntity<>(req2, createHeaders(testMerchant.getId(), "list-ref-2")), String.class);
 
         // Query GET
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = security().merchantHeaders(testMerchant.getId());
         headers.set("X-Merchant-Id", testMerchant.getId().toString());
         HttpEntity<Void> entity = new HttpEntity<>(headers);
 
@@ -764,7 +764,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
         assertThat(postResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
 
         // Merchant B tries to list refunds on Merchant A's payment -> 404
-        HttpHeaders getHeaders = new HttpHeaders();
+        HttpHeaders getHeaders = security().merchantHeaders(merchantB.getId());
         getHeaders.set("X-Merchant-Id", merchantB.getId().toString());
         ResponseEntity<String> getResponse = restTemplate.exchange(
                 "/v1/payments/" + payment.getId() + "/refunds",
