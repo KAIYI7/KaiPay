@@ -20,6 +20,9 @@ class BridgeController {
     @GetMapping("/api/state") Snapshot state() { return service.view(); }
     @PostMapping("/api/requests") PaymentRequest create(@RequestBody CreateRequest input) { return service.create(input); }
     @PostMapping("/api/observations") Observation ingest(@RequestBody Candidate event) { return service.ingest(event); }
+    @PostMapping("/api/notification-candidates") Observation notification(@RequestBody NotificationInput event) { return service.ingestNotification(event.candidate()); }
+    @PostMapping("/api/notification-candidates/{id}/invalidate") Observation invalidate(@PathVariable UUID id, @RequestBody Invalidation input) { return service.invalidate(id, input); }
+    @PostMapping("/api/observations/{id}/resolve") Observation resolve(@PathVariable UUID id, @RequestBody Resolution input) { return service.resolve(id, input); }
     @PostMapping("/api/requests/{id}/verify") PaymentRequest verify(@PathVariable UUID id, @RequestBody Confirmation input) {
         if (!Boolean.TRUE.equals(input.historyChecked())) throw new BridgeFailure(422, "HISTORY_CHECK_REQUIRED");
         return service.beginVerification(id);

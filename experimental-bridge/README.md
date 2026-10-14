@@ -1,22 +1,14 @@
-# Experimental observation simulator
+# Experimental notification observation server
 
-This standalone Java 21 / Spring Boot 3.4.3 process demonstrates a **synthetic** incoming-observation experience for KaiPay. It has no dependency on KaiPay's payment backend, PostgreSQL, Kafka, refund services, authorization transitions, or ledger. It is not a TNG integration or proof of settlement. Physical-device TNG notification compatibility is **UNVERIFIED**. Android probe networking and live event ingestion are deferred.
+This standalone Java 21 / Spring Boot process supports synthetic checkouts and opt-in Android notification candidates. It has no dependency on KaiPay's payment backend, database, Kafka, refund services, payment transitions, or ledger. **An authenticated Android report is unverified client evidence, never settlement proof or proof of a particular order.** Real TNG classification and delivery on a fresh ordinary notification remain **UNVERIFIED** until separately observed on the receiver's phone.
 
-The feature is disabled by default, including the demo page and all APIs. Its default bind address is `127.0.0.1:28082`. Do not deploy this process or expose it with a tunnel, proxy, port forward, or public server. Both credentials below are newly generated experimental credentials; never reuse wallet, bank, or production credentials.
+The experiment is disabled by default and binds `127.0.0.1:28082`. Keep it on laptop loopback: no public hosting, inbound ports or third-party tunnels. The Android debug app uses the USB development tunnel `adb reverse tcp:28082 tcp:28082` and its narrowly allowed `http://127.0.0.1:28082` destination. Remote configurations require actual HTTPS and normal certificate verification; forwarded headers never establish transport trust.
 
-## Build and run locally
+## Build and local startup
 
-Use JDK 21 and Maven. From this directory:
+Use JDK 21 and run `mvn -o verify` from this directory. Cached dependencies are required. Tests exercise actual loopback HTTP and atomic snapshot replacement; use a terminal permitted to perform these operations. Do not replace assertions to bypass sandbox restrictions.
 
-```powershell
-$env:JAVA_HOME = 'C:/Program Files/Java/jdk-21'
-$env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
-mvn -o verify
-```
-
-Offline verification requires the Maven dependencies to be cached. If they are absent, obtain them with `mvn verify` using your approved dependency network access. The tests include a real HTTP server on loopback and atomic file replacement; a Windows application sandbox may prohibit these operations. Run verification in a terminal permitted to make local loopback connections and atomic writes. Tests are never replaced with weaker persistence or mocked HTTP to bypass those limitations.
-
-Generate two separate random tokens in a local PowerShell session without printing them into command history or logs:
+Provision three separate random experimental credentials outside source/build files. Never reuse wallet, bank or production credentials. The receiver credential authorizes manual verification, the simulation credential authorizes the browser simulator, and the live credential authorizes only Android candidates and invalidations. Each must contain 32–256 ASCII letters, digits, underscores or hyphens and be distinct.
 
 ```powershell
 function New-ExperimentalToken {
@@ -27,55 +19,72 @@ function New-ExperimentalToken {
 }
 $env:BRIDGE_RECEIVER_TOKEN = New-ExperimentalToken
 $env:BRIDGE_DEVICE_TOKEN = New-ExperimentalToken
+$env:BRIDGE_LIVE_DEVICE_TOKEN = New-ExperimentalToken
+$env:BRIDGE_LIVE_DEVICE_ID = [guid]::NewGuid().ToString()
 $env:BRIDGE_ENABLED = 'true'
 java -jar target/notification-simulator-0.1.0-SNAPSHOT.jar
 ```
 
-The server requires distinct tokens containing 32–256 ASCII letters, digits, underscores, or hyphens. Missing, short, malformed, or identical tokens prevent enabled startup. Configuration never supplies a built-in token. Use a secure local mechanism to copy your session's two values into the demo; do not save them in source files, screenshots, or shared logs. The device credential is a simulation ingestion credential in this batch, not an Android connection.
+Provision the live credential and assigned UUID in the companion app privately. Never put credentials in URLs, screenshots, diagnostics, logs, APKs or Git. Enter only the receiver and simulation credentials in separate password fields at `http://127.0.0.1:28082/`. The browser keeps them in memory and clears them on leaving or using its cleanup control.
 
-Open `http://127.0.0.1:28082/`. On exit, stop the process and remove the environment values:
+The live credential and UUID are optional together: omitting both disables new routes and preserves the simulator. Supplying one, malformed values or reused credentials prevents enabled startup. Revoke/rotate by stopping the server, replacing the live credential or removing both live settings, and restarting. Credential rotation retains the assigned UUID and replay history. A replacement UUID establishes a new device scope; historical evidence remains in the private store.
+
+After stopping the experiment, clear environment settings:
 
 ```powershell
-Remove-Item Env:BRIDGE_ENABLED, Env:BRIDGE_RECEIVER_TOKEN, Env:BRIDGE_DEVICE_TOKEN
+Remove-Item Env:BRIDGE_ENABLED, Env:BRIDGE_RECEIVER_TOKEN, Env:BRIDGE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_ID
 ```
 
-No receiver endpoint is started within the existing KaiPay backend. Starting this separate process does not require Docker or change database schemas. The simulator binds loopback unless explicitly overridden. Any non-loopback bind requires configured server TLS; per-request transport checks require actual HTTPS outside loopback. Forwarded headers must remain disabled and never establish transport trust. Remote operation is outside this batch's delivery scope.
+## Synthetic end-to-end demonstration
 
-## Synthetic demonstration
+1. Enter receiver/simulation credentials in the browser. Create an invented checkout such as `12.34`. Its placeholder QR contains no payment code. Creation starts three-second polling.
+2. Use **Simulate candidate** for the existing browser path, or provision the Android debug companion, deliberately enable detection and experimental delivery, and trigger its labeled synthetic event. No wallet transfer is needed.
+3. The page reports **Potential incoming payment — unverified**, showing evidence source and disposition. Android synthetic events are explicitly `SYNTHETIC` and cannot use a real notification profile.
+4. As receiver, begin manual verification and confirm separately. For a real notification, independently check actual TNG transaction history and the correct request first. For invented evidence, acknowledge the synthetic scenario.
+5. Identical pending amounts remain ambiguous. Fresh Android unmatched/ambiguous evidence can be explicitly resolved to an eligible request after receiver history checking; separate verification and confirmation remain necessary. Delayed, expired, changed or consumed evidence cannot be resolved.
 
-1. Enter the receiver token and simulation device token in their separate password fields. The page keeps credentials only in memory. Clear them with the supplied control or leave the page.
-2. Use the default synthetic `12.34` amount. The page displays a placeholder QR that contains no payment code. Click **Create synthetic request**.
-3. Click **Simulate candidate**. The request becomes **Payment detected — awaiting verification**. Detection does not confirm payment.
-4. Use **Refresh / start polling** to poll authenticated status every three seconds. Polling never resubmits observation events.
-5. As receiver, select **Begin manual verification**, acknowledge the independent verification requirement, and then use **Confirm after independent history check**. These separate receiver-authenticated actions move the synthetic request through `AWAITING_VERIFICATION` to `MANUALLY_CONFIRMED`.
-6. To demonstrate ambiguity, create two new requests with identical amounts and simulate a candidate. Both remain `AMBIGUOUS`, with no confirmation action. Requests expire after ten minutes. Unmatched and expired observations remain represented separately.
+This is a single-owner experimental screen. Creation, receiver review and status polling require the receiver credential. It does not provide a public customer authentication flow or contain real account/QR details. Dynamic rendering uses text nodes and a restrictive content-security policy.
 
-All browser-rendered dynamic values use text nodes, with a restrictive content-security policy. No notification text, personal QR, wallet identifier, sender identity, or credential is accepted or persisted. The status page is authenticated and never exposes real accounts.
+## API contract
 
-## API and safety contract
+Send exactly one `Authorization: Bearer <credential>` header. No cookies, query credentials or cross-origin access are supported.
 
-Use `Authorization: Bearer <local token>`; tokens are never query parameters or cookies. No cross-origin access is configured.
-
-| Route | Credential | Input / behavior |
+| Route | Credential | Behavior |
 | --- | --- | --- |
-| `GET /api/state` | Receiver | Minimal synthetic requests and observation dispositions |
-| `POST /api/requests` | Receiver | `{"amountMinor":1234}`; integer MYR cents, range 1–1,000,000 |
-| `POST /api/observations` | Simulation device | Candidate schema below; never performs manual confirmation |
-| `POST /api/requests/{id}/verify` | Receiver | `{"historyChecked":true}`; detected request only |
-| `POST /api/requests/{id}/confirm` | Receiver | `{"historyChecked":true}`; awaiting-verification request only |
+| `GET /api/state` | Receiver | Requests and minimized observation evidence |
+| `POST /api/requests` | Receiver | `{"amountMinor":1234}`; exact integer MYR cents |
+| `POST /api/observations` | Simulation | Existing six-field `SIMULATED` schema/freshness |
+| `POST /api/notification-candidates` | Live device | Strict minimized Android candidate below |
+| `POST /api/notification-candidates/{eventId}/invalidate` | Live device | `{"reason":"NOTIFICATION_CHANGED"}`; invalidate lifecycle evidence |
+| `POST /api/observations/{eventId}/resolve` | Receiver | `{"requestId":"<UUID>","historyChecked":true}`; explicit fresh Android resolution |
+| `POST /api/requests/{id}/verify` | Receiver | `{"historyChecked":true}`; begin verification |
+| `POST /api/requests/{id}/confirm` | Receiver | Same attestation; separate manual confirmation |
 
-Candidate fields are `eventId` and `notificationId` (new random UUIDs for synthetic data), `sequence` (integer 1–1,000,000), `observedAt` (UTC ISO instant), `amountMinor` (integer cents), and `source` (**exactly** `"SIMULATED"`). No text fields are supported. Unknown fields, duplicate JSON keys, trailing JSON, numeric enums, string or decimal amounts, and bodies over 4096 bytes are rejected. Error bodies and application logs do not contain rejected payloads or tokens.
+Candidate fields are `eventId` (stable random UUID), `notificationId` (random local lifecycle UUID, never Android notification key), `sequence` (integer), `deviceId` (assigned UUID), `source`, `classification`, `classifierProfile`, `amountMinor` (integer MYR cents), `observedAt` (textual UTC ISO instant ending in `Z`) and `evidenceQuality`.
 
-New events must be no more than 120 seconds old and no more than 30 seconds in the future. A candidate predating a request cannot match it. Exact retries with the same event UUID and identical payload return their existing result, including after restart or when acknowledgement was lost; reusing an event UUID with altered fields is rejected. This does not assume exactly-once transport delivery. The browser does not implement background ingestion retries; local network errors are shown to the operator. A future bridge must retain the same event identity on retry.
+Exactly two reviewed tuples are accepted:
 
-A notification UUID identifies one notification lifecycle. Increasing-sequence updates are recorded as `UPDATE_IGNORED`; they cannot match a second request and invalidate an unconfirmed match to `AMBIGUOUS`. Lower/repeated sequences and backwards notification timestamps are rejected. Amount/time matching supplies only a candidate and never proves payment. Ambiguity cannot become eligible for confirmation because one competing request expires. Expired, unmatched, or ambiguous candidates cannot be manually confirmed through these APIs.
+| Source | Classification | Classifier profile | Evidence quality |
+| --- | --- | --- | --- |
+| `TNG_NOTIFICATION_CANDIDATE` | `INCOMING_CANDIDATE` | `tng.receipt.en.observed.v1` | `RULE_MATCHED` |
+| `SYNTHETIC` | `INCOMING_CANDIDATE` | `synthetic.debug.v1` | `SYNTHETIC` |
 
-## Local persistence and limitations
+The live credential's configured UUID must equal the reported UUID. No raw title/body, sender, wallet details, OTP, screenshot, Android notification key or provider transaction reference is accepted or invented. Amounts range from 1 to 1,000,000 cents; sequences from 1 to 1,000,000. Unknown fields, duplicate keys, trailing JSON, string/decimal amounts, numeric sources and bodies over 4KB are rejected. Sanitized errors/logs contain neither rejected payloads nor credentials.
 
-The default `.local/observations.json` snapshot contains only the synthetic model. Keep `.local/` ignored and private. Credentials are never stored there. One process owns a sibling lock file. Each mutation writes and forces a temporary file, then atomically replaces the snapshot before exposing success. Unsupported atomic replacement or write failure returns `503 STORE_UNAVAILABLE` and preserves in-memory state and replay eligibility. This is a process-restart prototype; it is not a database and does not claim power-loss durability, a distributed lock, multiple-node operation, or disaster recovery. Local files require normal operating-system access protection.
+The old simulation route retains its six fields (`eventId`, `notificationId`, `sequence`, `observedAt`, `amountMinor`, exactly `SIMULATED`) and 120-second freshness / 30-second future tolerance. Android candidates can be up to 24 hours old, with the same future tolerance. Older than 120 seconds is persisted as `DELAYED`: never automatically matched or manually resolved. Older than 24 hours is rejected. Exact persisted retries are acknowledged after age expiry and process restart; altered event UUID reuse is rejected. Retry the identical complete payload and UUID when acknowledgement is lost.
 
-Storage is bounded at 500 requests, 1000 observations, and two million snapshot bytes. The process refuses additional growth instead of evicting replay history. Stop the process and deliberately reset the private synthetic store to start a new experiment; reset removes duplicate history and is never automated. Do not reuse previous event UUIDs after a reset.
+## Tentative association and manual checks
 
-There is one configured receiver role for this experiment. Its bearer token grants manual confirmation authority; a future multi-receiver, multi-tenant design needs separate review. Verification is the receiver's attestation after checking independently; the prototype cannot authenticate TNG history. A spoofed Android notification, matching amount, or notification text would still not establish settlement. This batch accepts simulations only and never posts Android events here.
+Requests expire ten minutes after creation. Matching amount/time provides a tentative association only. Evidence predating a request or outside its time window cannot match. Multiple matching active requests or competing candidates for an unconfirmed association become `AMBIGUOUS`. Expiry never creates automatic certainty. Resolution requires fresh Android evidence, exact amount/time compatibility, an active unassigned request and an unconsumed lifecycle. One candidate/lifecycle cannot confirm multiple requests.
 
-Before any live batch: obtain physical-device evidence of actual Android system notification fields, distinguish incoming transfers from unrelated events without storing personal samples in Git, review package/signature and spoofing limitations, design authenticated HTTPS device onboarding and persistent retries, and independently review all live matching and confirmation changes. Keep live events disconnected from financial state.
+Increasing-sequence updates become `UPDATE_IGNORED`, cannot represent another payment and invalidate provisional associations. Repeated/lower sequences and backwards timestamps are rejected. An unsupported changed notification uses a separate device-authorized invalidation. This persists `INVALIDATED` evidence and makes provisional requests `AMBIGUOUS`. Invalidated evidence cannot resolve, verify or confirm. Repeated invalidation is idempotent. An original not yet received returns `404 OBSERVATION_NOT_FOUND`, allowing the companion to upload it first. Already manually confirmed experimental requests are retained if evidence later changes; no financial rollback is performed.
+
+History checking is a human attestation. The prototype cannot authenticate TNG transaction history, notification provenance, transaction identity, settlement or order identity. Device authentication identifies the configured reporter only. Notifications never automatically confirm requests or mutate KaiPay financial state.
+
+## Private persistence and bounds
+
+The default `.local/observations.json` contains minimized evidence, including real amounts/timestamps when deliberately enabled. Keep it private and ignored. Credentials are never persisted. One process owns a sibling file lock. Each mutation forces a temporary file and atomically replaces the snapshot before exposing success. Replacement failure returns `503 STORE_UNAVAILABLE`, without consuming event identity or publishing in-memory changes. This supports process restart without claiming power-loss durability, multi-node operation or disaster recovery.
+
+Bounds are 500 requests, 1,000 observations and two million snapshot bytes. Capacity refuses growth instead of deleting replay history. Reset deliberately with the process stopped; reset removes replay protection, so never reuse old event/lifecycle UUIDs. Neither these bounds nor synthetic success establishes immediate delivery, exactly-once transport or reliable background execution under all Android battery-saving modes.
+
+Real ordinary-payment validation remains a separate opt-in experiment: observe a fresh notification on the receiver's phone, verify the supported strict classification, inspect the unverified server/browser evidence, and independently check transaction history before receiver confirmation. Synthetic tests do not establish real TNG compatibility or production reliability.

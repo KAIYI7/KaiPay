@@ -42,10 +42,13 @@ class NotificationAccessAndManifestTest {
     }
 
     @Suppress("DEPRECATION")
-    @Test fun `merged app manifest requests no network storage or sensitive permissions`() {
+    @Test fun `merged app manifest allows only network and WorkManager permissions`() {
         val app = RuntimeEnvironment.getApplication()
         val info = app.packageManager.getPackageInfo(app.packageName, PackageManager.GET_PERMISSIONS)
-        assertTrue("Probe must request no uses-permission capabilities", info.requestedPermissions.isNullOrEmpty())
+        assertEquals(setOf("android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.WAKE_LOCK", "android.permission.RECEIVE_BOOT_COMPLETED", "android.permission.FOREGROUND_SERVICE",
+            "dev.kaipay.notificationprobe.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"),
+            info.requestedPermissions?.toSet())
         assertEquals(0, app.applicationInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP)
         assertEquals(0, app.applicationInfo.flags and ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC)
     }

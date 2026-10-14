@@ -14,6 +14,22 @@ class ProbeSessionInspectionTest {
         metadata: NotificationMetadata = NotificationMetadata()) =
         posted(official, key, time, metadata) { Fields(text = text) }
 
+    @Test fun `delivery hook cannot reuse a previous candidate on rejected or removed callbacks`() {
+        val session = active()
+        val accepted = session.post("Invented body")
+        assertSame(accepted, session.snapshot().events.single())
+        assertNull(session.posted("unrelated.synthetic", "invented-source", 100L) {
+            error("Unrelated fields must not be read")
+        })
+        session.removed(official, "invented-source", 100L)
+        assertNull(session.posted(official, "invented-source", 100L) {
+            error("Removed fields must not be read")
+        })
+        assertTrue(session.snapshot().events.isEmpty())
+        session.setEnabled(false)
+        assertNull(session.post("Invented later body", 101L))
+    }
+
     @Test fun `same timestamp changed content is an update and identical content a duplicate`() {
         val session = active()
         session.post("Invented first body")

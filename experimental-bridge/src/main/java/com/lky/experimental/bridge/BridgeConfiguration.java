@@ -36,16 +36,17 @@ class BridgeConfiguration {
     }
 
     @Bean @ConditionalOnProperty(name = "bridge.enabled", havingValue = "true")
-    ObservationService observations(SnapshotStore store) { return new ObservationService(store, Clock.systemUTC()); }
+    ObservationService observations(SnapshotStore store, BridgeAccess access) { return new ObservationService(store, Clock.systemUTC(), access.deviceId); }
 }
 
 final class BridgeAccess {
     final boolean enabled;
-    private final byte[] device, receiver;
+    private final byte[] device, receiver, liveDevice;
+    final java.util.UUID deviceId;
 
     BridgeAccess(Environment env) {
         enabled = env.getProperty("bridge.enabled", Boolean.class, false);
-        if (!enabled) { device = new byte[0]; receiver = new byte[0]; return; }
+        if (!enabled) { device = new byte[0]; receiver = new byte[0]; liveDevice = new byte[0]; deviceId = null; return; }
         String deviceToken = env.getProperty("bridge.device-token", "");
         String receiverToken = env.getProperty("bridge.receiver-token", "");
         if (!deviceToken.matches("[A-Za-z0-9_-]{32,256}") || !receiverToken.matches("[A-Za-z0-9_-]{32,256}") || deviceToken.equals(receiverToken))
@@ -59,10 +60,24 @@ final class BridgeAccess {
             throw new IllegalStateException("Forwarded headers must remain disabled");
         device = deviceToken.getBytes(StandardCharsets.UTF_8);
         receiver = receiverToken.getBytes(StandardCharsets.UTF_8);
+        String liveToken = env.getProperty("bridge.live-device-token", "");
+        String assignedId = env.getProperty("bridge.live-device-id", "");
+        if (liveToken.isEmpty() && assignedId.isEmpty()) { liveDevice = new byte[0]; deviceId = null; }
+        else {
+            if (!liveToken.matches("[A-Za-z0-9_-]{32,256}") || liveToken.equals(deviceToken) || liveToken.equals(receiverToken)
+                    || !assignedId.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))
+                throw new IllegalStateException("Distinct live device credential and UUID required");
+            liveDevice = liveToken.getBytes(StandardCharsets.UTF_8);
+            deviceId = java.util.UUID.fromString(assignedId);
+        }
     }
 
     boolean authorized(String header, boolean deviceRole) {
+        return authorized(header, deviceRole ? "simulation" : "receiver");
+    }
+    boolean authorized(String header, String role) {
         if (header == null || !header.startsWith("Bearer ") || header.length() > 263) return false;
-        return MessageDigest.isEqual(deviceRole ? device : receiver, header.substring(7).getBytes(StandardCharsets.UTF_8));
+        byte[] expected = switch (role) { case "live" -> liveDevice; case "simulation" -> device; default -> receiver; };
+        return expected.length > 0 && MessageDigest.isEqual(expected, header.substring(7).getBytes(StandardCharsets.UTF_8));
     }
 }

@@ -34,13 +34,17 @@ final class BridgeFilter implements Filter {
         String path = request.getRequestURI();
         boolean publicResource = path.equals("/") || path.equals("/demo.js") || path.equals("/demo.css");
         if (!publicResource) {
-            boolean canonical = path.equals("/api/state") || path.equals("/api/requests") || path.equals("/api/observations")
+            boolean canonical = path.equals("/api/state") || path.equals("/api/requests") || path.equals("/api/observations") || path.equals("/api/notification-candidates")
+                    || path.matches("/api/notification-candidates/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/invalidate")
+                    || path.matches("/api/observations/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resolve")
                     || path.matches("/api/requests/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(?:verify|confirm)");
             // Reject encoded/matrix paths before MVC normalizes them: roles use the same canonical route.
             if (!canonical) { error(response, 404, "NOT_FOUND"); return; }
-            boolean deviceRole = path.equals("/api/observations") && request.getMethod().equals("POST");
+            if (path.startsWith("/api/notification-candidates") && access.deviceId == null) { error(response, 404, "LIVE_DELIVERY_DISABLED"); return; }
+            String role = request.getMethod().equals("POST") && path.equals("/api/observations") ? "simulation"
+                    : request.getMethod().equals("POST") && path.startsWith("/api/notification-candidates") ? "live" : "receiver";
             if (Collections.list(request.getHeaders("Authorization")).size() != 1
-                    || !access.authorized(request.getHeader("Authorization"), deviceRole)) {
+                    || !access.authorized(request.getHeader("Authorization"), role)) {
                 error(response, 401, "UNAUTHORIZED"); return;
             }
         } else if (!"GET".equals(request.getMethod())) { error(response, 405, "METHOD_INVALID"); return; }

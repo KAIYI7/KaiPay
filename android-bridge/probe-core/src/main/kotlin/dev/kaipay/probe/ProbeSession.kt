@@ -66,15 +66,15 @@ class ProbeSession(
     @Synchronized fun posted(
         packageName: String?, key: String?, postTime: Long,
         metadata: NotificationMetadata = NotificationMetadata(), fields: () -> Fields
-    ) {
-        if (!enabled || !connected || packageName != ProbeParser.OFFICIAL_PACKAGE) return
-        if (key == null || key.length > 1024 || postTime < 0) return
+    ): RedactedEvent? {
+        if (!enabled || !connected || packageName != ProbeParser.OFFICIAL_PACKAGE) return null
+        if (key == null || key.length > 1024 || postTime < 0) return null
         expire()
         val now = elapsedClock()
         val source = digest(key)
         if (removedSources[source]?.let { postTime <= it.first } == true) {
             ignoredLate = (ignoredLate + 1).coerceAtMost(1_000_000)
-            return // Never read/restore the content of a removed notification's delayed callback.
+            return null // Never read/restore the content of a removed notification's delayed callback.
         }
         val previous = lastSeen[source]
         val safeMetadata = EventMetadata(source.take(12), postTime,
@@ -82,11 +82,12 @@ class ProbeSession(
             metadata.channelId?.takeIf { it.length <= 128 }?.let { digest("channel:$it").take(12) },
             metadata.grouped, metadata.groupSummary)
         if (previous != null && postTime < previous.postTime) {
-            append(RedactedEvent(Delivery.OUT_OF_ORDER, Diagnostic(Disposition.UNKNOWN),
-                metadata = safeMetadata, receivedElapsed = now))
-            return // Old callbacks are metadata-only and cannot replace or redisplay newer text.
+            val event = RedactedEvent(Delivery.OUT_OF_ORDER, Diagnostic(Disposition.UNKNOWN),
+                metadata = safeMetadata, receivedElapsed = now)
+            append(event)
+            return event // Old callbacks are metadata-only and cannot replace or redisplay newer text.
         }
-        val inspection = ProbeParser.inspectContent(packageName, fields, metadata.groupSummary, profile) ?: return
+        val inspection = ProbeParser.inspectContent(packageName, fields, metadata.groupSummary, profile) ?: return null
         val fingerprint = digest(buildString {
             append(inspection.diagnostic); append(safeMetadata.channelAlias)
             append(metadata.grouped); append(metadata.groupSummary); append(safeMetadata.notificationTime)
@@ -103,7 +104,9 @@ class ProbeSession(
         lastSeen[source] = Seen(postTime, fingerprint, now)
         if (lastSeen.size > capacity) lastSeen.remove(lastSeen.keys.first())
         removedSources.remove(source)
-        append(RedactedEvent(delivery, inspection.diagnostic, inspection, safeMetadata, now))
+        val event = RedactedEvent(delivery, inspection.diagnostic, inspection, safeMetadata, now)
+        append(event)
+        return event
     }
 
     @Synchronized fun removed(packageName: String?, key: String?, postTime: Long) {

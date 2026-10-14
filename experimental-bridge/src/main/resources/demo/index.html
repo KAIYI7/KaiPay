@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Experimental observation demo</title><link rel="stylesheet" href="/demo.css"><script src="/demo.js" defer></script></head>
 <body><main><h1>Experimental notification observation</h1>
-<p class="notice">Simulation only. TNG device compatibility is UNVERIFIED. Detection does not prove settlement. This separate demo never changes KaiPay payments or ledger entries.</p>
+<p class="notice">Experimental checkout with synthetic and opt-in Android notification evidence. Real TNG device classification and delivery remain UNVERIFIED. Detection does not prove settlement or identify an order. This separate demo never changes KaiPay payments or ledger entries.</p>
 <div class="qr" aria-label="Placeholder QR, not a payment code">Placeholder QR<br>NO PAYMENT CODE</div>
 <p>Use synthetic amounts only. Credentials stay in this page's memory and are cleared when you leave. Do not use real notification content or wallet identifiers.</p>
 <label>Receiver credential <input id="receiver" type="password" autocomplete="off" maxlength="256"></label>
@@ -9,6 +9,6 @@
 <label>Synthetic amount in MYR <input id="amount" value="12.34" inputmode="decimal" maxlength="8"></label>
 <div><button id="create">Create synthetic request</button><button id="observe">Simulate candidate</button><button id="refresh">Refresh / start polling</button><button id="clear">Clear credentials / stop polling</button></div>
 <p id="message" role="status"></p><section id="requests" aria-label="Synthetic request statuses"></section>
-<h2>Observation dispositions</h2><pre id="observations"></pre>
-<p>Manual verification requires the receiver's separate action. In this simulation, acknowledge the synthetic scenario. With a future reviewed live bridge, check actual TNG transaction history independently first.</p>
+<h2>Receiver observation review</h2><section id="observations" aria-label="Observation evidence and dispositions"></section>
+<p>Manual verification requires the receiver's separate action and an independent check of actual TNG transaction history for real evidence. Synthetic evidence is invented. Delayed or expired evidence remains review-only. Ambiguous evidence requires explicit receiver resolution; amount and time alone are insufficient.</p>
 </main></body></html>

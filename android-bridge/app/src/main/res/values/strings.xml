@@ -7,6 +7,25 @@
     <string name="disable_and_clear">Disable and clear</string>
     <string name="clear_diagnostics">Clear diagnostics</string>
     <string name="refresh_status">Refresh status</string>
+    <string name="delivery_explanation">EXPERIMENTAL DELIVERY — default off. Sends only minimized candidate fields; never notification text. Unverified evidence requires independent TNG history review. Delays and failures are possible. Disable cancels pending transmissions; an in-flight request may already have arrived. Detection still resets off after process restart.</string>
+    <string name="delivery_status">%1$s\n%2$s</string>
+    <string name="delivery_base_url">Server base URL (debug USB: http://127.0.0.1:28082)</string>
+    <string name="delivery_device_id">Assigned device UUID</string>
+    <string name="delivery_device_token">Separate experimental device token</string>
+    <string name="save_delivery_configuration">Save experimental device configuration</string>
+    <string name="enable_live_delivery">Enable experimental live delivery</string>
+    <string name="disable_live_delivery">Disable experimental delivery</string>
+    <string name="retry_delivery">Retry recoverable delivery failures</string>
+    <string name="clear_delivery_history">Clear delivery history (resets duplicate protection)</string>
+    <string name="forget_delivery_credential">Forget credential and delivery history</string>
+    <string name="delivery_configuration_queued">Saving configuration; delivery remains off.</string>
+    <string name="delivery_configuration_invalid">Invalid configuration; use assigned UUID, device token and approved transport.</string>
+    <string name="delivery_enabled">Experimental delivery enabled deliberately.</string>
+    <string name="delivery_enable_requires">Enable local detection with notification access and connection; save device configuration first.</string>
+    <string name="synthetic_amount_cents">Invented SYNTHETIC amount in integer cents (1–1000000)</string>
+    <string name="synthetic_delivery_trigger">DEBUG: queue invented SYNTHETIC candidate</string>
+    <string name="synthetic_queued">Invented SYNTHETIC candidate queued; never provider evidence.</string>
+    <string name="synthetic_requires">Synthetic trigger requires valid cents, detection, access and enabled delivery.</string>
     <string name="notification_settings_unavailable">Notification settings unavailable on this device.\n</string>
     <string name="redacted_event">%1$s: %2$s; title=%3$b, text=%4$b, expanded=%5$b</string>
     <string name="probe_status">%1$sOS access: %2$b\nDetection enabled: %3$b\nListener connected: %4$b\nLocal observations: %5$d / 32\nRemovals: %6$d\nIgnored removed callbacks: %7$d\n%8$s\nClassification is notification evidence only. UNKNOWN does not identify an incoming transfer or settlement.</string>

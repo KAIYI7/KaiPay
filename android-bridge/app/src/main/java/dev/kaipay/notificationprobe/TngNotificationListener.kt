@@ -23,14 +23,16 @@ internal object ProbeRuntime {
         // snapshot prunes using a monotonic clock. Display/export also prune before reads.
         if (session.snapshot().events.isNotEmpty()) handler.postDelayed(expiry, 30_000)
     }
-    fun disable() { session.setEnabled(false); handler.removeCallbacks(expiry) }
+    fun disable() { session.setEnabled(false); handler.removeCallbacks(expiry); LiveDelivery.disableIfInitialized() }
 }
 
 class TngNotificationListener : NotificationListenerService() {
-    override fun onListenerConnected() { ProbeRuntime.session.setConnected(true) }
-    override fun onListenerDisconnected() { ProbeRuntime.session.setConnected(false); ProbeRuntime.scheduleExpiry() }
+    override fun onListenerConnected() { ProbeRuntime.session.setConnected(true); LiveDelivery.get(this) }
+    override fun onListenerDisconnected() {
+        ProbeRuntime.session.setConnected(false); LiveDelivery.get(this).disable(); ProbeRuntime.scheduleExpiry()
+    }
     override fun onDestroy() {
-        ProbeRuntime.session.setConnected(false); ProbeRuntime.scheduleExpiry()
+        ProbeRuntime.session.setConnected(false); LiveDelivery.get(this).disable(); ProbeRuntime.scheduleExpiry()
         super.onDestroy()
     }
 
@@ -45,7 +47,7 @@ class TngNotificationListener : NotificationListenerService() {
             val notification = sbn.notification
             val metadata = NotificationMetadata(notification.channelId, notification.`when`, sbn.isGroup,
                 notification.flags and Notification.FLAG_GROUP_SUMMARY != 0)
-            session.posted(sbn.packageName, sbn.key, sbn.postTime, metadata) {
+            val event = session.posted(sbn.packageName, sbn.key, sbn.postTime, metadata) {
                 val extras = notification.extras
                 fun field(name: String): Any? {
                     @Suppress("DEPRECATION") val value = extras?.get(name)
@@ -59,16 +61,21 @@ class TngNotificationListener : NotificationListenerService() {
                 Fields(field(Notification.EXTRA_TITLE), field(Notification.EXTRA_TEXT), field(Notification.EXTRA_BIG_TEXT),
                     field(Notification.EXTRA_SUB_TEXT), field(Notification.EXTRA_SUMMARY_TEXT), lines)
             }
+            if (event != null) LiveDelivery.get(this).observed(sbn.key, event)
             ProbeRuntime.scheduleExpiry()
         } catch (_: RuntimeException) {
             // Invalid parcels/fields are dropped. Never log exception text or notification data.
+            try { LiveDelivery.get(this).unreadable(sbn.key, sbn.postTime) } catch (_: RuntimeException) { }
         }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         if (sbn?.packageName != ProbeParser.OFFICIAL_PACKAGE) return
         if (!notificationAccessGranted()) { ProbeRuntime.disable(); return }
-        try { ProbeRuntime.session.removed(sbn.packageName, sbn.key, sbn.postTime) }
+        try {
+            ProbeRuntime.session.removed(sbn.packageName, sbn.key, sbn.postTime)
+            LiveDelivery.get(this).removed(sbn.key, sbn.postTime)
+        }
         catch (_: RuntimeException) { ProbeRuntime.session.clear() }
         ProbeRuntime.scheduleExpiry()
     }
