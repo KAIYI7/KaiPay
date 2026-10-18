@@ -72,7 +72,7 @@ class MerchantBalanceServiceUnitTest {
                 .accountNumber("2000-MERCHANT-" + merchantId + "-LIABILITY")
                 .accountName("Acme Corp LIABILITY Account")
                 .accountType(AccountType.LIABILITY)
-                .currency("USD")
+                .currency("MYR")
                 .build();
     }
 
@@ -101,7 +101,7 @@ class MerchantBalanceServiceUnitTest {
             assertThat(response.getTotalVolumeCents()).isEqualTo(10000L);
             assertThat(response.getTotalFeesCents()).isEqualTo(320L);
             assertThat(response.getTotalRefundsCents()).isEqualTo(0L);
-            assertThat(response.getCurrency()).isEqualTo("USD");
+            assertThat(response.getCurrency()).isEqualTo("MYR");
 
             verify(merchantRepository).findById(merchantId);
             verify(accountRepository).findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY);
@@ -133,7 +133,7 @@ class MerchantBalanceServiceUnitTest {
             assertThat(response.getTotalVolumeCents()).isEqualTo(0L);
             assertThat(response.getTotalFeesCents()).isEqualTo(0L);
             assertThat(response.getTotalRefundsCents()).isEqualTo(0L);
-            assertThat(response.getCurrency()).isEqualTo("USD");
+            assertThat(response.getCurrency()).isEqualTo("MYR");
         }
 
         @Test
@@ -148,8 +148,8 @@ class MerchantBalanceServiceUnitTest {
         }
 
         @Test
-        @DisplayName("Should preserve account custom currency")
-        void shouldPreserveAccountCustomCurrency() {
+        @DisplayName("Should exclude historical account from MYR projection")
+        void shouldExcludeHistoricalAccount() {
             Account eurAccount = Account.builder()
                     .id(UUID.randomUUID())
                     .merchant(merchant)
@@ -162,12 +162,13 @@ class MerchantBalanceServiceUnitTest {
             when(merchantRepository.findById(merchantId)).thenReturn(Optional.of(merchant));
             when(accountRepository.findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY))
                     .thenReturn(Optional.of(eurAccount));
-            when(ledgerEntryRepository.calculateAccountBalance(eurAccount.getId())).thenReturn(25000L);
+
 
             MerchantBalanceResponse response = merchantBalanceService.getMerchantBalance(merchantId);
 
-            assertThat(response.getCurrency()).isEqualTo("EUR");
-            assertThat(response.getAvailableBalanceCents()).isEqualTo(25000L);
+            assertThat(response.getCurrency()).isEqualTo("MYR");
+            assertThat(response.getAvailableBalanceCents()).isZero();
+            verify(ledgerEntryRepository, never()).calculateAccountBalance(any());
         }
 
         @Test
@@ -185,7 +186,7 @@ class MerchantBalanceServiceUnitTest {
 
             assertThat(response.getMerchantId()).isEqualTo(merchantId);
             assertThat(response.getAvailableBalanceCents()).isZero();
-            assertThat(response.getCurrency()).isEqualTo("USD");
+            assertThat(response.getCurrency()).isEqualTo("MYR");
             assertThat(response.getPendingSettlementCents()).isEqualTo(5000L);
             assertThat(response.getTotalVolumeCents()).isEqualTo(10000L);
             assertThat(response.getTotalFeesCents()).isEqualTo(320L);

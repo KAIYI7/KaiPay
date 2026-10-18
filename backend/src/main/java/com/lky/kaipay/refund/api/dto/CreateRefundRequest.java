@@ -15,8 +15,9 @@ import lombok.Setter;
 @AllArgsConstructor
 public class CreateRefundRequest {
 
-    @NotNull(message = "Refund amount in cents is required")
+    @NotNull(message = "Refund amount in minor units (MYR sen) is required")
     @Positive(message = "Refund amount must be strictly positive")
+    @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = com.lky.kaipay.common.api.MinorUnitsDeserializer.class)
     private Long amountCents;
 
     private String reason;

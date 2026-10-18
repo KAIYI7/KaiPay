@@ -65,7 +65,11 @@ public class LedgerService {
                 throw new InvalidJournalException("Ledger entry must have an entry type (DEBIT or CREDIT)");
             }
             if (entry.amountCents() <= 0) {
-                throw new InvalidJournalException("Ledger entry amount must be strictly greater than zero cents");
+                throw new InvalidJournalException("Ledger entry amount must be strictly greater than zero sen");
+            }
+            if (!com.lky.kaipay.common.MoneyCurrency.MYR.equals(entry.currency())
+                    || !entry.currency().equals(entry.account().getCurrency())) {
+                throw new InvalidJournalException("New journal entries and accounts must use MYR");
             }
         }
 
@@ -81,7 +85,7 @@ public class LedgerService {
 
         if (totalDebit != totalCredit) {
             throw new UnbalancedJournalException(
-                    String.format("Unbalanced journal: total debit (%d cents) does not match total credit (%d cents)",
+                    String.format("Unbalanced journal: total debit (%d sen) does not match total credit (%d sen)",
                             totalDebit, totalCredit)
             );
         }
@@ -106,7 +110,7 @@ public class LedgerService {
                     .account(req.account())
                     .entryType(req.entryType())
                     .amountCents(req.amountCents())
-                    .currency(req.currency() != null ? req.currency() : "USD")
+                    .currency(req.currency())
                     .build();
             journal.addEntry(entry);
         }
@@ -120,6 +124,7 @@ public class LedgerService {
 
     @Transactional
     public Journal recordPaymentCapture(Payment payment, UUID eventId) {
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(payment.getCurrency());
         long feeCents = Math.round(payment.getAmountCents() * 0.029) + 30;
         feeCents = Math.min(feeCents, payment.getAmountCents());
         long netMerchantCents = payment.getAmountCents() - feeCents;
@@ -165,6 +170,10 @@ public class LedgerService {
 
     @Transactional
     public Journal recordPaymentRefund(Payment payment, Refund refund, UUID eventId) {
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(payment.getCurrency());
+        if (!payment.getCurrency().equals(refund.getCurrency())) {
+            throw new InvalidJournalException("Refund currency must match payment currency");
+        }
         long feeRefundCents = Math.round(refund.getAmountCents() * 0.029);
         feeRefundCents = Math.min(feeRefundCents, refund.getAmountCents());
         long netMerchantRefundCents = refund.getAmountCents() - feeRefundCents;
@@ -225,6 +234,9 @@ public class LedgerService {
 
     @Transactional(readOnly = true)
     public long getAccountBalance(UUID accountId) {
+        if (ledgerEntryRepository.hasConflictingAccountCurrency(accountId)) {
+            throw new InvalidJournalException("Stored entry currency conflicts with account currency");
+        }
         Long balance = ledgerEntryRepository.calculateAccountBalance(accountId);
         return balance != null ? balance : 0L;
     }

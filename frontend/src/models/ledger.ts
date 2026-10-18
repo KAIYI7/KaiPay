@@ -22,8 +22,9 @@ export interface Journal {
   eventId?: string | null;
   description: string;
   postedAt: string;
-  totalDebitCents: number;
-  totalCreditCents: number;
+  currency?: string | null;
+  totalDebitCents?: number | null;
+  totalCreditCents?: number | null;
   entries: LedgerEntry[];
 }
 

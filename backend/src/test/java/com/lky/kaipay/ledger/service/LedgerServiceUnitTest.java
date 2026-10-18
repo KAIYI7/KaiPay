@@ -72,7 +72,7 @@ class LedgerServiceUnitTest {
                 .accountNumber(AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC)
                 .accountName("Customer Funds Receivable")
                 .accountType(AccountType.ASSET)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         payableAccount = Account.builder()
@@ -81,7 +81,7 @@ class LedgerServiceUnitTest {
                 .accountNumber("2000-MERCHANT-" + merchant.getId() + "-LIABILITY")
                 .accountName("Acme Corp LIABILITY Account")
                 .accountType(AccountType.LIABILITY)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         revenueAccount = Account.builder()
@@ -89,7 +89,7 @@ class LedgerServiceUnitTest {
                 .accountNumber(AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC)
                 .accountName("Platform Fee Revenue")
                 .accountType(AccountType.REVENUE)
-                .currency("USD")
+                .currency("MYR")
                 .build();
     }
 
@@ -103,9 +103,9 @@ class LedgerServiceUnitTest {
             UUID eventId = UUID.randomUUID();
             String sourceId = "pay_12345";
             List<LedgerEntryRequest> entries = List.of(
-                    new LedgerEntryRequest(receivableAccount, EntryType.DEBIT, 10000L, "USD"),
-                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, 9680L, "USD"),
-                    new LedgerEntryRequest(revenueAccount, EntryType.CREDIT, 320L, "USD")
+                    new LedgerEntryRequest(receivableAccount, EntryType.DEBIT, 10000L, "MYR"),
+                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, 9680L, "MYR"),
+                    new LedgerEntryRequest(revenueAccount, EntryType.CREDIT, 320L, "MYR")
             );
 
             when(journalRepository.findBySourceTypeAndSourceIdAndEventId(JournalSourceType.PAYMENT_CAPTURE, sourceId, eventId))
@@ -148,8 +148,8 @@ class LedgerServiceUnitTest {
                     .thenReturn(Optional.of(existingJournal));
 
             List<LedgerEntryRequest> entries = List.of(
-                    new LedgerEntryRequest(receivableAccount, EntryType.DEBIT, 10000L, "USD"),
-                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, 10000L, "USD")
+                    new LedgerEntryRequest(receivableAccount, EntryType.DEBIT, 10000L, "MYR"),
+                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, 10000L, "MYR")
             );
 
             Journal result = ledgerService.postJournal(
@@ -171,8 +171,8 @@ class LedgerServiceUnitTest {
             UUID eventId = UUID.randomUUID();
             String sourceId = "pay_unbalanced";
             List<LedgerEntryRequest> entries = List.of(
-                    new LedgerEntryRequest(receivableAccount, EntryType.DEBIT, 10000L, "USD"),
-                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, 9000L, "USD")
+                    new LedgerEntryRequest(receivableAccount, EntryType.DEBIT, 10000L, "MYR"),
+                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, 9000L, "MYR")
             );
 
             when(journalRepository.findBySourceTypeAndSourceIdAndEventId(JournalSourceType.PAYMENT_CAPTURE, sourceId, eventId))
@@ -187,7 +187,7 @@ class LedgerServiceUnitTest {
                     entries
             ))
                     .isInstanceOf(UnbalancedJournalException.class)
-                    .hasMessageContaining("total debit (10000 cents) does not match total credit (9000 cents)");
+                    .hasMessageContaining("total debit (10000 sen) does not match total credit (9000 sen)");
 
             verify(journalRepository, never()).save(any(Journal.class));
         }
@@ -217,8 +217,8 @@ class LedgerServiceUnitTest {
                     .thenReturn(Optional.empty());
 
             List<LedgerEntryRequest> entries = List.of(
-                    new LedgerEntryRequest(receivableAccount, EntryType.DEBIT, -100L, "USD"),
-                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, -100L, "USD")
+                    new LedgerEntryRequest(receivableAccount, EntryType.DEBIT, -100L, "MYR"),
+                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, -100L, "MYR")
             );
 
             assertThatThrownBy(() -> ledgerService.postJournal(
@@ -239,8 +239,8 @@ class LedgerServiceUnitTest {
                     .thenReturn(Optional.empty());
 
             List<LedgerEntryRequest> entries = List.of(
-                    new LedgerEntryRequest(null, EntryType.DEBIT, 1000L, "USD"),
-                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, 1000L, "USD")
+                    new LedgerEntryRequest(null, EntryType.DEBIT, 1000L, "MYR"),
+                    new LedgerEntryRequest(payableAccount, EntryType.CREDIT, 1000L, "MYR")
             );
 
             assertThatThrownBy(() -> ledgerService.postJournal(
@@ -266,20 +266,20 @@ class LedgerServiceUnitTest {
             Payment payment = Payment.builder()
                     .id(paymentId)
                     .merchant(merchant)
-                    .amountCents(10000L) // $100.00
-                    .currency("USD")
+                    .amountCents(10000L) // RM100.00
+                    .currency("MYR")
                     .build();
 
-            // fee = round(10000 * 0.029) + 30 = 290 + 30 = 320 cents ($3.20)
-            // netMerchant = 10000 - 320 = 9680 cents ($96.80)
+            // fee = round(10000 * 0.029) + 30 = 290 + 30 = 320 cents (RM3.20)
+            // netMerchant = 10000 - 320 = 9680 cents (RM96.80)
 
             when(accountProvisioningService.getOrCreateSystemAccount(
-                    AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC, "Customer Funds Receivable", AccountType.ASSET, "USD"))
+                    AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC, "Customer Funds Receivable", AccountType.ASSET, "MYR"))
                     .thenReturn(receivableAccount);
-            when(accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD"))
+            when(accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "MYR"))
                     .thenReturn(payableAccount);
             when(accountProvisioningService.getOrCreateSystemAccount(
-                    AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC, "Platform Fee Revenue", AccountType.REVENUE, "USD"))
+                    AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC, "Platform Fee Revenue", AccountType.REVENUE, "MYR"))
                     .thenReturn(revenueAccount);
 
             when(journalRepository.findBySourceTypeAndSourceIdAndEventId(JournalSourceType.PAYMENT_CAPTURE, paymentId.toString(), eventId))
@@ -331,27 +331,27 @@ class LedgerServiceUnitTest {
                     .id(paymentId)
                     .merchant(merchant)
                     .amountCents(10000L)
-                    .currency("USD")
+                    .currency("MYR")
                     .build();
 
             Refund refund = Refund.builder()
                     .id(refundId)
                     .payment(payment)
                     .merchant(merchant)
-                    .amountCents(5000L) // $50.00 refund
-                    .currency("USD")
+                    .amountCents(5000L) // RM50.00 refund
+                    .currency("MYR")
                     .build();
 
-            // feeRefund = round(5000 * 0.029) = 145 cents ($1.45)
-            // netMerchantRefund = 5000 - 145 = 4855 cents ($48.55)
+            // feeRefund = round(5000 * 0.029) = 145 cents (RM1.45)
+            // netMerchantRefund = 5000 - 145 = 4855 cents (RM48.55)
 
             when(accountProvisioningService.getOrCreateSystemAccount(
-                    AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC, "Customer Funds Receivable", AccountType.ASSET, "USD"))
+                    AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC, "Customer Funds Receivable", AccountType.ASSET, "MYR"))
                     .thenReturn(receivableAccount);
-            when(accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD"))
+            when(accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "MYR"))
                     .thenReturn(payableAccount);
             when(accountProvisioningService.getOrCreateSystemAccount(
-                    AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC, "Platform Fee Revenue", AccountType.REVENUE, "USD"))
+                    AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC, "Platform Fee Revenue", AccountType.REVENUE, "MYR"))
                     .thenReturn(revenueAccount);
 
             when(journalRepository.findBySourceTypeAndSourceIdAndEventId(JournalSourceType.PAYMENT_REFUND, refundId.toString(), eventId))

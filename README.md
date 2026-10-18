@@ -24,7 +24,7 @@ KaiPay demonstrates production-style solutions to these engineering challenges:
 - **Distributed Dual-Write Elimination**: Combines local database transaction commits with an asynchronous Transactional Outbox poller using PostgreSQL row-level locks (`SELECT ... FOR UPDATE SKIP LOCKED`).
 - **Durable Simulated Authorization**: One retained operation per payment validates request equivalence and preserves the simulator outcome across competing calls and restarts. Payment completion and its consumer marker commit atomically. Calls may repeat; this is a simulated-provider guarantee, not a guarantee about real bank charges.
 - **Non-Blocking Multi-Topic Retries**: Eliminates consumer partition Head-of-Line blocking via Spring Kafka `@RetryableTopic` with exponential backoff and Dead Letter Topic (`kaipay.payment.requests-dlt`) quarantine.
-- **Strict Double-Entry Financial Ledger**: Records all monetary movements via immutable Journal entries and balanced Ledger Entries enforcing $\sum \text{Debits} = \sum \text{Credits}$ with integer-cent precision (`BIGINT amount_cents`).
+- **Strict Double-Entry Financial Ledger**: Records all monetary movements via immutable Journal entries and balanced Ledger Entries enforcing $\sum \text{Debits} = \sum \text{Credits}$ with integer minor-unit precision (MYR sen; `BIGINT amount_cents`).
 - **Pessimistic Locking on Financial Aggregates**: Guards against concurrent partial and full refund race conditions (`SELECT ... FOR UPDATE`) to prevent over-refunding.
 - **Operational Full-Stack Visibility**: Provides an operational administrative interface built with React 18, TypeScript, and Tailwind CSS to observe live outbox buffers, dead-letter events, and ledger journals in real time.
 
@@ -52,6 +52,7 @@ flowchart TD
         DedupeDB[("consumed_events")]
         LedgerDB[("accounts<br/>journals<br/>ledger_entries<br/>refunds")]
         DltDB[("dead_letter_events")]
+        SimulatorDB[("simulated_authorization_operations")]
     end
 
     subgraph KafkaBroker["Apache Kafka 3.8 Cluster (Port 29092, KRaft)"]
@@ -73,18 +74,19 @@ flowchart TD
     OutboxPoller -->|"Publish (acks=all)"| MainTopic
 
     MainTopic -->|"Consume (Manual Ack)"| Consumer
-    Consumer -->|"Tx 1: Status -> PROCESSING"| PaymentsDB
-    Consumer -->|"Authorize (Non-Tx Call)"| BankGateway
+    Consumer -->|"Tx 1: PROCESSING + durable intent"| PaymentsDB
+    Consumer -->|"Tx 1: Insert intent"| SimulatorDB
+    Consumer -->|"After Tx1 commit: authorize outside payment Tx"| BankGateway
+    BankGateway -->|"S: Independently committed outcome"| SimulatorDB
     
-    BankGateway -.->|"Transient Timeout"| RetryTopic
+    BankGateway -.->|"Unresolved timeout: retry"| RetryTopic
     RetryTopic -->|"Retry Attempt"| Consumer
-    BankGateway -.->|"Retry Exhausted / Fatal"| DltTopic
+    Consumer -.->|"Retry exhausted / diagnostic rejection"| DltTopic
     DltTopic --> DltHandler
-    DltHandler -->|"Status -> FAILED"| PaymentsDB
     DltHandler -->|"Save Quarantined Event"| DltDB
 
-    BankGateway -->|"Approved / Declined"| Consumer
-    Consumer -->|"Tx 2: Status -> AUTHORIZED + Dedupe"| PaymentsDB
+    BankGateway -->|"Approved / declined / no acceptance"| Consumer
+    Consumer -->|"Tx 2: AUTHORIZED / DECLINED / FAILED"| PaymentsDB
     Consumer -->|"Tx 2: Insert (event_id, group)"| DedupeDB
 
     Client -->|"POST /v1/payments/{id}/capture"| API
@@ -117,7 +119,7 @@ flowchart TD
 | **Framework** | Spring Boot | 3.4.3 | Portfolio-grade DI container, Spring Data JPA, Spring Kafka, declarative transactions |
 | **Message Broker** | Apache Kafka | 3.8.0 (KRaft) | High-throughput distributed log, partition ordering, KRaft consensus (ZooKeeper-less) |
 | **Database** | PostgreSQL | 16-alpine | ACID relational integrity, `SKIP LOCKED` row queuing, partial indexes, atomic constraints |
-| **Schema Migration**| Flyway | 10.x | Version-controlled relational database migrations (V1 through V8) |
+| **Schema Migration**| Flyway | 10.x | Version-controlled relational database migrations (V1 through V9) |
 | **Integration Testing**| Testcontainers | 1.20.4 | Ephemeral, production-identical Docker containers for PostgreSQL 16 and Kafka 3.8 |
 | **Frontend Framework**| React | 18.3.1 | Declarative component UI for operational payments, double-entry ledger, outbox & DLT views |
 | **Build Tool** | Vite | 6.1.0 | Fast ESM development server and optimized TypeScript bundling |
@@ -134,15 +136,17 @@ flowchart TD
 - **Transactional Outbox Worker**: Background poller (`fixedDelay = 500ms`, batch size = 20) with `SKIP LOCKED` row claiming, publishing events to Kafka with manual synchronous acknowledgments.
 - **Resilient Kafka Processing**: Partition-key routing on `paymentId`, manual immediate consumer offset acknowledgment, and non-blocking retry topics.
 - **Poison Pill & Failure Simulation**: Deterministic amount-based triggers in `MockBankAcquirerClient`:
-  - **`$8,888.00`**: Transient gateway timeout on attempts 1 & 2, succeeds on attempt 3 via retry topic.
-  - **`$7,777.00`**: Persistent gateway timeout exhausting the delivery's 3 attempts and routing to DLT; payment remains `PROCESSING` with unresolved durable evidence.
-  - **`$6,666.00`**: Durable definitive no-acceptance result; atomically finalizes `FAILED` and a consumer marker before non-retryable diagnostic routing to DLT.
-  - **`$9,999.00`**: Business decline (`INSUFFICIENT_FUNDS`), transitioning payment to `DECLINED`.
-- **Double-Entry Financial Ledger**: Multi-tenant chart of accounts, 3-way capture journal posting, reversing refund journals, Stripe-style pro-rata fee retention ($0.30 fixed fee retained on full refunds).
+  - **`RM8,888.00`**: Transient gateway timeout on attempts 1 & 2, succeeds on attempt 3 via retry topic.
+  - **`RM7,777.00`**: Persistent gateway timeout exhausting the delivery's 3 attempts and routing to DLT; payment remains `PROCESSING` with unresolved durable evidence.
+  - **`RM6,666.00`**: Durable definitive no-acceptance result; atomically finalizes `FAILED` and a consumer marker before non-retryable diagnostic routing to DLT.
+  - **`RM9,999.00`**: Business decline (`INSUFFICIENT_FUNDS`), transitioning payment to `DECLINED`.
+- **Double-Entry Financial Ledger**: Multi-tenant chart of accounts, 3-way capture journal posting, reversing refund journals, simulated pro-rata fee retention (30 sen fixed fee retained on full refunds).
 - **Merchant Access**: Persisted user memberships authorize requested merchant context; resource ownership checks scope payments, refunds, balances and journals. Administrators have separate diagnostic access.
 - **Interactive Operations UI**: Real-time management dashboards, visual state machine steppers, outbox queue inspectors, DLT payload viewers, and double-entry ledger explorers.
 
-Simulator outcomes and evaluation counts live in PostgreSQL; a retry, event ID or consumer group cannot create a second authorization identity for a payment. Amounts remain integer cents and currency must exactly match the stored payment. Authorization recovery never captures, refunds or posts ledger entries. DLT is evidence-only; there is no recovery scheduler, automatic DLT replay, terminal-state reopening or real-provider integration.
+Simulator outcomes and evaluation counts live in PostgreSQL; a retry, event ID or consumer group cannot create a second authorization identity for a payment. New simulated financial activity supports only MYR using integer sen (100 sen = RM1.00). The existing `amountCents` / `amount_cents` names mean sen for MYR. Currency must exactly match the stored payment. Authorization recovery never captures, refunds or posts ledger entries. DLT is evidence-only; there is no recovery scheduler, automatic DLT replay, terminal-state reopening or real-provider integration.
+
+Historical financial rows retain their original currency and amount; they are never converted or relabeled. Exact stored idempotent responses and historical authorization evidence remain replayable without new activity. New capture/refund, authorization intent and unresolved simulator evaluation require MYR. A conflicting historical account is preserved and blocks new posting through that identity; no automatic account migration is provided. Balance KPI projections cover MYR only; journal/payment/refund history displays its original units, and mixed-currency journal totals are unavailable. Legacy deliveries without currency retain their original USD interpretation and must match stored evidence. V9 changes only defaults for future omitted account/entry/refund currencies; apply upgrades separately under operator control.
 
 **V8 upgrade compatibility:** stop all old application writers/listeners before applying the additive schema and starting the updated application; mixed old/new recovery writers are unsupported. Retain operations with their payments, and never reuse payment UUIDs or purge outcome rows independently. Existing final payments can be handled without inventing provider history; historical `PROCESSING` payments without a durable operation are quarantined for separate operator review. New `CREATED` payments can enter the durable path. Rolling back to the old memory-based simulator after new operations begin is unsafe. Source publication does not apply a migration or deploy the application.
 
@@ -163,10 +167,12 @@ Simulator outcomes and evaluation counts live in PostgreSQL; a retry, event ID o
    - Emits message to Kafka topic 'kaipay.payment.requests' (partition key = paymentId).
    - Updates outbox record (status = PUBLISHED, published_at = NOW()).
 5. PaymentProcessingConsumer receives event:
-   - Queries consumed_events table (fast pre-check).
-   - Tx 1: Transitions payment status to PROCESSING.
-   - Calls MockBankAcquirerClient.authorize(...) outside database transaction.
-   - Tx 2: Commits payment status (AUTHORIZED or DECLINED) and inserts consumed_events record atomically.
+   - Validates the delivery against stored payment identity, amount, currency and retained evidence.
+   - Tx1: Locks the payment; creates durable simulator intent and transitions CREATED to PROCESSING atomically, or validates recovery eligibility.
+   - After Tx1 commits, calls MockBankAcquirerClient.authorize(...) outside a payment transaction.
+   - S: The simulator independently commits its operation evaluation/outcome before returning or throwing a timeout.
+   - Tx2: Validates the definitive stored outcome; commits AUTHORIZED (approval), DECLINED (business decline), or FAILED (definitive no acceptance), with consumed_events atomically.
+   - An unresolved timeout leaves PROCESSING and has no completion marker; retained Kafka deliveries drive automatic retries. DLT records diagnostic evidence only.
    - Manually acknowledges Kafka consumer offset.
 ```
 
@@ -178,8 +184,8 @@ KaiPay enforces the strict double-entry balance invariant:
 $$\sum \text{Debits} = \sum \text{Credits}$$
 
 #### Chart of Accounts
-- **`1000-CUSTOMER-RECEIVABLE`** (Type: `ASSET`): Represents clearing funds owed by customer banks.
-- **`2000-MERCHANT-{ID}-LIABILITY`** (Type: `LIABILITY`): Represents platform liability owed to the merchant for payouts.
+- **`1000-CUSTOMER-RECEIVABLE`** (Type: `ASSET`): Represents simulated customer funds receivable.
+- **`2000-MERCHANT-{ID}-LIABILITY`** (Type: `LIABILITY`): Represents simulated platform liability to the merchant.
 - **`4000-PLATFORM-FEE-REVENUE`** (Type: `REVENUE`): Platform transaction fee revenue.
 
 #### Capture Fee Policy
@@ -187,55 +193,55 @@ $$\sum \text{Debits} = \sum \text{Credits}$$
 - $\text{NetMerchantCents} = \text{GrossAmount} - \text{FeeCents}$
 
 #### Refund Fee Policy
-- Variable processing fee ($2.9\%$) is refunded proportionally: $\text{FeeRefundCents} = \text{round}(\text{RefundAmount} \times 2.9\%)$.
-- Fixed gateway fee ($0.30) is retained by the platform to cover interchange and network operational costs.
-- On a 100% full refund of a single transaction, the merchant's net position is $-\$0.30$.
-- Across two consecutive fully refunded transactions, the merchant's net position is $-\$0.60$.
+- Variable processing fee (2.9%) is refunded proportionally: $\text{FeeRefundCents} = \text{round}(\text{RefundAmount} \times 2.9\%)$.
+- The fixed simulated fee (30 sen / RM0.30) is retained on refunds. This is a demonstration formula, not actual Malaysian provider, interchange or network pricing.
+- On a 100% full refund of a single transaction, the merchant's net position is -RM0.30.
+- Across two consecutive fully refunded transactions, the merchant's net position is -RM0.60.
 
-#### Exact Capture & Refund Journal Entries ($120.00 Capture, $40.00 Partial Refund, $80.00 Remaining Refund)
+#### Exact Capture & Refund Journal Entries (RM120.00 Capture, RM40.00 Partial Refund, RM80.00 Remaining Refund)
 
 ```
 ====================================================================================================
-1. Payment Capture ($120.00 USD)
-   - Gross Amount: $120.00 | Fee (2.9% + $0.30): $3.78 | Net Merchant: $116.22
+1. Payment Capture (RM120.00 MYR)
+   - Gross Amount: RM120.00 | Fee (2.9% + RM0.30): RM3.78 | Net Merchant: RM116.22
 ----------------------------------------------------------------------------------------------------
-Account                                    Type        Debit (USD)         Credit (USD)
+Account                                    Type        Debit (MYR)         Credit (MYR)
 ----------------------------------------------------------------------------------------------------
-1000-CUSTOMER-RECEIVABLE                   ASSET       $ 120.00            -
-2000-MERCHANT-LIABILITY                    LIABILITY   -                   $ 116.22
-4000-PLATFORM-FEE-REVENUE                  REVENUE     -                   $   3.78
+1000-CUSTOMER-RECEIVABLE                   ASSET       RM 120.00            -
+2000-MERCHANT-LIABILITY                    LIABILITY   -                   RM 116.22
+4000-PLATFORM-FEE-REVENUE                  REVENUE     -                   RM   3.78
 ----------------------------------------------------------------------------------------------------
-SUBTOTAL:                                              $ 120.00            $ 120.00 (BALANCED)
+SUBTOTAL:                                              RM 120.00            RM 120.00 (BALANCED)
 
 ====================================================================================================
-2. Partial Refund ($40.00 USD)
-   - Refund Amount: $40.00 | Fee Refund (2.9%): $1.16 | Net Merchant Debit: $38.84
+2. Partial Refund (RM40.00 MYR)
+   - Refund Amount: RM40.00 | Fee Refund (2.9%): RM1.16 | Net Merchant Debit: RM38.84
 ----------------------------------------------------------------------------------------------------
-Account                                    Type        Debit (USD)         Credit (USD)
+Account                                    Type        Debit (MYR)         Credit (MYR)
 ----------------------------------------------------------------------------------------------------
-2000-MERCHANT-LIABILITY                    LIABILITY   $  38.84            -
-4000-PLATFORM-FEE-REVENUE                  REVENUE     $   1.16            -
-1000-CUSTOMER-RECEIVABLE                   ASSET       -                   $  40.00
+2000-MERCHANT-LIABILITY                    LIABILITY   RM  38.84            -
+4000-PLATFORM-FEE-REVENUE                  REVENUE     RM   1.16            -
+1000-CUSTOMER-RECEIVABLE                   ASSET       -                   RM  40.00
 ----------------------------------------------------------------------------------------------------
-SUBTOTAL:                                              $  40.00            $  40.00 (BALANCED)
+SUBTOTAL:                                              RM  40.00            RM  40.00 (BALANCED)
 
 ====================================================================================================
-3. Full Remaining Refund ($80.00 USD)
-   - Refund Amount: $80.00 | Fee Refund (2.9%): $2.32 | Net Merchant Debit: $77.68
+3. Full Remaining Refund (RM80.00 MYR)
+   - Refund Amount: RM80.00 | Fee Refund (2.9%): RM2.32 | Net Merchant Debit: RM77.68
 ----------------------------------------------------------------------------------------------------
-Account                                    Type        Debit (USD)         Credit (USD)
+Account                                    Type        Debit (MYR)         Credit (MYR)
 ----------------------------------------------------------------------------------------------------
-2000-MERCHANT-LIABILITY                    LIABILITY   $  77.68            -
-4000-PLATFORM-FEE-REVENUE                  REVENUE     $   2.32            -
-1000-CUSTOMER-RECEIVABLE                   ASSET       -                   $  80.00
+2000-MERCHANT-LIABILITY                    LIABILITY   RM  77.68            -
+4000-PLATFORM-FEE-REVENUE                  REVENUE     RM   2.32            -
+1000-CUSTOMER-RECEIVABLE                   ASSET       -                   RM  80.00
 ----------------------------------------------------------------------------------------------------
-SUBTOTAL:                                              $  80.00            $  80.00 (BALANCED)
+SUBTOTAL:                                              RM  80.00            RM  80.00 (BALANCED)
 
 ====================================================================================================
 FINAL LIFECYCLE RECONCILIATION
-- Total Customer Receivable Debits ($120.00) == Total Customer Receivable Credits ($40.00 + $80.00) = $0.00
-- Merchant Payable Balance: Credit $116.22 - Debit $38.84 - Debit $77.68 = -$0.30 (Fixed fee retained)
-- Platform Revenue Balance: Credit $3.78 - Debit $1.16 - Debit $2.32 = +$0.30 (Platform earned revenue)
+- Total Customer Receivable Debits (RM120.00) == Total Customer Receivable Credits (RM40.00 + RM80.00) = RM0.00
+- Merchant Payable Balance: Credit RM116.22 - Debit RM38.84 - Debit RM77.68 = -RM0.30 (Fixed fee retained)
+- Platform Revenue Balance: Credit RM3.78 - Debit RM1.16 - Debit RM2.32 = +RM0.30 (Platform earned revenue)
 ====================================================================================================
 ```
 
@@ -243,11 +249,11 @@ FINAL LIFECYCLE RECONCILIATION
 
 ## 7. Visual Portfolio Assets
 
-All visual documentation is captured directly from the live, running KaiPay application stack:
+Screenshots capture earlier local simulation sessions and may show historical USD labels; current new activity uses MYR:
 
 ### 7.1. Financial Analytics & Operational Telemetry Dashboard
 ![KaiPay Financial Overview Dashboard](docs/screenshots/dashboard.png)
-*Real-time financial KPI cards showing available payout balance ($77.38 after fee retention), gross volume, platform fees, operational buffers, and recent transactions with live status badges.*
+*Real-time financial KPI cards showing available simulated balance (historical screenshot: USD77.38 after fee retention), gross volume, platform fees, operational buffers, and recent transactions with live status badges.*
 
 ---
 

@@ -20,10 +20,12 @@ public class CreatePaymentRequest {
 
     @NotNull(message = "amountCents is required")
     @Positive(message = "amountCents must be greater than zero")
+    @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = com.lky.kaipay.common.api.MinorUnitsDeserializer.class)
+    // MYR minor units (sen); field name retained for API compatibility.
     private Long amountCents;
 
     @NotBlank(message = "currency is required")
-    @Pattern(regexp = "^[A-Z]{3}$", message = "currency must be a valid 3-letter ISO code (e.g., USD, EUR)")
+    @Pattern(regexp = "^[A-Z]{3}$", message = "currency must be a 3-letter uppercase code (e.g., MYR)")
     private String currency;
 
     @NotNull(message = "customerId is required")

@@ -54,7 +54,7 @@ class PaymentCreationIntegrityUnitTest {
         Merchant merchant = Merchant.builder().id(merchantId).name("Test").apiKeyHash("hash").build();
         Customer customer = Customer.builder().id(UUID.randomUUID()).merchant(merchant)
                 .email("test@example.com").fullName("Test").build();
-        request = CreatePaymentRequest.builder().customerId(customer.getId()).amountCents(100L).currency("USD").build();
+        request = CreatePaymentRequest.builder().customerId(customer.getId()).amountCents(100L).currency("MYR").build();
         when(idempotencyService.computeRequestHash(request)).thenReturn("hash");
         when(idempotencyService.getExistingResponse(merchantId, "key", "hash")).thenReturn(Optional.empty());
         when(merchantRepository.findById(merchantId)).thenReturn(Optional.of(merchant));

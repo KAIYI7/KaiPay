@@ -38,7 +38,11 @@ public class MerchantBalanceService {
         Account payableAccount = accountRepository.findByMerchantIdAndAccountType(merchantId, AccountType.LIABILITY)
                 .orElse(null);
 
-        Long balance = payableAccount != null ? ledgerEntryRepository.calculateAccountBalance(payableAccount.getId()) : null;
+        boolean myrAccount = payableAccount != null && com.lky.kaipay.common.MoneyCurrency.MYR.equals(payableAccount.getCurrency());
+        if (myrAccount && ledgerEntryRepository.hasConflictingAccountCurrency(payableAccount.getId())) {
+            throw new com.lky.kaipay.common.exception.InvalidJournalException("Stored entry currency conflicts with account currency");
+        }
+        Long balance = myrAccount ? ledgerEntryRepository.calculateAccountBalance(payableAccount.getId()) : null;
         long availableBalanceCents = balance != null ? balance : 0L;
 
         Long pendingSettlement = paymentRepository.sumPendingSettlementByMerchantId(merchantId);
@@ -53,7 +57,7 @@ public class MerchantBalanceService {
         Long refunds = refundRepository.sumRefundsByMerchantId(merchantId);
         long totalRefundsCents = refunds != null ? refunds : 0L;
 
-        String currency = payableAccount != null && payableAccount.getCurrency() != null ? payableAccount.getCurrency() : "USD";
+        String currency = com.lky.kaipay.common.MoneyCurrency.MYR;
 
         log.debug("Merchant balance calculated: merchantId={}, availableBalance={}, pendingSettlement={}, totalVolume={}, totalFees={}, totalRefunds={}",
                 merchantId, availableBalanceCents, pendingSettlementCents, totalVolumeCents, totalFeesCents, totalRefundsCents);

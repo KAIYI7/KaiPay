@@ -13,7 +13,7 @@ import { PaymentStatusBadge } from '../../components/payment/PaymentStatusBadge'
 import { StateMachineStepper } from '../../components/payment/StateMachineStepper';
 import { CopyButton } from '../../components/common/CopyButton';
 import { Spinner } from '../../components/common/Spinner';
-import { formatCentsToCurrency, formatDate, generateIdempotencyKey, truncateId } from '../../utils/formatters';
+import { formatCentsToCurrency, formatDate, generateIdempotencyKey, parseMyrToSen, truncateId } from '../../utils/formatters';
 import {
   ArrowLeft,
   CreditCard,
@@ -25,7 +25,7 @@ import {
   RotateCw,
   CheckCircle2,
   RotateCcw,
-  DollarSign,
+  Coins,
   X,
   Scale,
   AlertTriangle,
@@ -72,7 +72,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
   const [captureIdempotencyKey, setCaptureIdempotencyKey] = useState('');
   const [refundIdempotencyKey, setRefundIdempotencyKey] = useState('');
-  const [refundAmountDollars, setRefundAmountDollars] = useState('');
+  const [refundAmountMyr, setRefundAmountMyr] = useState('');
   const [refundReason, setRefundReason] = useState('');
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
   const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
@@ -107,8 +107,9 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
   });
 
   // Calculate refund limits
+  const hasMismatchedRefundCurrency = !!payment && refunds.some((r) => r.currency !== payment.currency);
   const totalRefundedCents = refunds
-    .filter((r) => r.status === 'COMPLETED')
+    .filter((r) => r.status === 'COMPLETED' && r.currency === payment?.currency)
     .reduce((sum, r) => sum + r.amountCents, 0);
 
   const remainingRefundableCents = payment
@@ -163,7 +164,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
           refund.currency
         )} successfully processed with status ${refund.status}!`
       );
-      setRefundAmountDollars('');
+      setRefundAmountMyr('');
       setRefundReason('');
     },
     onError: (err: Error) => {
@@ -182,7 +183,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
   // Open Refund Modal Handler
   const handleOpenRefundModal = () => {
     setRefundIdempotencyKey(generateIdempotencyKey());
-    setRefundAmountDollars((remainingRefundableCents / 100).toFixed(2));
+    setRefundAmountMyr((remainingRefundableCents / 100).toFixed(2));
     setRefundReason('');
     setActionErrorMessage(null);
     setIsRefundModalOpen(true);
@@ -196,12 +197,11 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
   // Submit Refund
   const handleConfirmRefund = (e: React.FormEvent) => {
     e.preventDefault();
-    const amountDollars = parseFloat(refundAmountDollars);
-    if (isNaN(amountDollars) || amountDollars <= 0) {
-      setActionErrorMessage('Please enter a valid positive refund amount.');
+    const amountCents = parseMyrToSen(refundAmountMyr);
+    if (amountCents === null) {
+      setActionErrorMessage('Please enter a positive MYR refund amount with at most two decimal places within the safe integer range.');
       return;
     }
-    const amountCents = Math.round(amountDollars * 100);
     if (amountCents > remainingRefundableCents) {
       setActionErrorMessage(
         `Refund amount exceeds remaining refundable amount (${formatCentsToCurrency(
@@ -276,8 +276,8 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
     );
   }
 
-  const canCapture = payment.status === 'AUTHORIZED';
-  const canRefund =
+  const canCapture = payment.currency === 'MYR' && payment.status === 'AUTHORIZED';
+  const canRefund = payment.currency === 'MYR' && !hasMismatchedRefundCurrency &&
     (payment.status === 'CAPTURED' || payment.status === 'PARTIALLY_REFUNDED') &&
     remainingRefundableCents > 0;
 
@@ -312,7 +312,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
               onClick={handleOpenCaptureModal}
               className="gap-2 text-xs font-semibold shadow-lg shadow-emerald-900/30"
             >
-              <DollarSign className="w-4 h-4" />
+              <Coins className="w-4 h-4" />
               Capture Funds
             </Button>
           )}
@@ -338,6 +338,9 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
           )}
         </div>
       </div>
+
+      {payment.currency !== 'MYR' && <p className="text-xs text-amber-300">Historical {payment.currency} record. New captures and refunds support MYR only.</p>}
+      {hasMismatchedRefundCurrency && <p role="alert" className="text-xs text-rose-300">Refund currency mismatch. Financial totals and new refunds are unavailable.</p>}
 
       {/* Success Notification Alert */}
       {actionSuccessMessage && (
@@ -460,13 +463,13 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                 <div>
                   <span className="text-slate-400 font-medium">Refunded Total:</span>
                   <span className="text-purple-300 font-mono font-bold ml-2">
-                    {formatCentsToCurrency(totalRefundedCents, payment.currency)}
+                    {hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(totalRefundedCents, payment.currency)}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-400 font-medium">Remaining:</span>
                   <span className="text-emerald-400 font-mono font-bold ml-2">
-                    {formatCentsToCurrency(remainingRefundableCents, payment.currency)}
+                    {hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(remainingRefundableCents, payment.currency)}
                   </span>
                 </div>
               </div>
@@ -616,14 +619,14 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                 <span className="text-slate-400">
                   Total Settled Refund Amount:{' '}
                   <strong className="text-purple-300 font-mono">
-                    {formatCentsToCurrency(totalRefundedCents, payment.currency)}
+                    {hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(totalRefundedCents, payment.currency)}
                   </strong>
                 </span>
               </div>
               <div className="text-slate-400">
                 Remaining Refundable:{' '}
                 <strong className="text-emerald-400 font-mono">
-                  {formatCentsToCurrency(remainingRefundableCents, payment.currency)}
+                  {hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(remainingRefundableCents, payment.currency)}
                 </strong>
               </div>
             </div>
@@ -649,7 +652,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                  <DollarSign className="w-5 h-5" />
+                  <Coins className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-100">Capture Payment Funds</h3>
@@ -780,13 +783,13 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                   <div className="flex justify-between">
                     <span className="text-slate-500">Already Refunded:</span>
                     <span className="text-purple-400">
-                      {formatCentsToCurrency(totalRefundedCents, payment.currency)}
+                      {hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(totalRefundedCents, payment.currency)}
                     </span>
                   </div>
                   <div className="flex justify-between border-t border-slate-800 pt-1.5 font-bold">
                     <span className="text-slate-400">Max Refundable:</span>
                     <span className="text-emerald-400">
-                      {formatCentsToCurrency(remainingRefundableCents, payment.currency)}
+                      {hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(remainingRefundableCents, payment.currency)}
                     </span>
                   </div>
                 </div>
@@ -798,10 +801,10 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                     </label>
                     <button
                       type="button"
-                      onClick={() => setRefundAmountDollars((remainingRefundableCents / 100).toFixed(2))}
+                      onClick={() => setRefundAmountMyr((remainingRefundableCents / 100).toFixed(2))}
                       className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold"
                     >
-                      Full Remaining ({formatCentsToCurrency(remainingRefundableCents, payment.currency)})
+                      Full Remaining ({hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(remainingRefundableCents, payment.currency)})
                     </button>
                   </div>
                   <Input
@@ -809,8 +812,8 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                     step="0.01"
                     min="0.01"
                     max={(remainingRefundableCents / 100).toFixed(2)}
-                    value={refundAmountDollars}
-                    onChange={(e) => setRefundAmountDollars(e.target.value)}
+                    value={refundAmountMyr}
+                    onChange={(e) => setRefundAmountMyr(e.target.value)}
                     placeholder="0.00"
                     required
                     className="font-mono text-sm"

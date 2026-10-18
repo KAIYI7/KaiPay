@@ -229,7 +229,7 @@ class CorrelationPropagationIntegrationTest extends AbstractPostgresIntegrationT
 
     private Creation createPayment(long amount, String supplied) throws Exception {
         CreatePaymentRequest request = CreatePaymentRequest.builder().customerId(customer.getId())
-                .amountCents(amount).currency("USD").build();
+                .amountCents(amount).currency("MYR").build();
         ResponseEntity<String> response = http.exchange("/v1/payments", HttpMethod.POST,
                 new HttpEntity<>(request, headers(supplied)), String.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);

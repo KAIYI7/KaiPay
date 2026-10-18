@@ -89,21 +89,21 @@ class PaymentHeadOfLinePartitionIntegrationTest extends AbstractPostgresIntegrat
     @Test
     @DisplayName("Poison pill in partition 0 does not block subsequent valid payment processing in the same partition")
     void testPartitionNonBlockingProgress_PoisonPillDoesNotBlockQueue() throws Exception {
-        // 1. Create Payment A ($50.00 / 5000 cents) -> status CREATED
+        // 1. Create Payment A (RM50.00 / 5000 cents) -> status CREATED
         CreatePaymentRequest requestA = CreatePaymentRequest.builder()
                 .customerId(testCustomer.getId())
                 .amountCents(5000L)
-                .currency("USD")
+                .currency("MYR")
                 .build();
         PaymentResponse responseA = paymentService.createPayment(testMerchant.getId(), "idemp-hol-a-" + UUID.randomUUID(), requestA);
         Payment paymentA = paymentRepository.findById(responseA.getId()).orElseThrow();
         assertThat(paymentA.getStatus()).isEqualTo(PaymentStatus.CREATED);
 
-        // 2. Create Payment C ($60.00 / 6000 cents) -> status CREATED
+        // 2. Create Payment C (RM60.00 / 6000 cents) -> status CREATED
         CreatePaymentRequest requestC = CreatePaymentRequest.builder()
                 .customerId(testCustomer.getId())
                 .amountCents(6000L)
-                .currency("USD")
+                .currency("MYR")
                 .build();
         PaymentResponse responseC = paymentService.createPayment(testMerchant.getId(), "idemp-hol-c-" + UUID.randomUUID(), requestC);
         Payment paymentC = paymentRepository.findById(responseC.getId()).orElseThrow();

@@ -220,7 +220,7 @@ class DemoSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
     }
     @Test void guessedForeignPaymentAndRefundIdsDoNotReachFinancialWork() {
         Payment foreign = payments.save(Payment.builder().merchant(merchantB).customer(customerB)
-                .amountCents(10000L).currency("USD").status(PaymentStatus.CAPTURED).idempotencyKey(UUID.randomUUID().toString()).build());
+                .amountCents(10000L).currency("MYR").status(PaymentStatus.CAPTURED).idempotencyKey(UUID.randomUUID().toString()).build());
         var browser = security().login(accountA);
         var headers = merchantHeaders(browser, merchantA);
         for (String path : List.of("/v1/payments/" + foreign.getId(), "/v1/payments/" + foreign.getId() + "/refunds")) {
@@ -388,7 +388,7 @@ class DemoSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         return jdbc.queryForObject("SELECT count(*) FROM payments WHERE merchant_id IN (?,?)", Long.class, merchantA.getId(), merchantB.getId());
     }
     private Map<String, Object> paymentBody(Customer customer) {
-        return Map.of("amountCents", 10000L, "currency", "USD", "customerId", customer.getId());
+        return Map.of("amountCents", 10000L, "currency", "MYR", "customerId", customer.getId());
     }
     private HttpHeaders merchantHeaders(SecurityHttpFixtures.Browser browser, Merchant merchant) {
         var headers = browser.headers();

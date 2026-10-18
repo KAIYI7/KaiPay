@@ -69,7 +69,7 @@ class PaymentAuthorizationTransactionIntegrationTest extends AbstractPostgresInt
                 .merchant(merchant)
                 .customer(customer)
                 .amountCents(5000L)
-                .currency("USD")
+                .currency("MYR")
                 .status(PaymentStatus.CREATED)
                 .idempotencyKey("authorization-tx-" + UUID.randomUUID())
                 .build());
@@ -178,7 +178,7 @@ class PaymentAuthorizationTransactionIntegrationTest extends AbstractPostgresInt
         return AuthorizationDelivery.fromJson(mapper.valueToTree(Map.of("eventId", eventId,
                 "eventType", EVENT_TYPE, "merchantId", merchant.getId(),
                 "payload", Map.of("paymentId", processingPayment.getId(), "merchantId", merchant.getId(),
-                        "amountCents", processingPayment.getAmountCents(), "currency", "USD"))));
+                        "amountCents", processingPayment.getAmountCents(), "currency", "MYR"))));
     }
 
     private Payment reload(UUID paymentId) {

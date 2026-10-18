@@ -147,7 +147,7 @@ export const DashboardPage: React.FC = () => {
         {/* 1. Available Payout Balance */}
         <Card className="relative overflow-hidden border-emerald-500/30 bg-gradient-to-b from-emerald-950/25 via-slate-800/90 to-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Available Payout Balance</span>
+            <span>Available Payout Balance (MYR only)</span>
             <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
               <Wallet className="w-4 h-4" />
             </div>
@@ -163,7 +163,7 @@ export const DashboardPage: React.FC = () => {
           ) : (
             <div className="mt-2">
               <div className="text-2xl font-bold font-mono text-emerald-400 tracking-tight">
-                {formatCentsToCurrency(balance?.availableBalanceCents ?? 0, balance?.currency || 'USD')}
+                {formatCentsToCurrency(balance?.availableBalanceCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Net merchant settlement funds available for payout
@@ -175,7 +175,7 @@ export const DashboardPage: React.FC = () => {
         {/* 2. Gross Volume */}
         <Card className="relative overflow-hidden border-slate-700/80 bg-gradient-to-b from-sky-950/20 via-slate-800/90 to-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Gross Volume</span>
+            <span>Gross Volume (MYR only)</span>
             <div className="p-2 rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/30">
               <TrendingUp className="w-4 h-4" />
             </div>
@@ -191,7 +191,7 @@ export const DashboardPage: React.FC = () => {
           ) : (
             <div className="mt-2">
               <div className="text-2xl font-bold font-mono text-slate-100 tracking-tight">
-                {formatCentsToCurrency(balance?.totalVolumeCents ?? 0, balance?.currency || 'USD')}
+                {formatCentsToCurrency(balance?.totalVolumeCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Total gross payment volume successfully captured
@@ -203,7 +203,7 @@ export const DashboardPage: React.FC = () => {
         {/* 3. Platform Fees */}
         <Card className="relative overflow-hidden border-slate-700/80 bg-gradient-to-b from-indigo-950/20 via-slate-800/90 to-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Platform Fees</span>
+            <span>Platform Fees (MYR only)</span>
             <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
               <Receipt className="w-4 h-4" />
             </div>
@@ -219,7 +219,7 @@ export const DashboardPage: React.FC = () => {
           ) : (
             <div className="mt-2">
               <div className="text-2xl font-bold font-mono text-slate-200 tracking-tight">
-                {formatCentsToCurrency(balance?.totalFeesCents ?? 0, balance?.currency || 'USD')}
+                {formatCentsToCurrency(balance?.totalFeesCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Automated platform revenue cut (Account 4000)
@@ -231,7 +231,7 @@ export const DashboardPage: React.FC = () => {
         {/* 4. Total Refunds */}
         <Card className="relative overflow-hidden border-slate-700/80 bg-gradient-to-b from-purple-950/20 via-slate-800/90 to-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Total Refunds</span>
+            <span>Total Refunds (MYR only)</span>
             <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30">
               <RotateCcw className="w-4 h-4" />
             </div>
@@ -247,7 +247,7 @@ export const DashboardPage: React.FC = () => {
           ) : (
             <div className="mt-2">
               <div className="text-2xl font-bold font-mono text-purple-300 tracking-tight">
-                {formatCentsToCurrency(balance?.totalRefundsCents ?? 0, balance?.currency || 'USD')}
+                {formatCentsToCurrency(balance?.totalRefundsCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Reversed customer volume debited from payable

@@ -90,7 +90,7 @@ class PaymentServiceUnitTest {
                     .merchant(merchant)
                     .customer(customer)
                     .amountCents(10000L)
-                    .currency("USD")
+                    .currency("MYR")
                     .status(PaymentStatus.AUTHORIZED)
                     .idempotencyKey("idem-123")
                     .build();
@@ -130,7 +130,7 @@ class PaymentServiceUnitTest {
                     .merchant(merchant)
                     .customer(customer)
                     .amountCents(10000L)
-                    .currency("USD")
+                    .currency("MYR")
                     .status(PaymentStatus.CAPTURED)
                     .idempotencyKey("idem-123")
                     .build();
@@ -153,7 +153,7 @@ class PaymentServiceUnitTest {
             Payment payment = Payment.builder()
                     .id(paymentId)
                     .amountCents(10000L)
-                    .currency("USD")
+                    .currency("MYR")
                     .status(PaymentStatus.CREATED)
                     .idempotencyKey("idem-123")
                     .build();

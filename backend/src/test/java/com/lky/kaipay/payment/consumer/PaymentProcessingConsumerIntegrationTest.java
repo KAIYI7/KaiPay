@@ -95,8 +95,8 @@ class PaymentProcessingConsumerIntegrationTest extends AbstractPostgresIntegrati
                 Payment.builder()
                         .merchant(testMerchant)
                         .customer(testCustomer)
-                        .amountCents(5000L) // $50.00
-                        .currency("USD")
+                        .amountCents(5000L) // RM50.00
+                        .currency("MYR")
                         .status(PaymentStatus.CREATED)
                         .idempotencyKey("key-" + UUID.randomUUID())
                         .build()
@@ -139,8 +139,8 @@ class PaymentProcessingConsumerIntegrationTest extends AbstractPostgresIntegrati
                 Payment.builder()
                         .merchant(testMerchant)
                         .customer(testCustomer)
-                        .amountCents(999900L) // $9999.00 -> triggers decline in MockBankAcquirerClient
-                        .currency("USD")
+                        .amountCents(999900L) // RM9999.00 -> triggers decline in MockBankAcquirerClient
+                        .currency("MYR")
                         .status(PaymentStatus.CREATED)
                         .idempotencyKey("key-" + UUID.randomUUID())
                         .build()
@@ -184,7 +184,7 @@ class PaymentProcessingConsumerIntegrationTest extends AbstractPostgresIntegrati
                         .merchant(testMerchant)
                         .customer(testCustomer)
                         .amountCents(7500L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CREATED)
                         .idempotencyKey("key-" + UUID.randomUUID())
                         .build()
@@ -236,7 +236,7 @@ class PaymentProcessingConsumerIntegrationTest extends AbstractPostgresIntegrati
                         .merchant(testMerchant)
                         .customer(testCustomer)
                         .amountCents(5000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.PROCESSING)
                         .idempotencyKey("dlt-key-" + UUID.randomUUID())
                         .build()

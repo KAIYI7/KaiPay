@@ -250,11 +250,11 @@ class PaymentConsumerCorrelationUnitTest {
     private ConsumerRecord<String, String> initiated() {
         return new ConsumerRecord<>("requests", 0, 1, "key",
                 "{\"eventId\":\"" + UUID.randomUUID() + "\",\"payload\":{\"paymentId\":\"" + UUID.randomUUID()
-                        + "\",\"amountCents\":100,\"currency\":\"USD\"}}");
+                        + "\",\"amountCents\":100,\"currency\":\"MYR\"}}");
     }
 
     private AuthorizationRequest request(ConsumerRecord<String, String> record) {
-        return new AuthorizationRequest(UUID.randomUUID(), UUID.randomUUID(), 100, "USD");
+        return new AuthorizationRequest(UUID.randomUUID(), UUID.randomUUID(), 100, "MYR");
     }
 
     private void addHeader(ConsumerRecord<String, String> record, String id) {

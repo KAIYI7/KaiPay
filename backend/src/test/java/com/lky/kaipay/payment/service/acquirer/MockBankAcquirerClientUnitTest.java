@@ -11,10 +11,10 @@ import static org.mockito.Mockito.*;
 class MockBankAcquirerClientUnitTest {
     @Test void rejectsInvalidCanonicalRequests() {
         UUID payment = UUID.randomUUID(), merchant = UUID.randomUUID();
-        assertThatThrownBy(() -> new AuthorizationRequest(payment, merchant, 0, "USD")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AuthorizationRequest(payment, merchant, 0, "MYR")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new AuthorizationRequest(payment, merchant, 1, "usd")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new AuthorizationRequest(null, merchant, 1, "USD")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new AuthorizationRequest(payment, null, 1, "USD")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AuthorizationRequest(null, merchant, 1, "MYR")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new AuthorizationRequest(payment, null, 1, "MYR")).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test void immutableOutcomeAndRequestSurviveEquivalentReplay() {
@@ -27,9 +27,9 @@ class MockBankAcquirerClientUnitTest {
         assertThat(operation.getRequest()).isEqualTo(request);
         assertThat(operation.getResult()).isEqualTo(result);
         assertThat(operation.getEvaluationCount()).isEqualTo(1);
-        assertThatThrownBy(() -> operation.validateRequest(new AuthorizationRequest(request.paymentId(), UUID.randomUUID(), 5000, "USD")))
+        assertThatThrownBy(() -> operation.validateRequest(new AuthorizationRequest(request.paymentId(), UUID.randomUUID(), 5000, "MYR")))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> operation.validateRequest(new AuthorizationRequest(request.paymentId(), request.merchantId(), 5001, "USD")))
+        assertThatThrownBy(() -> operation.validateRequest(new AuthorizationRequest(request.paymentId(), request.merchantId(), 5001, "MYR")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> operation.validateRequest(new AuthorizationRequest(request.paymentId(), request.merchantId(), 5000, "EUR")))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -87,6 +87,6 @@ class MockBankAcquirerClientUnitTest {
     }
 
     private AuthorizationRequest request(long amount) {
-        return new AuthorizationRequest(UUID.randomUUID(), UUID.randomUUID(), amount, "USD");
+        return new AuthorizationRequest(UUID.randomUUID(), UUID.randomUUID(), amount, "MYR");
     }
 }

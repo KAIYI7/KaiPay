@@ -27,8 +27,9 @@ public class JournalResponse {
     private UUID eventId;
     private String description;
     private Instant postedAt;
-    private long totalDebitCents;
-    private long totalCreditCents;
+    private String currency;
+    private Long totalDebitCents;
+    private Long totalCreditCents;
     private List<LedgerEntryResponse> entries;
 
     public static JournalResponse fromEntity(Journal journal) {
@@ -38,6 +39,12 @@ public class JournalResponse {
         List<LedgerEntryResponse> entryResponses = journal.getEntries() != null
                 ? journal.getEntries().stream().map(LedgerEntryResponse::fromEntity).toList()
                 : List.of();
+
+        // Keep historical rows readable, but do not sum unlike units or mismatched accounts.
+        String currency = entryResponses.isEmpty() ? null : entryResponses.getFirst().getCurrency();
+        boolean coherent = currency != null && journal.getEntries().stream().allMatch(e ->
+                currency.equals(e.getCurrency()) && e.getAccount() != null
+                        && currency.equals(e.getAccount().getCurrency()));
 
         long totalDebitCents = entryResponses.stream()
                 .filter(e -> e.getEntryType() == EntryType.DEBIT)
@@ -57,8 +64,9 @@ public class JournalResponse {
                 .eventId(journal.getEventId())
                 .description(journal.getDescription())
                 .postedAt(journal.getPostedAt())
-                .totalDebitCents(totalDebitCents)
-                .totalCreditCents(totalCreditCents)
+                .currency(coherent ? currency : null)
+                .totalDebitCents(coherent ? totalDebitCents : null)
+                .totalCreditCents(coherent ? totalCreditCents : null)
                 .entries(entryResponses)
                 .build();
     }

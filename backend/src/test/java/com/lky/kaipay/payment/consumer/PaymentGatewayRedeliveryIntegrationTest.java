@@ -81,7 +81,7 @@ class PaymentGatewayRedeliveryIntegrationTest extends AbstractPostgresIntegratio
     void testGatewayCrashAndKafkaRedeliveryMaintainsIdempotency() throws Exception {
         // Set up test payment via paymentRepository.save -> status is CREATED
         long amountCents = 5000L;
-        String currency = "USD";
+        String currency = "MYR";
         String idempotencyKey = "crash-key-" + UUID.randomUUID();
 
         Payment createdPayment = paymentRepository.save(

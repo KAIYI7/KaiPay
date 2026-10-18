@@ -44,6 +44,9 @@ public class AuthorizationRecoveryService {
         }
         if (payment.getStatus() == PaymentStatus.PROCESSING) {
             require(operation != null && marker == null, "Ambiguous legacy authorization");
+            if (!com.lky.kaipay.common.MoneyCurrency.MYR.equals(payment.getCurrency())) {
+                require(operation.result() != null, "Unresolved historical non-MYR authorization");
+            }
             return Optional.of(request);
         }
 

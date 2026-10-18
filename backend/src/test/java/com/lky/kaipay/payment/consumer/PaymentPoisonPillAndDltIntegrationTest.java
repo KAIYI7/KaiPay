@@ -90,8 +90,8 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
     @Test
     @DisplayName("Persistent timeout exhausts retries (3 attempts), preserves PROCESSING and routes to DLT")
     void testRetryExhaustion_PaymentRemainsProcessingAndRoutesToDlt() throws Exception {
-        long amountCents = 777700L; // $7,777.00 - persistent timeout
-        String currency = "USD";
+        long amountCents = 777700L; // RM7,777.00 - persistent timeout
+        String currency = "MYR";
         String idempotencyKey = "dlt-exhaustion-" + UUID.randomUUID();
 
         CreatePaymentRequest createPaymentRequest = CreatePaymentRequest.builder()
@@ -163,8 +163,8 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
     @Test
     @DisplayName("Durable definitive no-acceptance finalizes FAILED and marker before direct DLT")
     void testPoisonPill_ResolvableIdentity_FatalError_MarksPaymentFailedAndRoutesToDlt() throws Exception {
-        long amountCents = 666600L; // $6,666.00 - non-retryable fatal error
-        String currency = "USD";
+        long amountCents = 666600L; // RM6,666.00 - non-retryable fatal error
+        String currency = "MYR";
         String idempotencyKey = "fatal-error-" + UUID.randomUUID();
 
         CreatePaymentRequest createPaymentRequest = CreatePaymentRequest.builder()

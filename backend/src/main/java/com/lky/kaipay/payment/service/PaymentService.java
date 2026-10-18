@@ -57,6 +57,9 @@ public class PaymentService {
             return existingResponse.get();
         }
 
+        // Exact historical replays return retained evidence without creating new activity.
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(request.getCurrency());
+
         // 2. Validate Merchant
         Merchant merchant = merchantRepository.findById(merchantId)
                 .orElseThrow(() -> new EntityNotFoundException("Merchant not found with ID: " + merchantId));
@@ -191,6 +194,7 @@ public class PaymentService {
             throw new InvalidRequestException("Cannot capture payment in status " + payment.getStatus());
         }
 
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(payment.getCurrency());
         payment.transitionTo(PaymentStatus.CAPTURED);
         Payment savedPayment = paymentRepository.save(payment);
         log.info("Captured payment {} for merchant {}", paymentId, merchantId);

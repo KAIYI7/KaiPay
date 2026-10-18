@@ -49,7 +49,7 @@ class OutboxEventPublisherIntegrationTest extends AbstractPostgresIntegrationTes
     @DisplayName("publishPendingEvents should publish PENDING outbox events to Kafka and mark them PUBLISHED in DB")
     void testPublishPendingEvents_Success() {
         String aggregateId = "pay-" + UUID.randomUUID();
-        String payload = "{\"paymentId\":\"" + aggregateId + "\",\"amountCents\":15000,\"currency\":\"USD\"}";
+        String payload = "{\"paymentId\":\"" + aggregateId + "\",\"amountCents\":15000,\"currency\":\"MYR\"}";
 
         PaymentEventOutbox outbox = PaymentEventOutbox.builder()
                 .aggregateType("PAYMENT")

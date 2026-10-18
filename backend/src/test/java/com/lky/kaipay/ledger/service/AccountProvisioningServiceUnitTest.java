@@ -57,7 +57,7 @@ class AccountProvisioningServiceUnitTest {
                 .accountNumber(AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC)
                 .accountName("Customer Funds Receivable")
                 .accountType(AccountType.ASSET)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         when(accountRepository.findByAccountNumber(AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC))
@@ -67,7 +67,7 @@ class AccountProvisioningServiceUnitTest {
                 AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC,
                 "Customer Funds Receivable",
                 AccountType.ASSET,
-                "USD"
+                "MYR"
         );
 
         assertThat(result).isSameAs(existing);
@@ -85,13 +85,13 @@ class AccountProvisioningServiceUnitTest {
                 AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC,
                 "Customer Funds Receivable",
                 AccountType.ASSET,
-                "USD"
+                "MYR"
         );
 
         assertThat(result.getAccountNumber()).isEqualTo(AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC);
         assertThat(result.getAccountName()).isEqualTo("Customer Funds Receivable");
         assertThat(result.getAccountType()).isEqualTo(AccountType.ASSET);
-        assertThat(result.getCurrency()).isEqualTo("USD");
+        assertThat(result.getCurrency()).isEqualTo("MYR");
         assertThat(result.getMerchant()).isNull();
         verify(accountRepository).save(any(Account.class));
     }
@@ -105,13 +105,13 @@ class AccountProvisioningServiceUnitTest {
                 .accountNumber("2000-MERCHANT-" + merchant.getId() + "-LIABILITY")
                 .accountName("Test Merchant LIABILITY Account")
                 .accountType(AccountType.LIABILITY)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         when(accountRepository.findByMerchantIdAndAccountType(merchant.getId(), AccountType.LIABILITY))
                 .thenReturn(Optional.of(existing));
 
-        Account result = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD");
+        Account result = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "MYR");
 
         assertThat(result).isSameAs(existing);
         verify(accountRepository, never()).save(any());
@@ -125,12 +125,12 @@ class AccountProvisioningServiceUnitTest {
         when(merchantRepository.findById(merchant.getId())).thenReturn(Optional.of(merchant));
         when(accountRepository.save(any(Account.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        Account result = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD");
+        Account result = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "MYR");
 
         assertThat(result.getAccountNumber()).isEqualTo("2000-MERCHANT-" + merchant.getId() + "-LIABILITY");
         assertThat(result.getAccountName()).isEqualTo("Test Merchant LIABILITY Account");
         assertThat(result.getAccountType()).isEqualTo(AccountType.LIABILITY);
-        assertThat(result.getCurrency()).isEqualTo("USD");
+        assertThat(result.getCurrency()).isEqualTo("MYR");
         assertThat(result.getMerchant()).isEqualTo(merchant);
         verify(accountRepository).save(any(Account.class));
     }
@@ -138,7 +138,7 @@ class AccountProvisioningServiceUnitTest {
     @Test
     @DisplayName("Should throw IllegalArgumentException when merchant is null")
     void shouldThrowExceptionWhenMerchantIsNull() {
-        assertThatThrownBy(() -> accountProvisioningService.getOrCreateMerchantAccount(null, AccountType.LIABILITY, "USD"))
+        assertThatThrownBy(() -> accountProvisioningService.getOrCreateMerchantAccount(null, AccountType.LIABILITY, "MYR"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Merchant cannot be null");
     }

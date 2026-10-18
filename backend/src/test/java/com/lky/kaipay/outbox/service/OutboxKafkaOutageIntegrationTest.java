@@ -101,8 +101,8 @@ class OutboxKafkaOutageIntegrationTest extends AbstractPostgresIntegrationTest {
         // 1. Set up active test merchant and customer (done in setUp)
         String idempotencyKey = "key-outage-001";
         CreatePaymentRequest createPaymentRequest = CreatePaymentRequest.builder()
-                .amountCents(25000L) // $250.00
-                .currency("USD")
+                .amountCents(25000L) // RM250.00
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .metadata(Map.of("orderId", "ORD-OUTAGE-001"))
                 .build();
@@ -116,7 +116,7 @@ class OutboxKafkaOutageIntegrationTest extends AbstractPostgresIntegrationTest {
         assertThat(paymentResponse.getMerchantId()).isEqualTo(testMerchant.getId());
         assertThat(paymentResponse.getCustomerId()).isEqualTo(testCustomer.getId());
         assertThat(paymentResponse.getAmountCents()).isEqualTo(25000L);
-        assertThat(paymentResponse.getCurrency()).isEqualTo("USD");
+        assertThat(paymentResponse.getCurrency()).isEqualTo("MYR");
         assertThat(paymentResponse.getStatus()).isEqualTo(PaymentStatus.CREATED);
         assertThat(paymentResponse.getIdempotencyKey()).isEqualTo(idempotencyKey);
 
@@ -124,7 +124,7 @@ class OutboxKafkaOutageIntegrationTest extends AbstractPostgresIntegrationTest {
         Payment savedPayment = paymentRepository.findById(paymentResponse.getId()).orElseThrow();
         assertThat(savedPayment.getStatus()).isEqualTo(PaymentStatus.CREATED);
         assertThat(savedPayment.getAmountCents()).isEqualTo(25000L);
-        assertThat(savedPayment.getCurrency()).isEqualTo("USD");
+        assertThat(savedPayment.getCurrency()).isEqualTo("MYR");
         assertThat(savedPayment.getMerchant().getId()).isEqualTo(testMerchant.getId());
         assertThat(savedPayment.getCustomer().getId()).isEqualTo(testCustomer.getId());
         assertThat(savedPayment.getIdempotencyKey()).isEqualTo(idempotencyKey);

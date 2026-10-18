@@ -11,9 +11,10 @@ import { Badge } from '../../components/common/Badge';
 import { CopyButton } from '../../components/common/CopyButton';
 import { Spinner } from '../../components/common/Spinner';
 import { formatCentsToCurrency, formatDate, truncateId } from '../../utils/formatters';
+import { formatJournalTotal, isJournalBalanced } from '../../utils/ledger';
 import {
   BookOpen,
-  DollarSign,
+  Coins,
   TrendingUp,
   Receipt,
   RotateCcw,
@@ -103,7 +104,7 @@ const LedgerExplorer: React.FC = () => {
       case 'SETTLEMENT':
         return (
           <Badge variant="info" className="font-mono text-[11px]">
-            <DollarSign className="w-3 h-3" />
+            <Coins className="w-3 h-3" />
             SETTLEMENT
           </Badge>
         );
@@ -232,9 +233,9 @@ const LedgerExplorer: React.FC = () => {
         {/* Available Payout Balance */}
         <Card className="relative overflow-hidden border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Available Payout Balance</span>
+            <span>Available Payout Balance (MYR only)</span>
             <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400">
-              <DollarSign className="w-4 h-4" />
+              <Coins className="w-4 h-4" />
             </div>
           </div>
           {isBalanceLoading ? (
@@ -246,7 +247,7 @@ const LedgerExplorer: React.FC = () => {
           ) : (
             <div className="mt-2">
               <div className="text-2xl font-bold font-mono text-emerald-400">
-                {formatCentsToCurrency(balance?.availableBalanceCents ?? 0, balance?.currency || 'USD')}
+                {formatCentsToCurrency(balance?.availableBalanceCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Net merchant settlement funds available for payout
@@ -258,7 +259,7 @@ const LedgerExplorer: React.FC = () => {
         {/* Total Processed Volume */}
         <Card className="relative overflow-hidden border-slate-700/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Total Captured Volume</span>
+            <span>Total Captured Volume (MYR only)</span>
             <div className="p-2 rounded-lg bg-sky-500/20 text-sky-400">
               <TrendingUp className="w-4 h-4" />
             </div>
@@ -272,7 +273,7 @@ const LedgerExplorer: React.FC = () => {
           ) : (
             <div className="mt-2">
               <div className="text-2xl font-bold font-mono text-slate-100">
-                {formatCentsToCurrency(balance?.totalVolumeCents ?? 0, balance?.currency || 'USD')}
+                {formatCentsToCurrency(balance?.totalVolumeCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Gross payment volume successfully captured
@@ -284,7 +285,7 @@ const LedgerExplorer: React.FC = () => {
         {/* Platform Processing Fees */}
         <Card className="relative overflow-hidden border-slate-700/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Platform Processing Fees</span>
+            <span>Platform Processing Fees (MYR only)</span>
             <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400">
               <Receipt className="w-4 h-4" />
             </div>
@@ -298,7 +299,7 @@ const LedgerExplorer: React.FC = () => {
           ) : (
             <div className="mt-2">
               <div className="text-2xl font-bold font-mono text-slate-200">
-                {formatCentsToCurrency(balance?.totalFeesCents ?? 0, balance?.currency || 'USD')}
+                {formatCentsToCurrency(balance?.totalFeesCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Platform revenue deducted (Account 4000)
@@ -310,7 +311,7 @@ const LedgerExplorer: React.FC = () => {
         {/* Total Refunds */}
         <Card className="relative overflow-hidden border-slate-700/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Total Refunds Settled</span>
+            <span>Total Refunds Settled (MYR only)</span>
             <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400">
               <RotateCcw className="w-4 h-4" />
             </div>
@@ -324,7 +325,7 @@ const LedgerExplorer: React.FC = () => {
           ) : (
             <div className="mt-2">
               <div className="text-2xl font-bold font-mono text-purple-300">
-                {formatCentsToCurrency(balance?.totalRefundsCents ?? 0, balance?.currency || 'USD')}
+                {formatCentsToCurrency(balance?.totalRefundsCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
                 Reversed volume debiting merchant payable
@@ -395,7 +396,7 @@ const LedgerExplorer: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-700/40 font-mono">
                 {journals.map((journal) => {
-                  const isBalanced = journal.totalDebitCents === journal.totalCreditCents;
+                  const isBalanced = isJournalBalanced(journal);
                   return (
                     <tr
                       key={journal.id}
@@ -428,10 +429,10 @@ const LedgerExplorer: React.FC = () => {
                         {journal.description}
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold text-sky-400">
-                        {formatCentsToCurrency(journal.totalDebitCents)}
+                        {formatJournalTotal(journal, journal.totalDebitCents)}
                       </td>
                       <td className="px-4 py-3 text-right font-mono font-semibold text-emerald-400">
-                        {formatCentsToCurrency(journal.totalCreditCents)}
+                        {formatJournalTotal(journal, journal.totalCreditCents)}
                       </td>
                       <td className="px-4 py-3 text-center font-sans">
                         {isBalanced ? (
@@ -632,10 +633,10 @@ const LedgerExplorer: React.FC = () => {
                           Total Balancing Sums
                         </td>
                         <td className="px-3.5 py-3 text-right text-sky-400">
-                          {formatCentsToCurrency(selectedJournal.totalDebitCents)}
+                          {formatJournalTotal(selectedJournal, selectedJournal.totalDebitCents)}
                         </td>
                         <td className="px-3.5 py-3 text-right text-emerald-400">
-                          {formatCentsToCurrency(selectedJournal.totalCreditCents)}
+                          {formatJournalTotal(selectedJournal, selectedJournal.totalCreditCents)}
                         </td>
                       </tr>
                     </tfoot>
@@ -648,11 +649,11 @@ const LedgerExplorer: React.FC = () => {
                 <div className="flex items-center gap-2.5">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span>
-                    <strong>Double-Entry Invariant Satisfied:</strong> Total Debits equal Total Credits (Net Difference: $0.00).
+                    {isJournalBalanced(selectedJournal) ? <><strong>Double-Entry Invariant Satisfied:</strong> Total Debits equal Total Credits (Net Difference: {formatJournalTotal(selectedJournal, 0)}).</> : <strong>Journal invariant unavailable or violated. Inspect entry currencies and amounts.</strong>}
                   </span>
                 </div>
-                <Badge variant="success" className="font-mono text-[10px]">
-                  Balanced
+                <Badge variant={isJournalBalanced(selectedJournal) ? 'success' : 'danger'} className="font-mono text-[10px]">
+                  {isJournalBalanced(selectedJournal) ? 'Balanced' : 'Check journal'}
                 </Badge>
               </div>
             </div>

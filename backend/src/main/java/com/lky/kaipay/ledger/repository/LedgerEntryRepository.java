@@ -14,9 +14,12 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, UUID> 
 
     List<LedgerEntry> findByJournalId(UUID journalId);
 
-    @Query("SELECT COALESCE(SUM(CASE WHEN e.entryType = 'CREDIT' THEN e.amountCents ELSE -e.amountCents END), 0L) FROM LedgerEntry e WHERE e.account.id = :accountId")
+    @Query("SELECT COALESCE(SUM(CASE WHEN e.entryType = 'CREDIT' THEN e.amountCents ELSE -e.amountCents END), 0L) FROM LedgerEntry e WHERE e.account.id = :accountId AND e.currency = e.account.currency")
     Long calculateAccountBalance(@Param("accountId") UUID accountId);
 
-    @Query("SELECT COALESCE(SUM(CASE WHEN e.entryType = 'CREDIT' THEN e.amountCents ELSE -e.amountCents END), 0L) FROM LedgerEntry e WHERE e.journal.merchant.id = :merchantId AND e.account.accountType = com.lky.kaipay.ledger.domain.AccountType.REVENUE")
+    @Query("SELECT COUNT(e) > 0 FROM LedgerEntry e WHERE e.account.id = :accountId AND e.currency <> e.account.currency")
+    boolean hasConflictingAccountCurrency(@Param("accountId") UUID accountId);
+
+    @Query("SELECT COALESCE(SUM(CASE WHEN e.entryType = 'CREDIT' THEN e.amountCents ELSE -e.amountCents END), 0L) FROM LedgerEntry e WHERE e.journal.merchant.id = :merchantId AND e.currency = 'MYR' AND e.account.currency = 'MYR' AND e.account.accountType = com.lky.kaipay.ledger.domain.AccountType.REVENUE")
     Long calculateMerchantFees(@Param("merchantId") UUID merchantId);
 }

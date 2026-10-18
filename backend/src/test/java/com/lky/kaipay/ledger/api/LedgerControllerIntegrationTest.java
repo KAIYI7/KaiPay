@@ -154,7 +154,7 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
                 assertThat(data.get("totalVolumeCents").asLong()).isZero();
                 assertThat(data.get("totalFeesCents").asLong()).isZero();
                 assertThat(data.get("totalRefundsCents").asLong()).isZero();
-                assertThat(data.get("currency").asText()).isEqualTo("USD");
+                assertThat(data.get("currency").asText()).isEqualTo("MYR");
                 assertThat(accountRepository.count()).isZero();
                 assertThat(journalRepository.count()).isZero();
                 assertThat(ledgerEntryRepository.count()).isZero();
@@ -163,8 +163,8 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    @DisplayName("Both balance routes preserve the existing liability account currency without creating records")
-    void testExistingLiabilityBalance_PreservesCurrency() throws Exception {
+    @DisplayName("Both balance routes project MYR without relabeling a historical liability account")
+    void testExistingLiabilityBalance_ExcludesHistoricalCurrency() throws Exception {
         Account existing = accountRepository.save(Account.builder()
                 .merchant(merchantA)
                 .accountNumber("2000-MERCHANT-" + merchantA.getId() + "-LIABILITY")
@@ -178,9 +178,10 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
             ResponseEntity<String> response = restTemplate.exchange(route, HttpMethod.GET, entity, String.class);
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
             JsonNode data = objectMapper.readTree(response.getBody()).get("data");
-            assertThat(data.get("currency").asText()).isEqualTo("EUR");
+            assertThat(data.get("currency").asText()).isEqualTo("MYR");
             assertThat(data.get("availableBalanceCents").asLong()).isZero();
             assertThat(accountRepository.findAll()).extracting(Account::getId).containsExactly(existing.getId());
+            assertThat(accountRepository.findById(existing.getId()).orElseThrow().getCurrency()).isEqualTo("EUR");
             assertThat(journalRepository.count()).isZero();
             assertThat(ledgerEntryRepository.count()).isZero();
         }
@@ -189,26 +190,26 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("GET /v1/ledger/balance returns projected balances for merchant after payment and refund")
     void testGetLedgerBalance_Success() throws Exception {
-        // 1. Create and capture a payment of $100.00 (10000 cents)
+        // 1. Create and capture a payment of RM100.00 (10000 cents)
         Payment payment = paymentRepository.save(
                 Payment.builder()
                         .merchant(merchantA)
                         .customer(customerA)
                         .amountCents(10000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .idempotencyKey("pay_key_" + UUID.randomUUID())
                         .build()
         );
         ledgerService.recordPaymentCapture(payment, UUID.randomUUID());
 
-        // 2. Create and record a refund of $30.00 (3000 cents)
+        // 2. Create and record a refund of RM30.00 (3000 cents)
         Refund refund = refundRepository.save(
                 Refund.builder()
                         .payment(payment)
                         .merchant(merchantA)
                         .amountCents(3000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(RefundStatus.COMPLETED)
                         .idempotencyKey("ref_key_" + UUID.randomUUID())
                         .build()
@@ -238,7 +239,7 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
         assertThat(data.get("totalVolumeCents").asLong()).isEqualTo(10000L);
         assertThat(data.get("totalFeesCents").asLong()).isEqualTo(233L);
         assertThat(data.get("totalRefundsCents").asLong()).isEqualTo(3000L);
-        assertThat(data.get("currency").asText()).isEqualTo("USD");
+        assertThat(data.get("currency").asText()).isEqualTo("MYR");
     }
 
     @Test
@@ -249,7 +250,7 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(merchantA)
                         .customer(customerA)
                         .amountCents(5000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .idempotencyKey("pay_direct_" + UUID.randomUUID())
                         .build()
@@ -301,7 +302,7 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
                             .merchant(merchantA)
                             .customer(customerA)
                             .amountCents((long) (1000 * (i + 1)))
-                            .currency("USD")
+                            .currency("MYR")
                             .status(PaymentStatus.CAPTURED)
                             .idempotencyKey("jnl_pay_" + i + "_" + UUID.randomUUID())
                             .build()
@@ -334,7 +335,7 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(merchantA)
                         .customer(customerA)
                         .amountCents(2000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .idempotencyKey("pay_a_" + UUID.randomUUID())
                         .build()
@@ -360,7 +361,7 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(merchantA)
                         .customer(customerA)
                         .amountCents(10000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .idempotencyKey("pay_single_" + UUID.randomUUID())
                         .build()
@@ -388,7 +389,7 @@ class LedgerControllerIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(merchantA)
                         .customer(customerA)
                         .amountCents(10000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .idempotencyKey("pay_cross_" + UUID.randomUUID())
                         .build()

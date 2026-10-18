@@ -11,7 +11,7 @@ import { Input } from '../../components/common/Input';
 import { Select } from '../../components/common/Select';
 import { IdempotencyConflictBanner } from '../../components/payment/IdempotencyConflictBanner';
 import { Spinner } from '../../components/common/Spinner';
-import { generateIdempotencyKey } from '../../utils/formatters';
+import { generateIdempotencyKey, parseMyrToSen } from '../../utils/formatters';
 import { FlaskConical, Send, RefreshCw, AlertTriangle, CheckCircle2, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -22,8 +22,8 @@ export const PaymentSandboxPage: React.FC = () => {
   const customers = DEV_MERCHANTS.find((merchant) => merchant.id === activeMerchant.id)?.defaultCustomers || [];
 
   // Form State
-  const [dollars, setDollars] = useState<string>('50.00');
-  const [currency, setCurrency] = useState<string>('USD');
+  const [ringgit, setRinggit] = useState<string>('50.00');
+  const [amountError, setAmountError] = useState<string | undefined>();
   const [customerId, setCustomerId] = useState<string>(
     customers[0]?.id || ''
   );
@@ -36,10 +36,10 @@ export const PaymentSandboxPage: React.FC = () => {
   const [lastError, setLastError] = useState<ApiError | null>(null);
 
   const createPaymentMutation = useMutation({
-    mutationFn: async (params: { key: string; amountCents: number; custId: string; curr: string; order: string }) => {
+    mutationFn: async (params: { key: string; amountCents: number; custId: string; order: string }) => {
       return paymentsApi.createPayment(params.key, {
         amountCents: params.amountCents,
-        currency: params.curr,
+        currency: 'MYR',
         customerId: params.custId,
         metadata: { orderId: params.order },
       }, activeMerchant.id);
@@ -65,45 +65,30 @@ export const PaymentSandboxPage: React.FC = () => {
     },
   });
 
-  const getAmountCents = () => {
-    const num = parseFloat(dollars);
-    if (isNaN(num) || num <= 0) return 1000;
-    return Math.round(num * 100);
+  const submitPayment = (amountDelta = 0) => {
+    const amountCents = parseMyrToSen(ringgit);
+    if (amountCents === null || !Number.isSafeInteger(amountCents + amountDelta)) {
+      setAmountError('Enter a positive MYR amount with at most two decimal places within the safe integer range.');
+      return;
+    }
+    setAmountError(undefined);
+    createPaymentMutation.mutate({
+      key: idempotencyKey,
+      amountCents: amountCents + amountDelta,
+      custId: customerId,
+      order: orderId,
+    });
   };
 
   const handleStandardSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    createPaymentMutation.mutate({
-      key: idempotencyKey,
-      amountCents: getAmountCents(),
-      custId: customerId,
-      curr: currency,
-      order: orderId,
-    });
+    submitPayment();
   };
 
-  // Scenario 1: Test Idempotent Replay (Exact same key & exact same payload)
-  const handleTestIdempotentReplay = () => {
-    createPaymentMutation.mutate({
-      key: idempotencyKey,
-      amountCents: getAmountCents(),
-      custId: customerId,
-      curr: currency,
-      order: orderId,
-    });
-  };
+  const handleTestIdempotentReplay = () => submitPayment();
 
-  // Scenario 2: Test Idempotency Conflict (Same key, but mutate amount to trigger 409 Conflict)
-  const handleTestConflictMismatch = () => {
-    const mutatedAmountCents = getAmountCents() + 2500; // Alter amount by $25.00
-    createPaymentMutation.mutate({
-      key: idempotencyKey,
-      amountCents: mutatedAmountCents,
-      custId: customerId,
-      curr: currency,
-      order: orderId,
-    });
-  };
+  // Same key, with RM25.00 added to demonstrate a payload conflict.
+  const handleTestConflictMismatch = () => submitPayment(2500);
 
   const handleGenerateNewKey = () => {
     setIdempotencyKey(generateIdempotencyKey());
@@ -116,13 +101,6 @@ export const PaymentSandboxPage: React.FC = () => {
     value: c.id,
     label: `${c.name} (${c.email})`,
   }));
-
-  const currencyOptions = [
-    { value: 'USD', label: 'USD - United States Dollar' },
-    { value: 'EUR', label: 'EUR - Euro' },
-    { value: 'GBP', label: 'GBP - British Pound' },
-    { value: 'TWD', label: 'TWD - New Taiwan Dollar' },
-  ];
 
   return (
     <div className="space-y-6">
@@ -148,22 +126,18 @@ export const PaymentSandboxPage: React.FC = () => {
             <form onSubmit={handleStandardSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
-                  label="Amount (Dollars)"
+                  label="Amount (MYR)"
                   type="number"
                   step="0.01"
                   min="0.01"
-                  value={dollars}
-                  onChange={(e) => setDollars(e.target.value)}
-                  helperText={`Backend will store as ${getAmountCents()} cents (BIGINT)`}
+                  value={ringgit}
+                  onChange={(e) => setRinggit(e.target.value)}
+                  error={amountError}
+                  helperText={parseMyrToSen(ringgit) === null ? '100 sen = RM1.00' : `${parseMyrToSen(ringgit)} sen (amountCents)`}
                   required
                 />
 
-                <Select
-                  label="Currency"
-                  options={currencyOptions}
-                  value={currency}
-                  onChange={(e) => setCurrency(e.target.value)}
-                />
+                <Input label="Currency" value="MYR - Malaysian Ringgit" readOnly />
               </div>
 
               {customers.length > 0 ? <Select label="Customer (Tenant Scoped)" options={customerOptions} value={customerId} onChange={(e) => setCustomerId(e.target.value)} helperText="Synthetic seed customer; backend validates merchant ownership" /> :

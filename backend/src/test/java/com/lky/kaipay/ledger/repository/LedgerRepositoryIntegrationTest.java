@@ -79,7 +79,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .accountNumber("ACCT-MERCHANT-" + UUID.randomUUID())
                         .accountName("Merchant Payable Account")
                         .accountType(AccountType.LIABILITY)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
 
@@ -89,7 +89,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .accountNumber("ACCT-SYS-" + UUID.randomUUID())
                         .accountName("System Clearing Account")
                         .accountType(AccountType.ASSET)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
 
@@ -126,7 +126,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .accountNumber(accountNumber)
                         .accountName("Account 1")
                         .accountType(AccountType.LIABILITY)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
 
@@ -137,7 +137,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                             .accountNumber(accountNumber)
                             .accountName("Account 2")
                             .accountType(AccountType.EXPENSE)
-                            .currency("USD")
+                            .currency("MYR")
                             .build()
             );
         }).isInstanceOf(DataIntegrityViolationException.class);
@@ -151,7 +151,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .accountNumber("ACCT-CLEARING-" + UUID.randomUUID())
                         .accountName("Clearing")
                         .accountType(AccountType.ASSET)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
 
@@ -161,7 +161,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .accountNumber("ACCT-PAYABLE-" + UUID.randomUUID())
                         .accountName("Payable")
                         .accountType(AccountType.LIABILITY)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
 
@@ -182,7 +182,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                 .account(clearingAccount)
                 .entryType(EntryType.DEBIT)
                 .amountCents(10000L)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         LedgerEntry creditEntry = LedgerEntry.builder()
@@ -190,7 +190,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                 .account(merchantAccount)
                 .entryType(EntryType.CREDIT)
                 .amountCents(10000L)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         journal.addEntry(debitEntry);
@@ -279,7 +279,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .accountNumber("ACCT-BAL-" + UUID.randomUUID())
                         .accountName("Merchant Balance Account")
                         .accountType(AccountType.LIABILITY)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
 
@@ -303,7 +303,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .account(account)
                         .entryType(EntryType.CREDIT)
                         .amountCents(5000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
 
@@ -326,7 +326,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .account(account)
                         .entryType(EntryType.DEBIT)
                         .amountCents(1500L)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
 
@@ -340,7 +340,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .account(account)
                         .entryType(EntryType.CREDIT)
                         .amountCents(2000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
         assertThat(ledgerEntryRepository.calculateAccountBalance(account.getId())).isEqualTo(5500L);
@@ -352,7 +352,7 @@ class LedgerRepositoryIntegrationTest extends AbstractPostgresIntegrationTest {
                         .account(account)
                         .entryType(EntryType.DEBIT)
                         .amountCents(6000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .build()
         );
         assertThat(ledgerEntryRepository.calculateAccountBalance(account.getId())).isEqualTo(-500L);

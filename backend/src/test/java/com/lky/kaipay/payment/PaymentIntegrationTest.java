@@ -125,8 +125,8 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
     void testCreatePayment_Success() throws Exception {
         String idempotencyKey = "key-" + UUID.randomUUID();
         CreatePaymentRequest request = CreatePaymentRequest.builder()
-                .amountCents(10000L) // $100.00
-                .currency("USD")
+                .amountCents(10000L) // RM100.00
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .paymentMethodId(testPaymentMethod.getId())
                 .metadata(Map.of("orderId", "ORD-12345"))
@@ -143,7 +143,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         JsonNode data = root.get("data");
         UUID paymentId = UUID.fromString(data.get("id").asText());
         assertThat(data.get("amountCents").asLong()).isEqualTo(10000L);
-        assertThat(data.get("currency").asText()).isEqualTo("USD");
+        assertThat(data.get("currency").asText()).isEqualTo("MYR");
         assertThat(data.get("status").asText()).isEqualTo(PaymentStatus.CREATED.name());
         assertThat(data.get("idempotencyKey").asText()).isEqualTo(idempotencyKey);
 
@@ -163,7 +163,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         String idempotencyKey = "outbox-key-" + UUID.randomUUID();
         CreatePaymentRequest request = CreatePaymentRequest.builder()
                 .amountCents(15000L)
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .paymentMethodId(testPaymentMethod.getId())
                 .metadata(Map.of("orderId", "ORD-OUTBOX-1"))
@@ -198,7 +198,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         String idempotencyKey = "key-" + UUID.randomUUID();
         CreatePaymentRequest request = CreatePaymentRequest.builder()
                 .amountCents(5000L)
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .paymentMethodId(testPaymentMethod.getId())
                 .build();
@@ -234,7 +234,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
 
         CreatePaymentRequest initialRequest = CreatePaymentRequest.builder()
                 .amountCents(2500L)
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .build();
 
@@ -245,7 +245,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         // Attempt second request with same key but different amount (7500 instead of 2500)
         CreatePaymentRequest conflictingRequest = CreatePaymentRequest.builder()
                 .amountCents(7500L)
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .build();
 
@@ -271,7 +271,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
 
         CreatePaymentRequest request = CreatePaymentRequest.builder()
                 .amountCents(1000L)
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId()) // Customer belongs to testMerchant, not anotherMerchant
                 .build();
 
@@ -286,7 +286,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
     void testCreatePayment_InvalidAmount_Returns400BadRequest() {
         CreatePaymentRequest request = CreatePaymentRequest.builder()
                 .amountCents(-500L) // Invalid
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .build();
 
@@ -302,7 +302,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         String idempotencyKey = "key-" + UUID.randomUUID();
         CreatePaymentRequest request = CreatePaymentRequest.builder()
                 .amountCents(3300L)
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .build();
 
@@ -329,7 +329,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         String idempotencyKey = "key-concurrent-" + UUID.randomUUID();
         CreatePaymentRequest request = CreatePaymentRequest.builder()
                 .amountCents(8800L)
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .build();
 
@@ -394,7 +394,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         for (int i = 1; i <= 3; i++) {
             CreatePaymentRequest req = CreatePaymentRequest.builder()
                     .amountCents((long) (i * 1000))
-                    .currency("USD")
+                    .currency("MYR")
                     .customerId(testCustomer.getId())
                     .build();
             restTemplate.exchange("/v1/payments", HttpMethod.POST,
@@ -420,7 +420,7 @@ class PaymentIntegrationTest extends AbstractPostgresIntegrationTest {
         // Create payment for testMerchant
         CreatePaymentRequest req = CreatePaymentRequest.builder()
                 .amountCents(5000L)
-                .currency("USD")
+                .currency("MYR")
                 .customerId(testCustomer.getId())
                 .build();
         restTemplate.exchange("/v1/payments", HttpMethod.POST,

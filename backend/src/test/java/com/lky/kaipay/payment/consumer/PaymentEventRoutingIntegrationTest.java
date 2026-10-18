@@ -113,7 +113,7 @@ class PaymentEventRoutingIntegrationTest extends AbstractPostgresIntegrationTest
         try (Admin admin = admin()) {
             UUID paymentId = paymentService.createPayment(merchant.getId(), "create-" + UUID.randomUUID(),
                     CreatePaymentRequest.builder().customerId(customer.getId())
-                            .amountCents(10000L).currency("USD").build()).getId();
+                            .amountCents(10000L).currency("MYR").build()).getId();
             PaymentEventOutbox initiated = event("PaymentInitiatedEvent");
             publishAndAwaitCommit(admin);
             assertThat(payments.findById(paymentId).orElseThrow().getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
@@ -163,11 +163,11 @@ class PaymentEventRoutingIntegrationTest extends AbstractPostgresIntegrationTest
     @DisplayName("Unknown event types go directly to DLT without authorization or retry-topic publication")
     void unknownEventTypeRoutesDirectlyToDlt() throws Exception {
         Payment payment = payments.save(Payment.builder().merchant(merchant).customer(customer)
-                .amountCents(5000L).currency("USD").status(PaymentStatus.CREATED)
+                .amountCents(5000L).currency("MYR").status(PaymentStatus.CREATED)
                 .idempotencyKey("unknown-" + UUID.randomUUID()).build());
         EventEnvelope<Map<String, Object>> envelope = EventEnvelope.of("UnsupportedPaymentEvent", "PAYMENT",
                 payment.getId().toString(), merchant.getId(),
-                Map.of("paymentId", payment.getId(), "amountCents", 5000L, "currency", "USD"));
+                Map.of("paymentId", payment.getId(), "amountCents", 5000L, "currency", "MYR"));
         String payload = objectMapper.writeValueAsString(envelope);
 
         try (Admin admin = admin()) {

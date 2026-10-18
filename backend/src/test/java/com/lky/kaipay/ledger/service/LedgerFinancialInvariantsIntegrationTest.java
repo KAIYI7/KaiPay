@@ -158,7 +158,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                         .merchant(merchant)
                         .customer(customer)
                         .amountCents(amountCents)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.AUTHORIZED)
                         .gatewayReference("AUTH-INV-" + UUID.randomUUID().toString().substring(0, 8))
                         .idempotencyKey("pay_inv_" + UUID.randomUUID())
@@ -169,7 +169,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
     @Test
     @DisplayName("1. Every journal in the database is strictly balanced (totalDebit == totalCredit > 0)")
     void testEveryJournalInDatabaseIsStrictlyBalanced() {
-        // Merchant A Payment 1: $100.00 -> Captured -> Partial Refund $30.00
+        // Merchant A Payment 1: RM100.00 -> Captured -> Partial Refund RM30.00
         Payment pA1 = createAuthorizedPayment(merchantA, customerA, 10000L);
         paymentService.capturePayment(merchantA.getId(), pA1.getId(), "cap-a1-" + UUID.randomUUID());
         refundService.createRefund(
@@ -179,7 +179,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 CreateRefundRequest.builder().amountCents(3000L).reason("Partial return").build()
         );
 
-        // Merchant A Payment 2: $50.00 -> Captured -> Full Refund $50.00
+        // Merchant A Payment 2: RM50.00 -> Captured -> Full Refund RM50.00
         Payment pA2 = createAuthorizedPayment(merchantA, customerA, 5000L);
         paymentService.capturePayment(merchantA.getId(), pA2.getId(), "cap-a2-" + UUID.randomUUID());
         refundService.createRefund(
@@ -189,11 +189,11 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 CreateRefundRequest.builder().amountCents(5000L).reason("Full return").build()
         );
 
-        // Merchant A Payment 3: $250.00 -> Captured (no refund)
+        // Merchant A Payment 3: RM250.00 -> Captured (no refund)
         Payment pA3 = createAuthorizedPayment(merchantA, customerA, 25000L);
         paymentService.capturePayment(merchantA.getId(), pA3.getId(), "cap-a3-" + UUID.randomUUID());
 
-        // Merchant B Payment 1: $80.00 -> Captured -> Partial Refund $20.00 -> Partial Refund $30.00
+        // Merchant B Payment 1: RM80.00 -> Captured -> Partial Refund RM20.00 -> Partial Refund RM30.00
         Payment pB1 = createAuthorizedPayment(merchantB, customerB, 8000L);
         paymentService.capturePayment(merchantB.getId(), pB1.getId(), "cap-b1-" + UUID.randomUUID());
         refundService.createRefund(
@@ -209,7 +209,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 CreateRefundRequest.builder().amountCents(3000L).reason("Partial 2").build()
         );
 
-        // Merchant B Payment 2: $120.00 -> Captured
+        // Merchant B Payment 2: RM120.00 -> Captured
         Payment pB2 = createAuthorizedPayment(merchantB, customerB, 12000L);
         paymentService.capturePayment(merchantB.getId(), pB2.getId(), "cap-b2-" + UUID.randomUUID());
 
@@ -266,11 +266,11 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
     @Test
     @DisplayName("2. Over-refund prevention and merchant balance consistency")
     void testOverRefundPreventionAndBalanceConsistency() {
-        // Creates and captures $100.00 payment
+        // Creates and captures RM100.00 payment
         Payment payment = createAuthorizedPayment(merchantA, customerA, 10000L);
         paymentService.capturePayment(merchantA.getId(), payment.getId(), "cap-" + UUID.randomUUID());
 
-        // Partial refund 1: $60.00 (6000 cents) -> succeeds, status is PARTIALLY_REFUNDED
+        // Partial refund 1: RM60.00 (6000 cents) -> succeeds, status is PARTIALLY_REFUNDED
         RefundResponse ref1 = refundService.createRefund(
                 merchantA.getId(),
                 payment.getId(),
@@ -283,7 +283,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
         Payment paymentAfterRef1 = paymentRepository.findById(payment.getId()).orElseThrow();
         assertThat(paymentAfterRef1.getStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
 
-        // Attempts partial refund 2: $45.00 (4500 cents) -> throws InvalidRefundException (only $40 remaining)
+        // Attempts partial refund 2: RM45.00 (4500 cents) -> throws InvalidRefundException (only RM40 remaining)
         assertThatThrownBy(() -> refundService.createRefund(
                 merchantA.getId(),
                 payment.getId(),
@@ -292,7 +292,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
         )).isInstanceOf(InvalidRefundException.class)
                 .hasMessageContaining("Refund amount exceeds refundable balance");
 
-        // Processes partial refund 3: $40.00 (4000 cents) -> succeeds, status is REFUNDED
+        // Processes partial refund 3: RM40.00 (4000 cents) -> succeeds, status is REFUNDED
         RefundResponse ref3 = refundService.createRefund(
                 merchantA.getId(),
                 payment.getId(),
@@ -305,7 +305,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
         Payment paymentAfterRef3 = paymentRepository.findById(payment.getId()).orElseThrow();
         assertThat(paymentAfterRef3.getStatus()).isEqualTo(PaymentStatus.REFUNDED);
 
-        // Attempts partial refund 4: $1.00 (100 cents) -> throws InvalidRefundException
+        // Attempts partial refund 4: RM1.00 (100 cents) -> throws InvalidRefundException
         assertThatThrownBy(() -> refundService.createRefund(
                 merchantA.getId(),
                 payment.getId(),
@@ -314,13 +314,13 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
         )).isInstanceOf(InvalidRefundException.class);
 
         // Asserts MerchantBalanceService computes exact available balance, volume, fees, and refund totals
-        // Capture $100: Fee = round(10000 * 0.029) + 30 = 320 cents. Merchant Liability = +9680. Revenue = +320.
-        // Refund 1 ($60): Fee reversal = round(6000 * 0.029) = 174. Net debit = 5826. Revenue debit = 174.
-        // Refund 3 ($40): Fee reversal = round(4000 * 0.029) = 116. Net debit = 3884. Revenue debit = 116.
-        // Available balance: 9680 - (5826 + 3884) = 9680 - 9710 = -30 cents (platform retained $0.30 fixed fee).
-        // Total Volume: $100.00 (10000 cents).
-        // Total Fees: 320 - (174 + 116) = 30 cents ($0.30).
-        // Total Refunds: 6000 + 4000 = 10000 cents ($100.00).
+        // Capture RM100: Fee = round(10000 * 0.029) + 30 = 320 cents. Merchant Liability = +9680. Revenue = +320.
+        // Refund 1 (RM60): Fee reversal = round(6000 * 0.029) = 174. Net debit = 5826. Revenue debit = 174.
+        // Refund 3 (RM40): Fee reversal = round(4000 * 0.029) = 116. Net debit = 3884. Revenue debit = 116.
+        // Available balance: 9680 - (5826 + 3884) = 9680 - 9710 = -30 cents (platform retained RM0.30 fixed fee).
+        // Total Volume: RM100.00 (10000 cents).
+        // Total Fees: 320 - (174 + 116) = 30 cents (RM0.30).
+        // Total Refunds: 6000 + 4000 = 10000 cents (RM100.00).
         MerchantBalanceResponse balance = merchantBalanceService.getMerchantBalance(merchantA.getId());
         assertThat(balance.getMerchantId()).isEqualTo(merchantA.getId());
         assertThat(balance.getAvailableBalanceCents()).isEqualTo(-30L);
@@ -328,17 +328,17 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
         assertThat(balance.getTotalVolumeCents()).isEqualTo(10000L);
         assertThat(balance.getTotalFeesCents()).isEqualTo(30L);
         assertThat(balance.getTotalRefundsCents()).isEqualTo(10000L);
-        assertThat(balance.getCurrency()).isEqualTo("USD");
+        assertThat(balance.getCurrency()).isEqualTo("MYR");
     }
 
     @Test
     @DisplayName("3. Concurrent refunds never exceed captured amount")
     void testConcurrentRefundsNeverExceedCapturedAmount() throws Exception {
-        // Creates and captures $100.00 payment (10,000 cents)
+        // Creates and captures RM100.00 payment (10,000 cents)
         Payment payment = createAuthorizedPayment(merchantA, customerA, 10000L);
         paymentService.capturePayment(merchantA.getId(), payment.getId(), "cap-conc-" + UUID.randomUUID());
 
-        // Launches 10 concurrent threads each attempting to refund $20.00 (2,000 cents) using distinct idempotency keys
+        // Launches 10 concurrent threads each attempting to refund RM20.00 (2,000 cents) using distinct idempotency keys
         int threadCount = 10;
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
         CountDownLatch startLatch = new CountDownLatch(1);
@@ -435,7 +435,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
     @Test
     @DisplayName("4. Multi-payment capture and full refund cumulative fee retention")
     void testMultiPaymentCaptureAndFullRefundCumulativeFeeRetention() {
-        // Merchant creates Payment 1 ($150.00 / 15,000 cents) -> Captures -> Fully Refunds ($150.00)
+        // Merchant creates Payment 1 (RM150.00 / 15,000 cents) -> Captures -> Fully Refunds (RM150.00)
         Payment p1 = createAuthorizedPayment(merchantA, customerA, 15000L);
         paymentService.capturePayment(merchantA.getId(), p1.getId(), "cap-p1-" + UUID.randomUUID());
         RefundResponse r1 = refundService.createRefund(
@@ -447,7 +447,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
         assertThat(r1.getStatus()).isEqualTo(RefundStatus.COMPLETED);
         assertThat(r1.getAmountCents()).isEqualTo(15000L);
 
-        // Merchant creates Payment 2 ($120.00 / 12,000 cents) -> Captures -> Fully Refunds ($120.00 across partial $40.00 + $80.00)
+        // Merchant creates Payment 2 (RM120.00 / 12,000 cents) -> Captures -> Fully Refunds (RM120.00 across partial RM40.00 + RM80.00)
         Payment p2 = createAuthorizedPayment(merchantA, customerA, 12000L);
         paymentService.capturePayment(merchantA.getId(), p2.getId(), "cap-p2-" + UUID.randomUUID());
 
@@ -469,7 +469,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
         assertThat(r2_2.getStatus()).isEqualTo(RefundStatus.COMPLETED);
         assertThat(r2_2.getAmountCents()).isEqualTo(8000L);
 
-        // Asserts for Payment 1: Capture fee = $4.65 (30 cents fixed + $4.35 variable). Refund fee reversal = $4.35. Retained fee = $0.30. Net merchant position for P1 = -$0.30 (-30 cents).
+        // Asserts for Payment 1: Capture fee = RM4.65 (30 cents fixed + RM4.35 variable). Refund fee reversal = RM4.35. Retained fee = RM0.30. Net merchant position for P1 = -RM0.30 (-30 cents).
         Journal p1CaptureJournal = journalRepository.findAll().stream()
                 .filter(j -> j.getSourceId().equals(p1.getId().toString()))
                 .findFirst().orElseThrow();
@@ -478,7 +478,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 .filter(e -> e.getAccount().getAccountType() == AccountType.REVENUE)
                 .mapToLong(LedgerEntry::getAmountCents)
                 .findFirst().orElse(0L);
-        assertThat(p1CapFee).isEqualTo(465L); // $4.65 (30 cents fixed + $4.35 variable)
+        assertThat(p1CapFee).isEqualTo(465L); // RM4.65 (30 cents fixed + RM4.35 variable)
 
         Journal p1RefundJournal = journalRepository.findAll().stream()
                 .filter(j -> j.getSourceId().equals(r1.getId().toString()))
@@ -488,9 +488,9 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 .filter(e -> e.getAccount().getAccountType() == AccountType.REVENUE)
                 .mapToLong(LedgerEntry::getAmountCents)
                 .findFirst().orElse(0L);
-        assertThat(p1RefFeeReversal).isEqualTo(435L); // $4.35
+        assertThat(p1RefFeeReversal).isEqualTo(435L); // RM4.35
         long p1RetainedFee = p1CapFee - p1RefFeeReversal;
-        assertThat(p1RetainedFee).isEqualTo(30L); // Retained fee = $0.30
+        assertThat(p1RetainedFee).isEqualTo(30L); // Retained fee = RM0.30
 
         long p1MerchantCapCredit = p1CapEntries.stream()
                 .filter(e -> e.getAccount().getAccountType() == AccountType.LIABILITY && e.getEntryType() == EntryType.CREDIT)
@@ -501,9 +501,9 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 .mapToLong(LedgerEntry::getAmountCents)
                 .findFirst().orElse(0L);
         long p1NetMerchantPosition = p1MerchantCapCredit - p1MerchantRefDebit;
-        assertThat(p1NetMerchantPosition).isEqualTo(-30L); // Net merchant position for P1 = -$0.30 (-30 cents)
+        assertThat(p1NetMerchantPosition).isEqualTo(-30L); // Net merchant position for P1 = -RM0.30 (-30 cents)
 
-        // Asserts for Payment 2: Capture fee = $3.78 (30 cents fixed + $3.48 variable). Refund fee reversal = $3.48 ($1.16 + $2.32). Retained fee = $0.30. Net merchant position for P2 = -$0.30 (-30 cents).
+        // Asserts for Payment 2: Capture fee = RM3.78 (30 cents fixed + RM3.48 variable). Refund fee reversal = RM3.48 (RM1.16 + RM2.32). Retained fee = RM0.30. Net merchant position for P2 = -RM0.30 (-30 cents).
         Journal p2CaptureJournal = journalRepository.findAll().stream()
                 .filter(j -> j.getSourceId().equals(p2.getId().toString()))
                 .findFirst().orElseThrow();
@@ -512,7 +512,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 .filter(e -> e.getAccount().getAccountType() == AccountType.REVENUE)
                 .mapToLong(LedgerEntry::getAmountCents)
                 .findFirst().orElse(0L);
-        assertThat(p2CapFee).isEqualTo(378L); // $3.78 (30 cents fixed + $3.48 variable)
+        assertThat(p2CapFee).isEqualTo(378L); // RM3.78 (30 cents fixed + RM3.48 variable)
 
         Journal p2Ref1Journal = journalRepository.findAll().stream()
                 .filter(j -> j.getSourceId().equals(r2_1.getId().toString()))
@@ -522,7 +522,7 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 .filter(e -> e.getAccount().getAccountType() == AccountType.REVENUE)
                 .mapToLong(LedgerEntry::getAmountCents)
                 .findFirst().orElse(0L);
-        assertThat(p2Ref1FeeReversal).isEqualTo(116L); // $1.16
+        assertThat(p2Ref1FeeReversal).isEqualTo(116L); // RM1.16
 
         Journal p2Ref2Journal = journalRepository.findAll().stream()
                 .filter(j -> j.getSourceId().equals(r2_2.getId().toString()))
@@ -532,12 +532,12 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 .filter(e -> e.getAccount().getAccountType() == AccountType.REVENUE)
                 .mapToLong(LedgerEntry::getAmountCents)
                 .findFirst().orElse(0L);
-        assertThat(p2Ref2FeeReversal).isEqualTo(232L); // $2.32
+        assertThat(p2Ref2FeeReversal).isEqualTo(232L); // RM2.32
 
         long p2TotalFeeReversal = p2Ref1FeeReversal + p2Ref2FeeReversal;
-        assertThat(p2TotalFeeReversal).isEqualTo(348L); // $3.48 ($1.16 + $2.32)
+        assertThat(p2TotalFeeReversal).isEqualTo(348L); // RM3.48 (RM1.16 + RM2.32)
         long p2RetainedFee = p2CapFee - p2TotalFeeReversal;
-        assertThat(p2RetainedFee).isEqualTo(30L); // Retained fee = $0.30
+        assertThat(p2RetainedFee).isEqualTo(30L); // Retained fee = RM0.30
 
         long p2MerchantCapCredit = p2CapEntries.stream()
                 .filter(e -> e.getAccount().getAccountType() == AccountType.LIABILITY && e.getEntryType() == EntryType.CREDIT)
@@ -552,17 +552,17 @@ class LedgerFinancialInvariantsIntegrationTest extends AbstractPostgresIntegrati
                 .mapToLong(LedgerEntry::getAmountCents)
                 .findFirst().orElse(0L);
         long p2NetMerchantPosition = p2MerchantCapCredit - (p2Ref1MerchantDebit + p2Ref2MerchantDebit);
-        assertThat(p2NetMerchantPosition).isEqualTo(-30L); // Net merchant position for P2 = -$0.30 (-30 cents)
+        assertThat(p2NetMerchantPosition).isEqualTo(-30L); // Net merchant position for P2 = -RM0.30 (-30 cents)
 
         // Asserts MerchantBalanceService.getMerchantBalance:
         MerchantBalanceResponse balance = merchantBalanceService.getMerchantBalance(merchantA.getId());
         assertThat(balance.getMerchantId()).isEqualTo(merchantA.getId());
-        assertThat(balance.getAvailableBalanceCents()).isEqualTo(-60L); // -$0.60 cumulative net balance
-        assertThat(balance.getTotalVolumeCents()).isEqualTo(27000L); // $270.00 total volume
-        assertThat(balance.getTotalRefundsCents()).isEqualTo(27000L); // $270.00 total refunds
-        assertThat(balance.getTotalFeesCents()).isEqualTo(60L); // $0.60 cumulative platform fees retained
+        assertThat(balance.getAvailableBalanceCents()).isEqualTo(-60L); // -RM0.60 cumulative net balance
+        assertThat(balance.getTotalVolumeCents()).isEqualTo(27000L); // RM270.00 total volume
+        assertThat(balance.getTotalRefundsCents()).isEqualTo(27000L); // RM270.00 total refunds
+        assertThat(balance.getTotalFeesCents()).isEqualTo(60L); // RM0.60 cumulative platform fees retained
         assertThat(balance.getPendingSettlementCents()).isEqualTo(0L);
-        assertThat(balance.getCurrency()).isEqualTo("USD");
+        assertThat(balance.getCurrency()).isEqualTo("MYR");
 
         // Asserts every single journal in database is strictly balanced (totalDebit == totalCredit > 0)
         List<Journal> journals = journalRepository.findAll();

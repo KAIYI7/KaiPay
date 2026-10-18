@@ -20,6 +20,6 @@ public interface RefundRepository extends JpaRepository<Refund, UUID> {
     @Query("SELECT COALESCE(SUM(r.amountCents), 0L) FROM Refund r WHERE r.payment.id = :paymentId AND r.status = 'COMPLETED'")
     Long sumRefundedAmountByPaymentId(@Param("paymentId") UUID paymentId);
 
-    @Query("SELECT COALESCE(SUM(r.amountCents), 0L) FROM Refund r WHERE r.merchant.id = :merchantId AND r.status = 'COMPLETED'")
+    @Query("SELECT COALESCE(SUM(r.amountCents), 0L) FROM Refund r WHERE r.merchant.id = :merchantId AND r.currency = 'MYR' AND r.payment.currency = 'MYR' AND r.status = 'COMPLETED'")
     Long sumRefundsByMerchantId(@Param("merchantId") UUID merchantId);
 }

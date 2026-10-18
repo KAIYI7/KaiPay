@@ -115,8 +115,8 @@ class LedgerServiceIntegrationTest extends AbstractPostgresIntegrationTest {
                 Payment.builder()
                         .merchant(merchant)
                         .customer(customer)
-                        .amountCents(10000L) // $100.00
-                        .currency("USD")
+                        .amountCents(10000L) // RM100.00
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .idempotencyKey("idem_" + UUID.randomUUID())
                         .build()
@@ -142,8 +142,8 @@ class LedgerServiceIntegrationTest extends AbstractPostgresIntegrationTest {
         assertThat(payable.getAccountType()).isEqualTo(AccountType.LIABILITY);
         assertThat(revenue.getAccountType()).isEqualTo(AccountType.REVENUE);
 
-        // Fee: round(10000 * 0.029) + 30 = 320 cents ($3.20)
-        // Net Merchant: 10000 - 320 = 9680 cents ($96.80)
+        // Fee: round(10000 * 0.029) + 30 = 320 cents (RM3.20)
+        // Net Merchant: 10000 - 320 = 9680 cents (RM96.80)
         // Balance query returns CREDIT - DEBIT
         long receivableBalance = ledgerService.getAccountBalance(receivable.getId());
         long payableBalance = ledgerService.getAccountBalance(payable.getId());
@@ -164,8 +164,8 @@ class LedgerServiceIntegrationTest extends AbstractPostgresIntegrationTest {
                 Payment.builder()
                         .merchant(merchant)
                         .customer(customer)
-                        .amountCents(10000L) // $100.00
-                        .currency("USD")
+                        .amountCents(10000L) // RM100.00
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .idempotencyKey("idem_" + UUID.randomUUID())
                         .build()
@@ -178,8 +178,8 @@ class LedgerServiceIntegrationTest extends AbstractPostgresIntegrationTest {
                 Refund.builder()
                         .payment(payment)
                         .merchant(merchant)
-                        .amountCents(5000L) // $50.00 partial refund
-                        .currency("USD")
+                        .amountCents(5000L) // RM50.00 partial refund
+                        .currency("MYR")
                         .status(RefundStatus.COMPLETED)
                         .idempotencyKey("refund_idem_" + UUID.randomUUID())
                         .build()
@@ -197,8 +197,8 @@ class LedgerServiceIntegrationTest extends AbstractPostgresIntegrationTest {
         Account payable = accountRepository.findByMerchantIdAndAccountType(merchant.getId(), AccountType.LIABILITY).orElseThrow();
         Account revenue = accountRepository.findByAccountNumber(AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC).orElseThrow();
 
-        // Refund fee reversal: round(5000 * 0.029) = 145 cents ($1.45)
-        // Merchant net refund debit: 5000 - 145 = 4855 cents ($48.55)
+        // Refund fee reversal: round(5000 * 0.029) = 145 cents (RM1.45)
+        // Merchant net refund debit: 5000 - 145 = 4855 cents (RM48.55)
         // New balances:
         // Receivable: -10000 (DEBIT) + 5000 (CREDIT) = -5000
         // Payable: +9680 (CREDIT) - 4855 (DEBIT) = +4825
@@ -223,7 +223,7 @@ class LedgerServiceIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(merchant)
                         .customer(customer)
                         .amountCents(5000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .idempotencyKey("idem_" + UUID.randomUUID())
                         .build()
@@ -243,13 +243,13 @@ class LedgerServiceIntegrationTest extends AbstractPostgresIntegrationTest {
     @DisplayName("postJournal rejects unbalanced entries and does not persist anything")
     void testUnbalancedJournalRollback() {
         Account sysAcc = accountProvisioningService.getOrCreateSystemAccount(
-                AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC, "Customer Funds", AccountType.ASSET, "USD"
+                AccountProvisioningService.SYS_CUSTOMER_RECEIVABLE_ACC, "Customer Funds", AccountType.ASSET, "MYR"
         );
-        Account mchAcc = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD");
+        Account mchAcc = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "MYR");
 
         List<LedgerEntryRequest> unbalancedEntries = List.of(
-                new LedgerEntryRequest(sysAcc, EntryType.DEBIT, 1000L, "USD"),
-                new LedgerEntryRequest(mchAcc, EntryType.CREDIT, 900L, "USD")
+                new LedgerEntryRequest(sysAcc, EntryType.DEBIT, 1000L, "MYR"),
+                new LedgerEntryRequest(mchAcc, EntryType.CREDIT, 900L, "MYR")
         );
 
         assertThatThrownBy(() -> ledgerService.postJournal(
@@ -269,15 +269,15 @@ class LedgerServiceIntegrationTest extends AbstractPostgresIntegrationTest {
     @DisplayName("AccountProvisioningService idempotently gets or creates accounts")
     void testAccountProvisioningIdempotency() {
         Account sysAcc1 = accountProvisioningService.getOrCreateSystemAccount(
-                AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC, "Platform Revenue", AccountType.REVENUE, "USD"
+                AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC, "Platform Revenue", AccountType.REVENUE, "MYR"
         );
         Account sysAcc2 = accountProvisioningService.getOrCreateSystemAccount(
-                AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC, "Platform Revenue", AccountType.REVENUE, "USD"
+                AccountProvisioningService.SYS_PLATFORM_REVENUE_ACC, "Platform Revenue", AccountType.REVENUE, "MYR"
         );
         assertThat(sysAcc1.getId()).isEqualTo(sysAcc2.getId());
 
-        Account mchAcc1 = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD");
-        Account mchAcc2 = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "USD");
+        Account mchAcc1 = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "MYR");
+        Account mchAcc2 = accountProvisioningService.getOrCreateMerchantAccount(merchant, AccountType.LIABILITY, "MYR");
         assertThat(mchAcc1.getId()).isEqualTo(mchAcc2.getId());
     }
 }

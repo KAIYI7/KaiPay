@@ -56,7 +56,7 @@ public class Refund {
 
     @Column(nullable = false, length = 3)
     @Builder.Default
-    private String currency = "USD";
+    private String currency = "MYR";
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)

@@ -62,6 +62,7 @@ public class SimulatedAuthorizationOperation implements org.springframework.data
     private void markPersisted() { newOperation = false; }
 
     public static SimulatedAuthorizationOperation intent(AuthorizationRequest request) {
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(request.currency());
         var operation = new SimulatedAuthorizationOperation();
         operation.paymentId = request.paymentId();
         operation.namespace = AuthorizationRequest.NAMESPACE;
@@ -88,6 +89,8 @@ public class SimulatedAuthorizationOperation implements org.springframework.data
     /** Invoked only with the operation row locked in the independent simulator transaction. */
     void evaluate() {
         if (disposition != Disposition.UNRESOLVED) return;
+        // Definitive historical results can be replayed; never create a new non-MYR outcome.
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(currency);
         evaluationCount = Math.incrementExact(evaluationCount);
         updatedAt = now();
         if (amountCents == 777700L || (amountCents == 888800L && evaluationCount < 3)) return;

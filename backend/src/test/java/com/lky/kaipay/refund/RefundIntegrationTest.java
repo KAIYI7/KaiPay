@@ -178,7 +178,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(merchant)
                         .customer(customer)
                         .amountCents(amountCents)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CAPTURED)
                         .gatewayReference("AUTH-REF-12345")
                         .idempotencyKey("pay_idem_" + UUID.randomUUID())
@@ -193,7 +193,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("Full refund: Creates refund record, transitions payment to REFUNDED, saves outbox event, and posts reversing journal")
     void testCreateRefund_FullRefund_Success() throws Exception {
-        Payment payment = createCapturedPayment(10000L); // $100.00
+        Payment payment = createCapturedPayment(10000L); // RM100.00
         paymentEventOutboxRepository.deleteAll(); // clear capture outbox to verify refund outbox specifically
 
         String idempotencyKey = "ref_idem_" + UUID.randomUUID();
@@ -273,9 +273,9 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("Partial refunds: Transitions to PARTIALLY_REFUNDED then to REFUNDED upon full amount")
     void testCreateRefund_PartialRefunds_TransitionToPartiallyRefundedThenRefunded() throws Exception {
-        Payment payment = createCapturedPayment(10000L); // $100.00
+        Payment payment = createCapturedPayment(10000L); // RM100.00
 
-        // 1. First Partial Refund: $40.00 (4000 cents)
+        // 1. First Partial Refund: RM40.00 (4000 cents)
         CreateRefundRequest req1 = CreateRefundRequest.builder()
                 .amountCents(4000L)
                 .reason("Partial return")
@@ -291,7 +291,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
         Payment paymentAfterFirst = paymentRepository.findById(payment.getId()).orElseThrow();
         assertThat(paymentAfterFirst.getStatus()).isEqualTo(PaymentStatus.PARTIALLY_REFUNDED);
 
-        // 2. Second Partial Refund: $60.00 (6000 cents) - completes total $100.00
+        // 2. Second Partial Refund: RM60.00 (6000 cents) - completes total RM100.00
         CreateRefundRequest req2 = CreateRefundRequest.builder()
                 .amountCents(6000L)
                 .reason("Remainder return")
@@ -316,9 +316,9 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
     @Test
     @DisplayName("Validation: Refund amount exceeding remaining refundable balance returns HTTP 400 Bad Request")
     void testCreateRefund_ExceedsMaxRefundable_Returns400BadRequest() {
-        Payment payment = createCapturedPayment(10000L); // $100.00
+        Payment payment = createCapturedPayment(10000L); // RM100.00
 
-        // Refund $40.00
+        // Refund RM40.00
         CreateRefundRequest req1 = CreateRefundRequest.builder()
                 .amountCents(4000L)
                 .reason("Partial return")
@@ -330,7 +330,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
                 String.class
         );
 
-        // Attempt to refund $70.00 when only $60.00 is left
+        // Attempt to refund RM70.00 when only RM60.00 is left
         CreateRefundRequest req2 = CreateRefundRequest.builder()
                 .amountCents(7000L)
                 .reason("Too much")
@@ -353,7 +353,7 @@ class RefundIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(testMerchant)
                         .customer(testCustomer)
                         .amountCents(5000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.AUTHORIZED)
                         .idempotencyKey("pay_idem_" + UUID.randomUUID())
                         .build()

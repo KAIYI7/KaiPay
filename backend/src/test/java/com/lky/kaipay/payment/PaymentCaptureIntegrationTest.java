@@ -139,8 +139,8 @@ class PaymentCaptureIntegrationTest extends AbstractPostgresIntegrationTest {
                 Payment.builder()
                         .merchant(testMerchant)
                         .customer(testCustomer)
-                        .amountCents(10000L) // $100.00
-                        .currency("USD")
+                        .amountCents(10000L) // RM100.00
+                        .currency("MYR")
                         .status(PaymentStatus.AUTHORIZED)
                         .gatewayReference("AUTH-CAP-12345")
                         .idempotencyKey("pay_idem_" + UUID.randomUUID())
@@ -198,8 +198,8 @@ class PaymentCaptureIntegrationTest extends AbstractPostgresIntegrationTest {
         long payableBalance = ledgerService.getAccountBalance(payable.getId());
         long revenueBalance = ledgerService.getAccountBalance(revenue.getId());
 
-        // Fee: round(10000 * 0.029) + 30 = 320 cents ($3.20)
-        // Net Merchant: 10000 - 320 = 9680 cents ($96.80)
+        // Fee: round(10000 * 0.029) + 30 = 320 cents (RM3.20)
+        // Net Merchant: 10000 - 320 = 9680 cents (RM96.80)
         assertThat(receivableBalance).isEqualTo(-10000L);
         assertThat(payableBalance).isEqualTo(9680L);
         assertThat(revenueBalance).isEqualTo(320L);
@@ -214,7 +214,7 @@ class PaymentCaptureIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(testMerchant)
                         .customer(testCustomer)
                         .amountCents(10000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.AUTHORIZED)
                         .idempotencyKey("pay_idem_" + UUID.randomUUID())
                         .build()
@@ -259,7 +259,7 @@ class PaymentCaptureIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(testMerchant)
                         .customer(testCustomer)
                         .amountCents(5000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.CREATED)
                         .idempotencyKey("pay_idem_" + UUID.randomUUID())
                         .build()
@@ -300,7 +300,7 @@ class PaymentCaptureIntegrationTest extends AbstractPostgresIntegrationTest {
                         .merchant(testMerchant)
                         .customer(testCustomer)
                         .amountCents(5000L)
-                        .currency("USD")
+                        .currency("MYR")
                         .status(PaymentStatus.AUTHORIZED)
                         .idempotencyKey("pay_idem_" + UUID.randomUUID())
                         .build()

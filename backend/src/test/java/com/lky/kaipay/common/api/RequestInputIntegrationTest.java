@@ -70,7 +70,7 @@ class RequestInputIntegrationTest extends AbstractPostgresIntegrationTest {
         String body = switch (kind) {
             case "malformed" -> "{\"metadata\":{\"secret\":\"" + SECRET + "\"},";
             case "missing" -> null;
-            case "wrongType" -> "{\"amountCents\":\"" + SECRET + "\",\"currency\":\"USD\",\"customerId\":\""
+            case "wrongType" -> "{\"amountCents\":\"" + SECRET + "\",\"currency\":\"MYR\",\"customerId\":\""
                     + UUID.randomUUID() + "\"}";
             default -> throw new AssertionError(kind);
         };

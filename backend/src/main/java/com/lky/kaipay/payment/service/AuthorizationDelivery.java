@@ -25,6 +25,8 @@ public record AuthorizationDelivery(UUID eventId, UUID paymentId, long amountCen
                 : UUID.nameUUIDFromBytes(("kaipay:legacy-initiation:v1:" + payment).getBytes(StandardCharsets.UTF_8));
         JsonNode amount = payload.get("amountCents");
         require(amount != null && amount.isIntegralNumber() && amount.canConvertToLong() && amount.longValue() > 0);
+        // Preserve the pre-MYR legacy transport meaning; never relabel an old delivery as MYR.
+        // Storage/evidence validation decides eligibility; all new events include currency.
         String currency = payload.has("currency") ? text(payload, "currency") : "USD";
         require(currency.matches("[A-Z]{3}"));
         String aggregateType = optionalText(root, "aggregateType");

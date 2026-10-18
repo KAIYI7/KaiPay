@@ -52,7 +52,7 @@ public class LedgerEntry {
 
     @Column(nullable = false, length = 3)
     @Builder.Default
-    private String currency = "USD";
+    private String currency = "MYR";
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

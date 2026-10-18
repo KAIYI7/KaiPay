@@ -89,8 +89,8 @@ class PaymentTransientRetryIntegrationTest extends AbstractPostgresIntegrationTe
     @Test
     @DisplayName("Transient gateway timeout triggers Spring Kafka retry topic and recovers on third attempt")
     void testTransientTimeout_RetriesAndSucceedsOnThirdAttempt() throws Exception {
-        long amountCents = 888800L; // $8,888.00 triggers timeout on attempts 1 & 2, recovers on attempt 3
-        String currency = "USD";
+        long amountCents = 888800L; // RM8,888.00 triggers timeout on attempts 1 & 2, recovers on attempt 3
+        String currency = "MYR";
         String idempotencyKey = "retry-key-" + UUID.randomUUID();
 
         // 1. Create payment with amount 888800L via paymentService.createPayment -> status CREATED
@@ -150,7 +150,7 @@ class PaymentTransientRetryIntegrationTest extends AbstractPostgresIntegrationTe
     @DisplayName("A real transient Tx2 serialization failure retries through Kafka using the durable simulator result")
     void localTransientCompletionFailureRollsBackThenRetriesWithoutReevaluation() throws Exception {
         Payment initial = paymentRepository.saveAndFlush(Payment.builder().merchant(testMerchant).customer(testCustomer)
-                .amountCents(5000L).currency("USD").status(PaymentStatus.CREATED)
+                .amountCents(5000L).currency("MYR").status(PaymentStatus.CREATED)
                 .idempotencyKey("local-retry-" + UUID.randomUUID()).build());
         var envelope = EventEnvelope.of("PaymentInitiatedEvent", "PAYMENT", initial.getId().toString(),
                 testMerchant.getId(), PaymentInitiatedEvent.fromPayment(initial));

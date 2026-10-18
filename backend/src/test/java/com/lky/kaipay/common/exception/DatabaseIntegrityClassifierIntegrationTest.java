@@ -46,7 +46,7 @@ class DatabaseIntegrityClassifierIntegrationTest extends AbstractPostgresIntegra
                     execute(paymentInsert("100"), ids);
                     insert = """
                             insert into refunds (payment_id, merchant_id, amount_cents, currency, status, idempotency_key)
-                            values (:payment, :merchant, 50, 'USD', 'COMPLETED', 'same-key')
+                            values (:payment, :merchant, 50, 'MYR', 'COMPLETED', 'same-key')
                             """;
                 }
                 default -> throw new IllegalArgumentException(constraint);
@@ -108,7 +108,7 @@ class DatabaseIntegrityClassifierIntegrationTest extends AbstractPostgresIntegra
     private String paymentInsert(String amount) {
         return """
                 insert into payments (id, merchant_id, customer_id, amount_cents, currency, status, idempotency_key)
-                values (:payment, :merchant, :customer, %s, 'USD', 'CREATED', 'same-key')
+                values (:payment, :merchant, :customer, %s, 'MYR', 'CREATED', 'same-key')
                 """.formatted(amount);
     }
 

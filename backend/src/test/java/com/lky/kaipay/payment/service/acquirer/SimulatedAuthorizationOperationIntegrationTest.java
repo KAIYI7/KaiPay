@@ -117,14 +117,14 @@ class SimulatedAuthorizationOperationIntegrationTest extends AbstractPostgresInt
 
     @Test void conflictAndMissingIntentNeverEvaluateOrFabricateOperation() {
         var request = prepare(5000);
-        assertThatThrownBy(() -> client.authorize(new AuthorizationRequest(request.paymentId(), merchant, 5001, "USD")))
+        assertThatThrownBy(() -> client.authorize(new AuthorizationRequest(request.paymentId(), merchant, 5001, "MYR")))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> client.authorize(new AuthorizationRequest(request.paymentId(), UUID.randomUUID(), 5000, "USD")))
+        assertThatThrownBy(() -> client.authorize(new AuthorizationRequest(request.paymentId(), UUID.randomUUID(), 5000, "MYR")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> client.authorize(new AuthorizationRequest(request.paymentId(), merchant, 5000, "EUR")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(client.getEvaluationCount(request.paymentId())).isZero();
-        assertThatThrownBy(() -> client.authorize(new AuthorizationRequest(UUID.randomUUID(), merchant, 5000, "USD")))
+        assertThatThrownBy(() -> client.authorize(new AuthorizationRequest(UUID.randomUUID(), merchant, 5000, "MYR")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(operations.findById(request.paymentId()).orElseThrow().getResult()).isNull();
     }
@@ -247,7 +247,7 @@ class SimulatedAuthorizationOperationIntegrationTest extends AbstractPostgresInt
                 context.register(SimulatorPersistenceTestConfiguration.class);
                 context.refresh();
                 var client = context.getBean(MockBankAcquirerClient.class);
-                var result = client.authorize(new AuthorizationRequest(UUID.fromString(args[3]), UUID.fromString(args[4]), 5000, "USD"));
+                var result = client.authorize(new AuthorizationRequest(UUID.fromString(args[3]), UUID.fromString(args[4]), 5000, "MYR"));
                 System.out.println("S_COMMITTED|" + result.getAuthorizationCode() + "|" + result.getTimestamp());
                 System.out.flush();
                 new CountDownLatch(1).await();
@@ -257,9 +257,9 @@ class SimulatedAuthorizationOperationIntegrationTest extends AbstractPostgresInt
 
     private AuthorizationRequest prepare(long amount) {
         UUID payment = UUID.randomUUID();
-        jdbc.update("INSERT INTO payments(id,merchant_id,customer_id,amount_cents,currency,status,idempotency_key) VALUES (?,?,?,?,'USD','PROCESSING',?)",
+        jdbc.update("INSERT INTO payments(id,merchant_id,customer_id,amount_cents,currency,status,idempotency_key) VALUES (?,?,?,?,'MYR','PROCESSING',?)",
                 payment, merchant, customer, amount, payment.toString());
-        var request = new AuthorizationRequest(payment, merchant, amount, "USD");
+        var request = new AuthorizationRequest(payment, merchant, amount, "MYR");
         operations.saveAndFlush(SimulatedAuthorizationOperation.intent(request));
         return request;
     }

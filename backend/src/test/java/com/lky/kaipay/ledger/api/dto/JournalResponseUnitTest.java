@@ -18,6 +18,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 class JournalResponseUnitTest {
 
     @Test
+    void mismatchedStoredAccountKeepsEntriesButOmitsUnusableTotalsFromJson() throws Exception {
+        Account usd = Account.builder().accountNumber("old-usd").currency("USD").build();
+        Journal journal = Journal.builder().journalNumber("mismatch").build();
+        journal.addEntry(LedgerEntry.builder().account(usd).entryType(EntryType.DEBIT)
+                .amountCents(100).currency("MYR").build());
+        journal.addEntry(LedgerEntry.builder().account(usd).entryType(EntryType.CREDIT)
+                .amountCents(100).currency("MYR").build());
+        JournalResponse response = JournalResponse.fromEntity(journal);
+        assertThat(response.getCurrency()).isNull();
+        assertThat(response.getTotalDebitCents()).isNull();
+        assertThat(response.getTotalCreditCents()).isNull();
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(response);
+        assertThat(json.has("currency")).isFalse();
+        assertThat(json.has("totalDebitCents")).isFalse();
+        assertThat(json.has("totalCreditCents")).isFalse();
+        assertThat(json.path("entries")).hasSize(2);
+        assertThat(json.path("entries").get(0).path("amountCents").asLong()).isEqualTo(100);
+    }
+
+    @Test
     @DisplayName("Should correctly map Journal entity to JournalResponse with computed totals")
     void shouldMapJournalToResponse() {
         Account account1 = Account.builder()
@@ -25,7 +45,7 @@ class JournalResponseUnitTest {
                 .accountNumber("1000-CUSTOMER-RECEIVABLE")
                 .accountName("Receivable")
                 .accountType(AccountType.ASSET)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         Account account2 = Account.builder()
@@ -33,7 +53,7 @@ class JournalResponseUnitTest {
                 .accountNumber("2000-MERCHANT-LIABILITY")
                 .accountName("Payable")
                 .accountType(AccountType.LIABILITY)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         Account account3 = Account.builder()
@@ -41,7 +61,7 @@ class JournalResponseUnitTest {
                 .accountNumber("4000-PLATFORM-REVENUE")
                 .accountName("Revenue")
                 .accountType(AccountType.REVENUE)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         Journal journal = Journal.builder()
@@ -60,7 +80,7 @@ class JournalResponseUnitTest {
                 .account(account1)
                 .entryType(EntryType.DEBIT)
                 .amountCents(10000L)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         LedgerEntry entry2 = LedgerEntry.builder()
@@ -69,7 +89,7 @@ class JournalResponseUnitTest {
                 .account(account2)
                 .entryType(EntryType.CREDIT)
                 .amountCents(9680L)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         LedgerEntry entry3 = LedgerEntry.builder()
@@ -78,7 +98,7 @@ class JournalResponseUnitTest {
                 .account(account3)
                 .entryType(EntryType.CREDIT)
                 .amountCents(320L)
-                .currency("USD")
+                .currency("MYR")
                 .build();
 
         journal.addEntry(entry1);

@@ -23,7 +23,12 @@ public class AccountProvisioningService {
 
     @Transactional
     public Account getOrCreateSystemAccount(String accountNumber, String accountName, AccountType accountType, String currency) {
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(currency);
         return accountRepository.findByAccountNumber(accountNumber)
+                .map(account -> {
+                    validateCurrency(account, currency);
+                    return account;
+                })
                 .orElseGet(() -> {
                     log.info("Provisioning new system account: accountNumber={}, accountName={}, accountType={}, currency={}",
                             accountNumber, accountName, accountType, currency);
@@ -32,7 +37,7 @@ public class AccountProvisioningService {
                             .accountNumber(accountNumber)
                             .accountName(accountName)
                             .accountType(accountType)
-                            .currency(currency != null ? currency : "USD")
+                            .currency(currency)
                             .build();
                     return accountRepository.save(account);
                 });
@@ -46,7 +51,12 @@ public class AccountProvisioningService {
         if (merchant.getId() == null) {
             throw new IllegalArgumentException("Merchant ID cannot be null when provisioning merchant account");
         }
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(currency);
         return accountRepository.findByMerchantIdAndAccountType(merchant.getId(), accountType)
+                .map(account -> {
+                    validateCurrency(account, currency);
+                    return account;
+                })
                 .orElseGet(() -> {
                     Merchant attachedMerchant = merchantRepository.findById(merchant.getId()).orElse(merchant);
                     String merchantName = (attachedMerchant.getName() != null) ? attachedMerchant.getName() : "Merchant";
@@ -60,9 +70,16 @@ public class AccountProvisioningService {
                             .accountNumber(accountNumber)
                             .accountName(accountName)
                             .accountType(accountType)
-                            .currency(currency != null ? currency : "USD")
+                            .currency(currency)
                             .build();
                     return accountRepository.save(account);
                 });
+    }
+
+    private void validateCurrency(Account account, String currency) {
+        if (!currency.equals(account.getCurrency())) {
+            throw new com.lky.kaipay.common.exception.InvalidRequestException(
+                    "Existing account currency is incompatible with MYR activity");
+        }
     }
 }

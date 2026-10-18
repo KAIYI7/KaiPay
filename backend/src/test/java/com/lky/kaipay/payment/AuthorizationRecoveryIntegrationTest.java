@@ -53,8 +53,8 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
     @ParameterizedTest
     @ValueSource(strings = {"null", "0", "-1", "1.5", "\"5000\"", "9223372036854775808", "true"})
     void invalidMoneyNeverPreparesAnOperation(String amountJson) throws Exception {
-        UUID payment = payment(5000, "USD", "CREATED");
-        ObjectNode root = event(payment, UUID.randomUUID(), 5000, "USD");
+        UUID payment = payment(5000, "MYR", "CREATED");
+        ObjectNode root = event(payment, UUID.randomUUID(), 5000, "MYR");
         ((ObjectNode) root.get("payload")).set("amountCents", mapper.readTree(amountJson));
         assertThatThrownBy(() -> AuthorizationDelivery.fromJson(root)).isInstanceOf(IllegalArgumentException.class);
         assertThat(operations.findById(payment)).isEmpty();
@@ -62,9 +62,9 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
     }
 
     @Test void strictIdentityVersionAndOptionalMetadataCannotHideBehindConsumedMarker() {
-        UUID payment = payment(5000, "USD", "CREATED");
+        UUID payment = payment(5000, "MYR", "CREATED");
         UUID eventId = UUID.randomUUID();
-        var root = event(payment, eventId, 5000, "USD");
+        var root = event(payment, eventId, 5000, "MYR");
         var delivery = AuthorizationDelivery.fromJson(root);
         var request = recovery.prepareAuthorization(delivery, GROUP).orElseThrow();
         var accepted = simulator.authorize(request);
@@ -90,32 +90,32 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
         assertThat(markers.findByPaymentIdOrderByProcessedAtAsc(payment)).hasSize(1);
     }
 
-    @Test void stableLegacyIdentityAndUsdFallbackStillValidatePayloadAcrossGroups() {
-        UUID payment = payment(5000, "USD", "CREATED");
+    @Test void stableLegacyIdentityAndUsdMeaningValidateFinalEvidenceAcrossGroups() {
+        UUID payment = payment(5000, "USD", "AUTHORIZED");
+        jdbc.update("UPDATE payments SET gateway_reference='AUTH-LEGACY' WHERE id=?", payment);
         var legacy = (ObjectNode) event(payment, UUID.randomUUID(), 5000, "USD").get("payload");
         legacy.remove("currency");
         var first = AuthorizationDelivery.fromJson(legacy);
         var second = AuthorizationDelivery.fromJson(legacy.deepCopy());
+        assertThat(first.currency()).isEqualTo("USD");
         assertThat(first.eventId()).isEqualTo(second.eventId());
-        var request = recovery.prepareAuthorization(first, GROUP).orElseThrow();
-        var result = simulator.authorize(request);
-        recovery.completeAuthorization(first, GROUP, result);
+        assertThat(recovery.prepareAuthorization(first, GROUP)).isEmpty();
         assertThat(recovery.prepareAuthorization(second, GROUP)).isEmpty();
         assertThat(recovery.prepareAuthorization(second, GROUP + "-other")).isEmpty();
         assertThat(markers.findByPaymentIdOrderByProcessedAtAsc(payment)).hasSize(2);
-        assertThat(simulator.getEvaluationCount(payment)).isEqualTo(1);
-        UUID euro = payment(5000, "EUR", "CREATED");
-        legacy.put("paymentId", euro.toString());
+        assertThat(operations.findById(payment)).isEmpty();
+        UUID myr = payment(5000, "MYR", "CREATED");
+        legacy.put("paymentId", myr.toString());
         assertThatThrownBy(() -> recovery.prepareAuthorization(AuthorizationDelivery.fromJson(legacy), GROUP))
                 .isInstanceOf(IllegalStateException.class);
-        assertThat(operations.findById(euro)).isEmpty();
+        assertThat(operations.findById(myr)).isEmpty();
     }
 
     @ParameterizedTest @EnumSource(PaymentStatus.class)
     void allLegacyStatesHaveExplicitEligibilityWithoutFabricatedOutcomes(PaymentStatus state) {
-        UUID payment = payment(5000, "USD", state.name());
+        UUID payment = payment(5000, "MYR", state.name());
         jdbc.update("UPDATE payments SET gateway_reference='AUTH-LEGACY',failure_code='LEGACY',failure_message='Legacy evidence' WHERE id=?", payment);
-        var delivery = AuthorizationDelivery.fromJson(event(payment, UUID.randomUUID(), 5000, "USD"));
+        var delivery = AuthorizationDelivery.fromJson(event(payment, UUID.randomUUID(), 5000, "MYR"));
         if (state == PaymentStatus.CREATED) {
             assertThat(recovery.prepareAuthorization(delivery, GROUP)).isPresent();
             assertThat(status(payment)).isEqualTo("PROCESSING");
@@ -136,8 +136,8 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
     @ParameterizedTest
     @EnumSource(value = PaymentStatus.class, names = {"AUTHORIZED", "CAPTURED", "REFUND_PENDING", "PARTIALLY_REFUNDED", "REFUNDED", "FAILED"})
     void lateApprovalNeverReversesLaterStateAndContradictionsQuarantine(PaymentStatus state) {
-        UUID payment = payment(5000, "USD", "CREATED");
-        var delivery = AuthorizationDelivery.fromJson(event(payment, UUID.randomUUID(), 5000, "USD"));
+        UUID payment = payment(5000, "MYR", "CREATED");
+        var delivery = AuthorizationDelivery.fromJson(event(payment, UUID.randomUUID(), 5000, "MYR"));
         var request = recovery.prepareAuthorization(delivery, GROUP).orElseThrow();
         var accepted = simulator.authorize(request); // Delayed response after independently committed acceptance.
         jdbc.update("UPDATE payments SET status=?,gateway_reference=?,failure_code=? WHERE id=?", state.name(),
@@ -160,8 +160,8 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
     }
 
     @Test void contradictoryCallerResultNeverBecomesPaymentAuthority() {
-        UUID payment = payment(5000, "USD", "CREATED");
-        var delivery = AuthorizationDelivery.fromJson(event(payment, UUID.randomUUID(), 5000, "USD"));
+        UUID payment = payment(5000, "MYR", "CREATED");
+        var delivery = AuthorizationDelivery.fromJson(event(payment, UUID.randomUUID(), 5000, "MYR"));
         var request = recovery.prepareAuthorization(delivery, GROUP).orElseThrow();
         var accepted = simulator.authorize(request);
         assertThatThrownBy(() -> recovery.completeAuthorization(delivery, GROUP, AcquirerAuthorizationResult.approved("DIFFERENT")))
@@ -173,8 +173,8 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
     }
 
     @Test void consumerRejectsAmbientTransactionBeforePreparationOrGatewayCall() throws Exception {
-        UUID payment = payment(5000, "USD", "CREATED");
-        String payload = mapper.writeValueAsString(event(payment, UUID.randomUUID(), 5000, "USD"));
+        UUID payment = payment(5000, "MYR", "CREATED");
+        String payload = mapper.writeValueAsString(event(payment, UUID.randomUUID(), 5000, "MYR"));
         var record = new org.apache.kafka.clients.consumer.ConsumerRecord<String, String>("kaipay.payment.requests", 0, 0L, payment.toString(), payload);
         var tx = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
         assertThatThrownBy(() -> tx.execute(status -> { consumer.processPaymentRequest(record, null); return null; }))
@@ -186,8 +186,8 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
 
     @Test void legacyFinalWithoutRequiredEvidenceAndExplicitUnsupportedVersionQuarantine() {
         for (String state : List.of("AUTHORIZED", "DECLINED", "FAILED")) {
-            UUID payment = payment(5000, "USD", state);
-            var root = event(payment, UUID.randomUUID(), 5000, "USD");
+            UUID payment = payment(5000, "MYR", state);
+            var root = event(payment, UUID.randomUUID(), 5000, "MYR");
             var delivery = AuthorizationDelivery.fromJson(root);
             assertThatThrownBy(() -> recovery.prepareAuthorization(delivery, GROUP)).isInstanceOf(IllegalStateException.class);
             assertThat(operations.findById(payment)).isEmpty();
@@ -204,9 +204,9 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
     }
 
     @Test void simultaneousCrossPaymentEventCollisionPreservesBothProviderOutcomesButOnlyOneMarker() throws Exception {
-        UUID a = payment(5000, "USD", "CREATED"), b = payment(5000, "USD", "CREATED"), sharedEvent = UUID.randomUUID();
-        var da = AuthorizationDelivery.fromJson(event(a, sharedEvent, 5000, "USD"));
-        var db = AuthorizationDelivery.fromJson(event(b, sharedEvent, 5000, "USD"));
+        UUID a = payment(5000, "MYR", "CREATED"), b = payment(5000, "MYR", "CREATED"), sharedEvent = UUID.randomUUID();
+        var da = AuthorizationDelivery.fromJson(event(a, sharedEvent, 5000, "MYR"));
+        var db = AuthorizationDelivery.fromJson(event(b, sharedEvent, 5000, "MYR"));
         var ra = recovery.prepareAuthorization(da, GROUP).orElseThrow();
         var rb = recovery.prepareAuthorization(db, GROUP).orElseThrow();
         var acceptedA = simulator.authorize(ra); var acceptedB = simulator.authorize(rb);
@@ -227,9 +227,9 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
 
     @ParameterizedTest @CsvSource({"true,true", "true,false", "false,true", "false,false"})
     void overlappingProcessingDeliveriesConvergeAcrossEventAndGroupIdentities(boolean sameEvent, boolean sameGroup) throws Exception {
-        UUID payment = payment(5000, "USD", "CREATED"), eventId = UUID.randomUUID();
-        var a = AuthorizationDelivery.fromJson(event(payment, eventId, 5000, "USD"));
-        var b = AuthorizationDelivery.fromJson(event(payment, sameEvent ? eventId : UUID.randomUUID(), 5000, "USD"));
+        UUID payment = payment(5000, "MYR", "CREATED"), eventId = UUID.randomUUID();
+        var a = AuthorizationDelivery.fromJson(event(payment, eventId, 5000, "MYR"));
+        var b = AuthorizationDelivery.fromJson(event(payment, sameEvent ? eventId : UUID.randomUUID(), 5000, "MYR"));
         String groupB = sameGroup ? GROUP : GROUP + "-other";
         var requestA = recovery.prepareAuthorization(a, GROUP).orElseThrow();
         var requestB = recovery.prepareAuthorization(b, groupB).orElseThrow();
@@ -260,11 +260,11 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
 
     @ParameterizedTest @ValueSource(strings = {"CAPTURED", "REFUNDED", "PROCESSING", "OTHER"})
     void unknownHistoricalMarkerStatusesAreQuarantined(String markerStatus) {
-        UUID payment = payment(5000, "USD", "AUTHORIZED"), id = UUID.randomUUID();
+        UUID payment = payment(5000, "MYR", "AUTHORIZED"), id = UUID.randomUUID();
         jdbc.update("UPDATE payments SET gateway_reference='AUTH-LEGACY' WHERE id=?", payment);
         jdbc.update("INSERT INTO consumed_events(event_id,consumer_group,payment_id,event_type,status) VALUES (?,?,?,?,?)",
                 id, GROUP, payment, AuthorizationDelivery.EVENT_TYPE, markerStatus);
-        var delivery = AuthorizationDelivery.fromJson(event(payment, id, 5000, "USD"));
+        var delivery = AuthorizationDelivery.fromJson(event(payment, id, 5000, "MYR"));
         assertThatThrownBy(() -> recovery.prepareAuthorization(delivery, GROUP)).isInstanceOf(IllegalStateException.class);
         assertThat(operations.findById(payment)).isEmpty();
         assertThat(status(payment)).isEqualTo("AUTHORIZED");
@@ -272,11 +272,11 @@ class AuthorizationRecoveryIntegrationTest extends AbstractPostgresIntegrationTe
     }
 
     @Test void preexistingSuccessfulMarkerForCreatedOrOtherPaymentCannotSuppressValidation() {
-        UUID a = payment(5000, "USD", "CREATED"), b = payment(5000, "USD", "CREATED"), id = UUID.randomUUID();
+        UUID a = payment(5000, "MYR", "CREATED"), b = payment(5000, "MYR", "CREATED"), id = UUID.randomUUID();
         jdbc.update("INSERT INTO consumed_events(event_id,consumer_group,payment_id,event_type,status) VALUES (?,?,?,?,?)",
                 id, GROUP, a, AuthorizationDelivery.EVENT_TYPE, "AUTHORIZED");
         for (UUID payment : List.of(a, b)) {
-            var delivery = AuthorizationDelivery.fromJson(event(payment, id, 5000, "USD"));
+            var delivery = AuthorizationDelivery.fromJson(event(payment, id, 5000, "MYR"));
             assertThatThrownBy(() -> recovery.prepareAuthorization(delivery, GROUP)).isInstanceOf(IllegalStateException.class);
             assertThat(operations.findById(payment)).isEmpty();
             assertThat(status(payment)).isEqualTo("CREATED");

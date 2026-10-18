@@ -36,7 +36,7 @@ class SimulatedAuthorizationMigrationIntegrationTest extends AbstractPostgresInt
             var legacyPayments = sql.queryForList("SELECT * FROM " + schema + ".payments ORDER BY id");
             var legacyMarkers = sql.queryForList("SELECT * FROM " + schema + ".consumed_events ORDER BY event_id");
             var legacyOutbox = sql.queryForList("SELECT * FROM " + schema + ".payment_events_outbox ORDER BY id");
-            var flyway = Flyway.configure().dataSource(source).schemas(schema).load();
+            var flyway = Flyway.configure().dataSource(source).schemas(schema).target("8").load();
             assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
             flyway.validate();
             assertThat(sql.queryForList("SELECT * FROM " + schema + ".payments ORDER BY id")).isEqualTo(legacyPayments);

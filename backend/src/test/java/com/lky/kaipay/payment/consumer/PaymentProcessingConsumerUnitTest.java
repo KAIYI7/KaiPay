@@ -71,7 +71,7 @@ class PaymentProcessingConsumerUnitTest {
     void approvalPreparesAuthorizesAndCompletesBeforeAcknowledgment() throws Exception {
         var record = initiated();
         var delivery = AuthorizationDelivery.fromJson(mapper.readTree(record.value()));
-        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "MYR");
         var result = AcquirerAuthorizationResult.approved("AUTH-1234");
         when(recovery.prepareAuthorization(delivery, GROUP)).thenReturn(Optional.of(request));
         when(acquirer.authorize(request)).thenReturn(result);
@@ -87,7 +87,7 @@ class PaymentProcessingConsumerUnitTest {
     @ValueSource(strings = {"timeout", "unavailable"})
     void gatewayTransientFailureLeavesCompletionAndAcknowledgmentForRetry(String kind) throws Exception {
         var record = initiated();
-        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "MYR");
         RuntimeException failure = kind.equals("timeout") ? new GatewayTimeoutException("timeout")
                 : new GatewayUnavailableException("unavailable");
         when(recovery.prepareAuthorization(any(), eq(GROUP))).thenReturn(Optional.of(request));
@@ -122,7 +122,7 @@ class PaymentProcessingConsumerUnitTest {
     @Test
     void definitiveRejectionFinalizesBeforeNonRetryableRouting() throws Exception {
         var record = initiated();
-        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "MYR");
         var result = AcquirerAuthorizationResult.builder().rejectedNoAcceptance(true)
                 .failureCode("SIMULATED_NO_ACCEPTANCE").failureMessage("rejected").build();
         when(recovery.prepareAuthorization(any(), eq(GROUP))).thenReturn(Optional.of(request));
@@ -139,7 +139,7 @@ class PaymentProcessingConsumerUnitTest {
     @Test
     void completionFailureDoesNotAcknowledge() throws Exception {
         var record = initiated();
-        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "MYR");
         var result = AcquirerAuthorizationResult.approved("AUTH");
         when(recovery.prepareAuthorization(any(), eq(GROUP))).thenReturn(Optional.of(request));
         when(acquirer.authorize(request)).thenReturn(result);
@@ -151,7 +151,7 @@ class PaymentProcessingConsumerUnitTest {
     @Test
     void transientCompletionFailurePrecedesDefinitiveRejectionDiagnostic() throws Exception {
         var record = initiated();
-        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "MYR");
         var result = AcquirerAuthorizationResult.builder().rejectedNoAcceptance(true)
                 .failureCode("SIMULATED_NO_ACCEPTANCE").failureMessage("rejected").build();
         when(recovery.prepareAuthorization(any(), eq(GROUP))).thenReturn(Optional.of(request));
@@ -168,10 +168,10 @@ class PaymentProcessingConsumerUnitTest {
     void lifecycleNotificationsNeverAuthorizeOrPrepare() throws Exception {
         UUID paymentId = UUID.randomUUID();
         var capture = EventEnvelope.of("PaymentCapturedEvent", "PAYMENT", paymentId.toString(), UUID.randomUUID(),
-                PaymentCapturedEvent.builder().paymentId(paymentId).amountCents(5000L).currency("USD").build());
+                PaymentCapturedEvent.builder().paymentId(paymentId).amountCents(5000L).currency("MYR").build());
         var refund = EventEnvelope.of("PaymentRefundedEvent", "REFUND", UUID.randomUUID().toString(), UUID.randomUUID(),
                 PaymentRefundedEvent.builder().paymentId(paymentId).refundId(UUID.randomUUID())
-                        .refundAmountCents(2000L).currency("USD").build());
+                        .refundAmountCents(2000L).currency("MYR").build());
         consumer.processPaymentRequest(record(mapper.writeValueAsString(capture), paymentId), ack);
         consumer.processPaymentRequest(record(mapper.writeValueAsString(refund), paymentId), ack);
         verify(ack, org.mockito.Mockito.times(2)).acknowledge();
@@ -233,7 +233,7 @@ class PaymentProcessingConsumerUnitTest {
     private ConsumerRecord<String, String> initiated() {
         UUID paymentId = UUID.randomUUID();
         return record("{\"eventId\":\"" + UUID.randomUUID() + "\",\"payload\":{\"paymentId\":\"" + paymentId
-                + "\",\"amountCents\":5000,\"currency\":\"USD\"}}", paymentId);
+                + "\",\"amountCents\":5000,\"currency\":\"MYR\"}}", paymentId);
     }
 
     private ConsumerRecord<String, String> record(String payload, UUID id) {

@@ -50,6 +50,7 @@ interface RequestRecord {
 class HttpFixture {
   requests: RequestRecord[] = [];
   status: PaymentStatus = 'CAPTURED';
+  currency = 'MYR';
   refunds: Refund[] = [refund()];
   hold: (request: RequestRecord) => boolean = () => false;
 
@@ -69,7 +70,7 @@ class HttpFixture {
         } else if (request.method === 'GET' && request.merchant === merchantB) {
           resolve(response('The payment belongs to another merchant', 404));
         } else if (request.method === 'GET' && request.path === paymentPath) {
-          resolve(response(payment(this.status)));
+          resolve(response({ ...payment(this.status), currency: this.currency }));
         } else if (request.method === 'GET' && request.path === `${paymentPath}/refunds`) {
           resolve(response(this.refunds));
         } else {
@@ -395,5 +396,40 @@ describe('merchant-scoped payment details', () => {
         expect((screen.getByLabelText('Refund Reason (Optional)') as HTMLInputElement).value).toBe('');
       }
     });
+  });
+});
+
+describe('currency-safe payment details', () => {
+  it.each(['AUTHORIZED', 'CAPTURED'] as const)('preserves historical USD display and blocks new %s financial actions', async (status) => {
+    const http = new HttpFixture();
+    http.status = status;
+    http.currency = 'USD';
+    http.refunds = [{ ...refund(), currency: 'USD' }];
+    mount();
+    await screen.findByText('Historical USD record. New captures and refunds support MYR only.');
+    expect(screen.queryByRole('button', { name: 'Capture Funds' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Issue Refund' })).toBeNull();
+    expect(screen.getAllByText(/US\$/).length).toBeGreaterThan(0);
+  });
+
+  it('does not combine mixed refund units or offer an incompatible refund', async () => {
+    const http = new HttpFixture();
+    http.refunds = [refund(), { ...refund(), id: 'usd-refund', currency: 'USD', amountCents: 5000 }];
+    mount();
+    await screen.findByText('Refund currency mismatch. Financial totals and new refunds are unavailable.');
+    expect(screen.queryByRole('button', { name: 'Issue Refund' })).toBeNull();
+    expect(screen.getAllByText('Unavailable: currency mismatch').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/US\$/).length).toBeGreaterThan(0);
+  });
+
+  it('rejects fractional sen in refund input without submitting a request', async () => {
+    const http = new HttpFixture();
+    mount();
+    await screen.findByText('refund-only-A');
+    openAction('refund');
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '1.005' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Process Refund' }).closest('form')!);
+    expect(await screen.findByText(/Please enter a positive MYR refund amount/)).toBeTruthy();
+    expect(http.matching(actionPath('refund'), 'POST')).toHaveLength(0);
   });
 });

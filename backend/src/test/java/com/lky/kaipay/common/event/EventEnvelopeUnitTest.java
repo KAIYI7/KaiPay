@@ -44,7 +44,7 @@ class EventEnvelopeUnitTest {
                     .merchantId(merchantId)
                     .customerId(UUID.randomUUID())
                     .amountCents(5000L)
-                    .currency("USD")
+                    .currency("MYR")
                     .idempotencyKey("idem-123")
                     .build();
 
@@ -122,7 +122,7 @@ class EventEnvelopeUnitTest {
                     .merchantId(merchantId)
                     .customerId(customerId)
                     .amountCents(12900L)
-                    .currency("USD")
+                    .currency("MYR")
                     .idempotencyKey("key-roundtrip-1")
                     .build();
 
@@ -146,7 +146,7 @@ class EventEnvelopeUnitTest {
             assertThat(json).contains("\"merchantId\":\"" + merchantId + "\"");
             assertThat(json).contains("\"version\":1");
             assertThat(json).contains("\"amountCents\":12900");
-            assertThat(json).contains("\"currency\":\"USD\"");
+            assertThat(json).contains("\"currency\":\"MYR\"");
             assertThat(json).contains("\"idempotencyKey\":\"key-roundtrip-1\"");
 
             EventEnvelope<PaymentInitiatedEvent> deserialized = objectMapper.readValue(
@@ -168,7 +168,7 @@ class EventEnvelopeUnitTest {
             assertThat(deserializedPayload.getMerchantId()).isEqualTo(merchantId);
             assertThat(deserializedPayload.getCustomerId()).isEqualTo(customerId);
             assertThat(deserializedPayload.getAmountCents()).isEqualTo(12900L);
-            assertThat(deserializedPayload.getCurrency()).isEqualTo("USD");
+            assertThat(deserializedPayload.getCurrency()).isEqualTo("MYR");
             assertThat(deserializedPayload.getIdempotencyKey()).isEqualTo("key-roundtrip-1");
         }
     }

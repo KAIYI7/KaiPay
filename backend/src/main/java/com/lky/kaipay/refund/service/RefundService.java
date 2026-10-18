@@ -64,6 +64,11 @@ public class RefundService {
         }
 
         // 3. Validate status: must be CAPTURED or PARTIALLY_REFUNDED
+        com.lky.kaipay.common.MoneyCurrency.requireMyr(payment.getCurrency());
+        if (refundRepository.findByPaymentId(paymentId).stream()
+                .anyMatch(refund -> !payment.getCurrency().equals(refund.getCurrency()))) {
+            throw new InvalidRefundException("Stored refund currency conflicts with payment currency");
+        }
         if (payment.getStatus() != PaymentStatus.CAPTURED && payment.getStatus() != PaymentStatus.PARTIALLY_REFUNDED) {
             throw new InvalidRefundException("Cannot refund payment in status " + payment.getStatus());
         }
@@ -74,7 +79,7 @@ public class RefundService {
         long maxRefundable = payment.getAmountCents() - totalRefunded;
 
         if (request.getAmountCents() > maxRefundable) {
-            throw new InvalidRefundException("Refund amount exceeds refundable balance of " + maxRefundable + " cents");
+            throw new InvalidRefundException("Refund amount exceeds refundable balance of " + maxRefundable + " sen");
         }
 
         // 5. Create and save Refund entity

@@ -1,15 +1,23 @@
 /**
- * Formats minor currency units (cents) into human-readable currency strings.
- * e.g., 1050 cents -> "$10.50"
+ * amountCents retains its API name; for MYR it is integer sen (100 sen = RM1).
+ * Explicit historical currency codes are preserved for display.
  */
-export function formatCentsToCurrency(amountCents: number, currency: string = 'USD'): string {
-  const dollars = amountCents / 100;
-  return new Intl.NumberFormat('en-US', {
+export function formatCentsToCurrency(amountCents: number, currency: string = 'MYR'): string {
+  const majorUnits = amountCents / 100;
+  return new Intl.NumberFormat('en-MY', {
     style: 'currency',
     currency: currency.toUpperCase(),
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(dollars);
+  }).format(majorUnits);
+}
+
+/** Parse MYR form input without rounding away fractional sen or unsafe integers. */
+export function parseMyrToSen(value: string): number | null {
+  if (!/^\d+(?:\.\d{1,2})?$/.test(value)) return null;
+  const [ringgit, fraction = ''] = value.split('.');
+  const sen = Number(ringgit) * 100 + Number(fraction.padEnd(2, '0'));
+  return Number.isSafeInteger(sen) && sen > 0 ? sen : null;
 }
 
 /**

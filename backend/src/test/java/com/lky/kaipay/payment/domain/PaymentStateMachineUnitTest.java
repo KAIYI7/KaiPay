@@ -125,7 +125,7 @@ class PaymentStateMachineUnitTest {
         void paymentEntityThrowsOnIllegalTransition() {
             Payment payment = Payment.builder()
                     .amountCents(5000L)
-                    .currency("USD")
+                    .currency("MYR")
                     .status(PaymentStatus.CREATED)
                     .idempotencyKey("key-1")
                     .build();
@@ -140,7 +140,7 @@ class PaymentStateMachineUnitTest {
         void paymentEntityTransitionsSuccessfully() {
             Payment payment = Payment.builder()
                     .amountCents(5000L)
-                    .currency("USD")
+                    .currency("MYR")
                     .status(PaymentStatus.CREATED)
                     .idempotencyKey("key-1")
                     .build();

@@ -29,9 +29,9 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
     Page<Payment> findByMerchantId(UUID merchantId, Pageable pageable);
     Page<Payment> findByMerchantIdAndStatus(UUID merchantId, PaymentStatus status, Pageable pageable);
 
-    @Query("SELECT COALESCE(SUM(p.amountCents), 0L) FROM Payment p WHERE p.merchant.id = :merchantId AND p.status IN ('CAPTURED', 'PARTIALLY_REFUNDED', 'REFUNDED')")
+    @Query("SELECT COALESCE(SUM(p.amountCents), 0L) FROM Payment p WHERE p.merchant.id = :merchantId AND p.currency = 'MYR' AND p.status IN ('CAPTURED', 'PARTIALLY_REFUNDED', 'REFUNDED')")
     Long sumSuccessfulVolumeByMerchantId(@Param("merchantId") UUID merchantId);
 
-    @Query("SELECT COALESCE(SUM(p.amountCents), 0L) FROM Payment p WHERE p.merchant.id = :merchantId AND p.status = 'AUTHORIZED'")
+    @Query("SELECT COALESCE(SUM(p.amountCents), 0L) FROM Payment p WHERE p.merchant.id = :merchantId AND p.currency = 'MYR' AND p.status = 'AUTHORIZED'")
     Long sumPendingSettlementByMerchantId(@Param("merchantId") UUID merchantId);
 }
