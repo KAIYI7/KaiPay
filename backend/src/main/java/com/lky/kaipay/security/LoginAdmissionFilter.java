@@ -27,6 +27,7 @@ final class LoginAdmissionFilter extends OncePerRequestFilter {
                                               FilterChain chain) throws ServletException, IOException {
         var decision = admission.acquire(request.getRemoteAddr());
         if (decision.permit() == null) {
+            SecurityDiagnostics.record(SecurityDiagnostics.Event.LOGIN_ADMISSION_DENIED, null, null);
             // Failed identity switching must not preserve a previous logged-in principal.
             SecurityContextHolder.clearContext();
             var session = request.getSession(false);

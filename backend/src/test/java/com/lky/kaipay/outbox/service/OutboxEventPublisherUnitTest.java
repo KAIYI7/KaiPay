@@ -133,7 +133,7 @@ class OutboxEventPublisherUnitTest {
         assertThat(result).isEqualTo(1);
         assertThat(record1.getStatus()).isEqualTo(PaymentEventOutboxStatus.PENDING);
         assertThat(record1.getRetryCount()).isEqualTo(1);
-        assertThat(record1.getLastError()).contains("Kafka broker unreachable");
+        assertThat(record1.getLastError()).isEqualTo("TimeoutException");
         assertThat(record1.getNextAttemptAt()).isEqualTo(now.plusSeconds(1));
         assertThat(record1.getLastAttemptAt()).isEqualTo(now);
         verify(outboxRepository).save(record1);
@@ -275,7 +275,7 @@ class OutboxEventPublisherUnitTest {
             assertThat(interrupted.getPublishedAt()).isNull();
             assertThat(interrupted.getQuarantinedAt()).isNull();
             assertThat(interrupted.getLastError()).contains(path.equals("wrapped-java")
-                    ? "java.lang.InterruptedException" : "org.apache.kafka.common.errors.InterruptException");
+                    ? "InterruptedException" : "InterruptException");
             verify(kafkaTemplate, times(1)).send(any(ProducerRecord.class));
             verify(outboxRepository).save(interrupted);
             verify(outboxRepository, never()).save(untouched);

@@ -1,5 +1,7 @@
 package com.lky.kaipay.refund.service;
 
+import com.lky.kaipay.common.observability.FailureDiagnostics;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.common.event.EventEnvelope;
@@ -129,7 +131,7 @@ public class RefundService {
         try {
             jsonPayload = objectMapper.writeValueAsString(envelope);
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize outbox event envelope for refund {}", savedRefund.getId(), e);
+            log.error("Failed to serialize outbox event envelope for refund {}: {}", savedRefund.getId(), FailureDiagnostics.summary(e));
             throw new IllegalStateException("Failed to serialize outbox event envelope", e);
         }
 

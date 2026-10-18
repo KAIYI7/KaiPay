@@ -93,3 +93,11 @@ logging:
     com.lky.kaipay: INFO
     org.springframework.web: INFO
     org.hibernate.SQL: INFO
+    # These framework loggers emit raw records, SQL row details or exception chains.
+    # Application failure categories/SQLSTATE + correlation remain available instead.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+    org.springframework.kafka.support.LoggingProducerListener: OFF
+    org.springframework.kafka.listener.DefaultErrorHandler: OFF
+    org.springframework.kafka.listener.KafkaMessageListenerContainer: OFF
+    org.springframework.kafka.listener.DeadLetterPublishingRecoverer: OFF
+    org.springframework.kafka.retrytopic.DeadLetterPublishingRecovererFactory: OFF

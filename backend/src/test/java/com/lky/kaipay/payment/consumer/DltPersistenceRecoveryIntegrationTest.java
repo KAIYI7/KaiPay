@@ -2,7 +2,6 @@ package com.lky.kaipay.payment.consumer;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.classic.spi.ThrowableProxy;
 import ch.qos.logback.core.AppenderBase;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.AbstractPostgresIntegrationTest;
@@ -30,7 +29,6 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 
 import java.nio.charset.StandardCharsets;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -75,15 +73,15 @@ class DltPersistenceRecoveryIntegrationTest extends AbstractPostgresIntegrationT
                 .filter(container -> Arrays.asList(container.getContainerProperties().getTopics()).contains(DLT_TOPIC))
                 .findFirst().orElseThrow();
         CountDownLatch saveFailed = new CountDownLatch(1);
-        AtomicReference<Throwable> rejection = new AtomicReference<>();
+        AtomicReference<String> rejection = new AtomicReference<>();
         Logger logger = (Logger) LoggerFactory.getLogger(PaymentProcessingConsumer.class);
         AppenderBase<ILoggingEvent> barrier = new AppenderBase<>() {
             @Override
             protected void append(ILoggingEvent event) {
-                if ("Failed to persist dead letter event record".equals(event.getFormattedMessage())
+                if (event.getFormattedMessage().startsWith("Failed to persist dead letter event record: ")
                         && correlation.equals(event.getMDCPropertyMap().get("traceId"))) {
-                    if (event.getThrowableProxy() instanceof ThrowableProxy throwable
-                            && rejection.compareAndSet(null, throwable.getThrowable())) {
+                    if (event.getFormattedMessage().contains("sqlState=23514")
+                            && rejection.compareAndSet(null, event.getFormattedMessage())) {
                         // Called synchronously on the listener thread, before the exception is rethrown.
                         // One record per poll ensures no next DLT attempt runs before the pause.
                         dlt.pause();
@@ -118,8 +116,8 @@ class DltPersistenceRecoveryIntegrationTest extends AbstractPostgresIntegrationT
 
             assertThat(saveFailed.await(20, TimeUnit.SECONDS)).as("real PostgreSQL save failure").isTrue();
             Awaitility.await().atMost(TIMEOUT).until(dlt::isContainerPaused);
-            assertThat(isInjectedConstraintViolation(rejection.get())).as("targeted CHECK violation, SQLSTATE 23514")
-                    .isTrue();
+            assertThat(rejection.get()).as("targeted PostgreSQL CHECK violation")
+                    .contains("sqlState=23514").doesNotContain(CONSTRAINT, payload);
             assertThat(jdbc.queryForObject("SELECT count(*) FROM dead_letter_events WHERE event_id = ?",
                     Long.class, eventId)).isZero();
 
@@ -180,11 +178,4 @@ class DltPersistenceRecoveryIntegrationTest extends AbstractPostgresIntegrationT
         }
     }
 
-    private boolean isInjectedConstraintViolation(Throwable failure) {
-        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof SQLException sql && "23514".equals(sql.getSQLState())
-                    && sql.getMessage().contains(CONSTRAINT)) return true;
-        }
-        return false;
-    }
 }

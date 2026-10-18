@@ -33,7 +33,7 @@ public class PaymentController {
             @RequestHeader(name = "Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody CreatePaymentRequest request
     ) {
-        log.info("Received payment creation request for merchant {} with idempotency key {}", merchantId, idempotencyKey);
+        log.info("Received payment creation request for merchant {}", merchantId);
         PaymentResponse response = paymentService.createPayment(merchantId, idempotencyKey, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Payment created successfully", response));
     }
@@ -51,7 +51,7 @@ public class PaymentController {
         org.springframework.data.domain.Sort sort = direction.equalsIgnoreCase("asc")
                 ? org.springframework.data.domain.Sort.by(sortBy).ascending()
                 : org.springframework.data.domain.Sort.by(sortBy).descending();
-        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size, sort);
+        org.springframework.data.domain.Pageable pageable = com.lky.kaipay.common.api.BoundedPageRequest.of(page, size, sort);
         org.springframework.data.domain.Page<PaymentResponse> response = paymentService.listPayments(merchantId, status, pageable);
         return ResponseEntity.ok(ApiResponse.success("Payments retrieved successfully", response));
     }

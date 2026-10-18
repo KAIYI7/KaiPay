@@ -66,14 +66,6 @@ export const OutboxStreamPage: React.FC = () => {
     setPage(0);
   };
 
-  const parseJson = (str: string) => {
-    try {
-      return JSON.stringify(JSON.parse(str), null, 2);
-    } catch {
-      return str;
-    }
-  };
-
   const getEventTypeBadgeClass = (eventType: string) => {
     if (eventType.includes('Created')) return 'bg-sky-500/15 text-sky-400 border-sky-500/30';
     if (eventType.includes('Authorized')) return 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30';
@@ -110,6 +102,10 @@ export const OutboxStreamPage: React.FC = () => {
               Durable event publication with retries and operator recovery for quarantined records. Payment state transitions
               and outbox records are committed atomically within PostgreSQL ACID transactions before being relayed to
               Kafka by the asynchronous <code className="text-emerald-400 font-mono">OutboxEventPublisher</code> scheduler.
+            </p>
+            <p className="text-xs text-slate-400">
+              Browser diagnostics omit payloads, error details and transport headers other than a validated correlation ID.
+              Raw evidence remains in restricted storage.
             </p>
           </div>
 
@@ -307,7 +303,7 @@ export const OutboxStreamPage: React.FC = () => {
                           className="text-xs h-7 px-2.5 font-sans gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
                         >
                           <Code2 className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Payload</span>
+                          <span>Inspect</span>
                         </Button>
                       </td>
                     </tr>
@@ -444,9 +440,7 @@ export const OutboxStreamPage: React.FC = () => {
                     <AlertTriangle className="w-4 h-4" />
                     <span>Publisher Relay Error (Retry #{selectedEvent.retryCount})</span>
                   </div>
-                  <pre className="font-mono text-[11px] whitespace-pre-wrap text-rose-200 bg-rose-950/40 p-2.5 rounded border border-rose-800/40">
-                    {selectedEvent.lastError}
-                  </pre>
+                  <p>Error details are omitted from browser diagnostics.</p>
                 </div>
               )}
 
@@ -456,14 +450,11 @@ export const OutboxStreamPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <Code2 className="w-4 h-4 text-emerald-400" />
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                      Serialized Event Payload (JSON)
+                      Payload Omitted
                     </h4>
                   </div>
-                  <CopyButton text={selectedEvent.payload} />
                 </div>
-                <pre className="bg-slate-950 p-4 rounded-xl font-mono text-xs text-emerald-300 overflow-x-auto border border-slate-800 leading-relaxed">
-                  {parseJson(selectedEvent.payload)}
-                </pre>
+                <p className="text-xs text-slate-400">Payload contents are omitted from browser diagnostics. Raw evidence remains in restricted storage.</p>
               </div>
 
               {/* Headers Section */}
@@ -473,7 +464,7 @@ export const OutboxStreamPage: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <Info className="w-4 h-4 text-sky-400" />
                       <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                        Event Transport Headers (Map)
+                        Validated Correlation ID
                       </h4>
                     </div>
                     <CopyButton text={JSON.stringify(selectedEvent.headers, null, 2)} />

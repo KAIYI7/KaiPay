@@ -1,6 +1,7 @@
 package com.lky.kaipay.dlt.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.lky.kaipay.common.api.DiagnosticProjection;
 import com.lky.kaipay.dlt.domain.DeadLetterEvent;
 import lombok.Builder;
 import lombok.Getter;
@@ -34,11 +35,11 @@ public class DeadLetterEventResponse {
                 .originalOffset(entity.getOriginalOffset())
                 .eventId(entity.getEventId())
                 .paymentId(entity.getPaymentId())
-                .exceptionClass(entity.getExceptionClass())
-                .failureMessage(entity.getFailureMessage())
+                .exceptionClass(DiagnosticProjection.redact(entity.getExceptionClass()))
+                .failureMessage(DiagnosticProjection.redact(entity.getFailureMessage()))
                 .retryCount(entity.getRetryCount())
-                .payload(entity.getPayload())
-                .headers(entity.getHeaders())
+                .payload(DiagnosticProjection.redact(entity.getPayload()))
+                .headers(DiagnosticProjection.correlationHeaders(entity.getHeaders()))
                 .createdAt(entity.getCreatedAt())
                 .build();
     }

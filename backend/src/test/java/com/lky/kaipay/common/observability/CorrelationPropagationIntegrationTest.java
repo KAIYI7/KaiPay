@@ -221,7 +221,10 @@ class CorrelationPropagationIntegrationTest extends AbstractPostgresIntegrationT
             assertThat(events).hasSize(1);
             assertThat(events.getFirst().getHeaders().get(HEADER)).isInstanceOf(String.class).isEqualTo(trace);
             assertThat(events.getFirst().getExceptionClass()).contains("GatewayTimeoutException");
-            assertTraceLog("key=" + creation.paymentId(), "Handling Dead Letter", trace);
+            var persisted = events.getFirst();
+            assertTraceLog("topic=" + persisted.getOriginalTopic() + ", partition="
+                    + persisted.getOriginalPartition() + ", offset=" + persisted.getOriginalOffset(),
+                    "Handling Dead Letter", trace);
             assertTraceLog("Saved dead letter event record", trace);
         });
         assertGatewayAttempts(creation.paymentId(), trace, 3);
@@ -330,8 +333,11 @@ class CorrelationPropagationIntegrationTest extends AbstractPostgresIntegrationT
     }
 
     private void assertLifecycleConsumed(PaymentEventOutbox row, String trace) {
-        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
-                assertTraceLog("eventId=" + eventId(row), "Skipping lifecycle notification", trace));
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            UUID paymentId = UUID.fromString(mapper.readTree(row.getPayload()).path("payload").path("paymentId").asText());
+            assertTraceLog("paymentId=" + paymentId + ", eventType=" + row.getEventType(),
+                    "Skipping lifecycle notification", trace);
+        });
     }
 
     private List<LogSnapshot> gatewayAttempts(UUID paymentId) {

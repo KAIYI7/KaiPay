@@ -35,7 +35,7 @@ public class RefundController {
             @PathVariable("paymentId") UUID paymentId,
             @Valid @RequestBody CreateRefundRequest request
     ) {
-        log.info("Received refund request for payment {} by merchant {} with idempotency key {}", paymentId, merchantId, idempotencyKey);
+        log.info("Received refund request for payment {} by merchant {}", paymentId, merchantId);
         RefundResponse response = refundService.createRefund(merchantId, paymentId, idempotencyKey, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Refund created successfully", response));
     }

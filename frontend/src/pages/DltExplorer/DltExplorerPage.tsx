@@ -76,24 +76,6 @@ export const DltExplorerPage: React.FC = () => {
     setSearchParams({});
   };
 
-  const parseJson = (str: string) => {
-    try {
-      return JSON.stringify(JSON.parse(str), null, 2);
-    } catch {
-      return str;
-    }
-  };
-
-  const getExceptionBadgeClass = (exceptionClass: string) => {
-    if (exceptionClass.includes('PoisonPill') || exceptionClass.includes('Deserialization')) {
-      return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
-    }
-    if (exceptionClass.includes('Transient') || exceptionClass.includes('Timeout')) {
-      return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-    }
-    return 'bg-red-500/20 text-red-300 border-red-500/40';
-  };
-
   return (
     <div className="space-y-6">
       {/* Top Banner: Internal Platform Operational Tool */}
@@ -121,6 +103,10 @@ export const DltExplorerPage: React.FC = () => {
               Non-blocking retry exhaustion buffer and poison pill isolation monitoring. Messages that exceed maximum retry attempts
               on <code className="text-amber-400 font-mono">kaipay.payment.processing-retry</code> or trigger deserialization failures are routed to
               the <code className="text-rose-400 font-mono">kaipay.payment.processing.DLT</code> topic and persisted in the Dead Letter Graveyard.
+            </p>
+            <p className="text-xs text-slate-400">
+              Browser diagnostics omit payloads, exception details and transport headers other than a validated correlation ID.
+              Raw evidence remains in restricted storage.
             </p>
           </div>
 
@@ -231,7 +217,7 @@ export const DltExplorerPage: React.FC = () => {
                   <th className="px-4 py-3.5 font-semibold">DLT Record ID</th>
                   <th className="px-4 py-3.5 font-semibold">Payment ID</th>
                   <th className="px-4 py-3.5 font-semibold">Original Topic &amp; Partition</th>
-                  <th className="px-4 py-3.5 font-semibold">Exception Class</th>
+                  <th className="px-4 py-3.5 font-semibold">Exception Details</th>
                   <th className="px-4 py-3.5 font-semibold">Retries</th>
                   <th className="px-4 py-3.5 font-semibold">Failure Message</th>
                   <th className="px-4 py-3.5 font-semibold">Timestamp</th>
@@ -280,13 +266,8 @@ export const DltExplorerPage: React.FC = () => {
 
                     {/* Exception Class */}
                     <td className="px-4 py-3 font-sans">
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium border ${getExceptionBadgeClass(
-                          event.exceptionClass
-                        )}`}
-                        title={event.exceptionClass}
-                      >
-                        {event.exceptionClass.split('.').pop() || event.exceptionClass}
+                      <span className="text-slate-500 text-[11px]">
+                        Omitted from browser
                       </span>
                     </td>
 
@@ -299,8 +280,8 @@ export const DltExplorerPage: React.FC = () => {
                     </td>
 
                     {/* Failure Message */}
-                    <td className="px-4 py-3 font-sans max-w-xs truncate text-slate-400" title={event.failureMessage || ''}>
-                      {event.failureMessage || '—'}
+                    <td className="px-4 py-3 font-sans max-w-xs truncate text-slate-400">
+                      {event.failureMessage ? 'Omitted from browser' : '—'}
                     </td>
 
                     {/* Timestamp */}
@@ -372,13 +353,6 @@ export const DltExplorerPage: React.FC = () => {
                 <div>
                   <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                     <span>Dead Letter Event Record</span>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded font-mono border ${getExceptionBadgeClass(
-                        selectedEvent.exceptionClass
-                      )}`}
-                    >
-                      {selectedEvent.exceptionClass.split('.').pop()}
-                    </span>
                   </h3>
                   <p className="text-xs text-slate-400 font-mono mt-0.5">DLT ID: {selectedEvent.id}</p>
                 </div>
@@ -438,20 +412,9 @@ export const DltExplorerPage: React.FC = () => {
               <div className="p-4 rounded-xl bg-rose-950/30 border border-rose-500/30 text-rose-200 text-xs space-y-2">
                 <div className="flex items-center gap-2 font-semibold text-rose-400">
                   <AlertTriangle className="w-4 h-4" />
-                  <span>Exception Details &amp; Root Cause</span>
+                  <span>Exception Details Omitted</span>
                 </div>
-                <div className="font-mono text-[11px] space-y-1">
-                  <div>
-                    <span className="text-slate-400">Class: </span>
-                    <span className="text-rose-300 font-semibold">{selectedEvent.exceptionClass}</span>
-                  </div>
-                  {selectedEvent.failureMessage && (
-                    <div>
-                      <span className="text-slate-400">Message: </span>
-                      <span className="text-rose-200">{selectedEvent.failureMessage}</span>
-                    </div>
-                  )}
-                </div>
+                <p>Exception class and message are omitted from browser diagnostics.</p>
               </div>
 
               {/* Payload Section */}
@@ -460,14 +423,11 @@ export const DltExplorerPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <Code2 className="w-4 h-4 text-rose-400" />
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                      Serialized Payload (Poison Pill / Exhausted Event JSON)
+                      Payload Omitted
                     </h4>
                   </div>
-                  <CopyButton text={selectedEvent.payload} />
                 </div>
-                <pre className="bg-slate-950 p-4 rounded-xl font-mono text-xs text-rose-300 overflow-x-auto border border-slate-800 leading-relaxed max-h-60">
-                  {parseJson(selectedEvent.payload)}
-                </pre>
+                <p className="text-xs text-slate-400">Payload contents are omitted from browser diagnostics. Raw evidence remains in restricted storage.</p>
               </div>
 
               {/* Transport Headers Section */}
@@ -477,7 +437,7 @@ export const DltExplorerPage: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <Info className="w-4 h-4 text-sky-400" />
                       <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                        Kafka Headers &amp; Retry Metadata
+                        Validated Correlation ID
                       </h4>
                     </div>
                     <CopyButton text={JSON.stringify(selectedEvent.headers, null, 2)} />

@@ -1,5 +1,7 @@
 package com.lky.kaipay.outbox.service;
 
+import com.lky.kaipay.common.observability.FailureDiagnostics;
+
 import com.lky.kaipay.common.observability.CorrelationContext;
 import com.lky.kaipay.outbox.domain.PaymentEventOutbox;
 import com.lky.kaipay.outbox.repository.PaymentEventOutboxRepository;
@@ -88,8 +90,8 @@ public class OutboxEventPublisher {
                 } catch (Exception e) {
                     Throwable failure = unwrapSendFailure(e);
                     log.error("Failed to publish outbox event [id={}, aggregateId={}]: {}",
-                            record.getId(), record.getAggregateId(), failure.getMessage(), e);
-                    String error = failure.getClass().getName() + ": " + failure.getMessage();
+                            record.getId(), record.getAggregateId(), FailureDiagnostics.summary(failure));
+                    String error = FailureDiagnostics.summary(failure);
                     // Only this record-specific rejection proves it cannot be delivered unchanged.
                     // Timeouts, auth/config failures and unknown errors retain indefinite retry eligibility.
                     if (failure instanceof RecordTooLargeException) {

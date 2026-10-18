@@ -1,6 +1,7 @@
 package com.lky.kaipay.outbox.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.lky.kaipay.common.api.DiagnosticProjection;
 import com.lky.kaipay.outbox.domain.PaymentEventOutbox;
 import com.lky.kaipay.outbox.domain.PaymentEventOutboxStatus;
 import lombok.Builder;
@@ -35,11 +36,11 @@ public class OutboxEventResponse {
                 .aggregateType(outbox.getAggregateType())
                 .aggregateId(outbox.getAggregateId())
                 .eventType(outbox.getEventType())
-                .payload(outbox.getPayload())
-                .headers(outbox.getHeaders())
+                .payload(DiagnosticProjection.redact(outbox.getPayload()))
+                .headers(DiagnosticProjection.correlationHeaders(outbox.getHeaders()))
                 .status(outbox.getStatus())
                 .retryCount(outbox.getRetryCount())
-                .lastError(outbox.getLastError())
+                .lastError(DiagnosticProjection.redact(outbox.getLastError()))
                 .createdAt(outbox.getCreatedAt())
                 .publishedAt(outbox.getPublishedAt())
                 .nextAttemptAt(outbox.getNextAttemptAt())

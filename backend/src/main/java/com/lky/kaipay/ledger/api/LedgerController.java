@@ -10,7 +10,6 @@ import com.lky.kaipay.security.MerchantApplicationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
@@ -49,13 +48,12 @@ public class LedgerController {
             @RequestParam(name = "sortBy", defaultValue = "postedAt") String sortBy,
             @RequestParam(name = "direction", defaultValue = "desc") String direction
     ) {
-        log.info("Listing journals: merchantId={}, page={}, size={}, sortBy={}, direction={}",
-                merchantId, page, size, sortBy, direction);
+        log.info("Listing journals: merchantId={}, page={}, size={}", merchantId, page, size);
 
         Sort sort = direction.equalsIgnoreCase("asc")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
-        Pageable pageable = PageRequest.of(page, size, sort);
+        Pageable pageable = com.lky.kaipay.common.api.BoundedPageRequest.of(page, size, sort);
 
         Page<JournalResponse> response = journalApplicationService.list(merchantId, pageable);
         return ResponseEntity.ok(ApiResponse.success("Journals retrieved successfully", response));

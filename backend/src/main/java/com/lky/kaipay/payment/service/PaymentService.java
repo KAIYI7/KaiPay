@@ -1,5 +1,7 @@
 package com.lky.kaipay.payment.service;
 
+import com.lky.kaipay.common.observability.FailureDiagnostics;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.common.event.EventEnvelope;
@@ -116,7 +118,7 @@ public class PaymentService {
         try {
             jsonPayload = objectMapper.writeValueAsString(envelope);
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize outbox event envelope for payment {}", savedPayment.getId(), e);
+            log.error("Failed to serialize outbox event envelope for payment {}: {}", savedPayment.getId(), FailureDiagnostics.summary(e));
             throw new IllegalStateException("Failed to serialize outbox event envelope", e);
         }
 
@@ -219,7 +221,7 @@ public class PaymentService {
         try {
             jsonPayload = objectMapper.writeValueAsString(envelope);
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize outbox event envelope for payment capture {}", savedPayment.getId(), e);
+            log.error("Failed to serialize outbox event envelope for payment capture {}: {}", savedPayment.getId(), FailureDiagnostics.summary(e));
             throw new IllegalStateException("Failed to serialize outbox event envelope", e);
         }
 

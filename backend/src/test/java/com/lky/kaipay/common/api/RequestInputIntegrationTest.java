@@ -118,6 +118,21 @@ class RequestInputIntegrationTest extends AbstractPostgresIntegrationTest {
         assertThat(businessCounts()).containsExactly(originalCounts);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/v1/payments", "/v1/ledger/journals", "/v1/events/dlt", "/v1/events/outbox"})
+    void paginationRejectsUnboundedOrInvalidResultsBeforeQuery(String route) throws Exception {
+        HttpHeaders identity = route.startsWith("/v1/events/") ? security().adminHeaders() : headers();
+        for (String query : new String[] {"?size=0", "?size=101", "?size=2147483647", "?page=-1"}) {
+            ResponseEntity<String> response = restTemplate.exchange(route + query, HttpMethod.GET,
+                    new HttpEntity<Void>(identity), String.class);
+            assertBadRequest(response, "Page must be non-negative and size must be between 1 and 100", route);
+        }
+        ResponseEntity<String> accepted = restTemplate.exchange(route + "?size=100", HttpMethod.GET,
+                new HttpEntity<Void>(identity), String.class);
+        assertThat(accepted.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(objectMapper.readTree(accepted.getBody()).path("data").path("size").asInt()).isEqualTo(100);
+    }
+
     private HttpHeaders headers() {
         HttpHeaders headers = security().merchantHeaders(merchant.getId());
         headers.setContentType(MediaType.APPLICATION_JSON);

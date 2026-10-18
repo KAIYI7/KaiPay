@@ -1,5 +1,7 @@
 package com.lky.kaipay.payment.consumer;
 
+import com.lky.kaipay.common.observability.FailureDiagnostics;
+
 import com.lky.kaipay.common.observability.CorrelationContext;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -79,8 +81,8 @@ public class PaymentProcessingConsumer {
                     case "PaymentCapturedEvent", "PaymentRefundedEvent" -> {
                         // State and accounting already committed in the synchronous capture/refund transaction.
                         // This authorization group owns no side effect or deduplication record for notifications.
-                        log.info("Skipping lifecycle notification in authorization consumer: eventId={}, paymentId={}, eventType={}",
-                                rootNode.path("eventId").asText("legacy"), paymentId, eventType);
+                        log.info("Skipping lifecycle notification in authorization consumer: paymentId={}, eventType={}",
+                                paymentId, eventType);
                         if (ack != null) ack.acknowledge();
                         return;
                     }
@@ -105,19 +107,23 @@ public class PaymentProcessingConsumer {
                 if (ack != null) ack.acknowledge();
             } catch (TransientDataAccessException | DataAccessResourceFailureException
                      | CannotCreateTransactionException e) {
+                log.warn("Authorization persistence failure at partition={}, offset={}: {}",
+                        record.partition(), record.offset(), FailureDiagnostics.summary(e));
                 throw new AuthorizationPersistenceException(e);
             } catch (TransactionSystemException e) {
+                log.warn("Authorization transaction failure at partition={}, offset={}: {}",
+                        record.partition(), record.offset(), FailureDiagnostics.summary(e));
                 // Only a connection-class SQL failure establishes a potentially uncertain commit.
                 if (connectionFailure(e)) throw new AuthorizationPersistenceException(e);
                 throw e;
             } catch (GatewayTimeoutException | GatewayUnavailableException e) {
-                log.warn("Transient gateway error during event processing [key={}]: {}", record.key(), e.getMessage());
+                log.warn("Transient gateway error at partition={}, offset={}: {}", record.partition(), record.offset(), FailureDiagnostics.summary(e));
                 throw e; // Rethrow to trigger @RetryableTopic
             } catch (NonRetryableGatewayException e) {
-                log.error("Non-retryable gateway error during event processing [key={}]: {}", record.key(), e.getMessage(), e);
+                log.error("Non-retryable gateway error at partition={}, offset={}: {}", record.partition(), record.offset(), FailureDiagnostics.summary(e));
                 throw e;
             } catch (Exception e) {
-                log.error("Fatal error during event processing [key={}]: {}", record.key(), e.getMessage(), e);
+                log.error("Fatal event processing error at partition={}, offset={}: {}", record.partition(), record.offset(), FailureDiagnostics.summary(e));
                 throw new RuntimeException("Fatal payment event processing failed", e);
             }
         }
@@ -133,8 +139,8 @@ public class PaymentProcessingConsumer {
     ) {
         String correlationId = CorrelationContext.normalizeKafka(record);
         try (var ignored = CorrelationContext.open(correlationId)) {
-            log.error("Handling Dead Letter message from topic={}, partition={}, offset={}, key={}",
-                    record.topic(), record.partition(), record.offset(), record.key());
+            log.error("Handling Dead Letter message from topic={}, partition={}, offset={}",
+                    record.topic(), record.partition(), record.offset());
 
             String resolvedExceptionClass = (exceptionCauseFqcn != null && !exceptionCauseFqcn.isBlank())
                     ? exceptionCauseFqcn
@@ -152,7 +158,7 @@ public class PaymentProcessingConsumer {
                     paymentId = UUID.fromString(payloadNode.get("paymentId").asText());
                 }
             } catch (Exception parseEx) {
-                log.warn("Could not parse payload for DLT message: {}", parseEx.getMessage());
+                log.warn("Could not parse payload for DLT message: {}", FailureDiagnostics.summary(parseEx));
             }
 
             String rawPayload = record.value();
@@ -211,7 +217,7 @@ public class PaymentProcessingConsumer {
                 deadLetterEventRepository.save(dltEvent);
                 log.info("Saved dead letter event record with id {}", dltEvent.getId());
             } catch (Exception e) {
-                log.error("Failed to persist dead letter event record", e);
+                log.error("Failed to persist dead letter event record: {}", FailureDiagnostics.summary(e));
                 throw e;
             }
 

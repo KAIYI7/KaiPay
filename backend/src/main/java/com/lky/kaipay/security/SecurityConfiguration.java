@@ -71,20 +71,33 @@ public class SecurityConfiguration {
                             new org.springframework.security.web.context.HttpSessionSecurityContextRepository()
                                     .saveContext(context, request, response);
                         }
+                        SecurityDiagnostics.record(SecurityDiagnostics.Event.LOGIN_SUCCEEDED, authentication, null);
                         response.setStatus(204);
                     })
                     .failureHandler((request, response, exception) -> {
+                        SecurityDiagnostics.record(SecurityDiagnostics.Event.LOGIN_FAILED, null, null);
                         org.springframework.security.core.context.SecurityContextHolder.clearContext();
                         var session = request.getSession(false);
                         if (session != null) session.invalidate();
                         error(mapper, request, response, 401);
                     }))
             .logout(logout -> logout.logoutUrl("/v1/auth/logout").invalidateHttpSession(true)
-                    .deleteCookies("JSESSIONID").logoutSuccessHandler((request, response, authentication) -> response.setStatus(204)))
+                    .deleteCookies("JSESSIONID").logoutSuccessHandler((request, response, authentication) -> {
+                        SecurityDiagnostics.record(SecurityDiagnostics.Event.LOGOUT_SUCCEEDED, authentication, null);
+                        response.setStatus(204);
+                    }))
             .exceptionHandling(exceptions -> exceptions
-                    .authenticationEntryPoint((request, response, exception) -> error(mapper, request, response, 401))
-                    .accessDeniedHandler((request, response, exception) -> error(mapper, request, response,
-                            authenticated() ? 403 : 401)))
+                    .authenticationEntryPoint((request, response, exception) -> {
+                        SecurityDiagnostics.record(SecurityDiagnostics.Event.REQUEST_UNAUTHORIZED, null, null);
+                        error(mapper, request, response, 401);
+                    })
+                    .accessDeniedHandler((request, response, exception) -> {
+                        boolean authenticated = authenticated();
+                        SecurityDiagnostics.record(authenticated ? SecurityDiagnostics.Event.REQUEST_DENIED
+                                        : SecurityDiagnostics.Event.REQUEST_UNAUTHORIZED,
+                                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication(), null);
+                        error(mapper, request, response, authenticated ? 403 : 401);
+                    }))
             .sessionManagement(session -> session.sessionFixation(fixation -> fixation.changeSessionId()))
             .requestCache(cache -> cache.disable())
             .httpBasic(basic -> basic.disable());

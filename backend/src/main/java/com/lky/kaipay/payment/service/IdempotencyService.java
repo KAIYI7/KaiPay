@@ -1,5 +1,7 @@
 package com.lky.kaipay.payment.service;
 
+import com.lky.kaipay.common.observability.FailureDiagnostics;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.common.exception.IdempotencyConflictException;
@@ -61,24 +63,23 @@ public class IdempotencyService {
         IdempotencyRecord record = recordOpt.get();
 
         if (record.isExpired()) {
-            log.info("Idempotency record expired for merchant {} and key {}", merchantId, idempotencyKey);
+            log.info("Idempotency record expired for merchant {}", merchantId);
             return Optional.empty();
         }
 
         if (!record.getRequestHash().equals(requestHash)) {
-            log.warn("Idempotency key mismatch for merchant {} and key {}. Stored hash: {}, Incoming hash: {}",
-                    merchantId, idempotencyKey, record.getRequestHash(), requestHash);
+            log.warn("Idempotency conflict for merchant {}", merchantId);
             throw new IdempotencyConflictException(
-                    String.format("Idempotency key '%s' was already used with a different request payload", idempotencyKey)
+                    "Idempotency key was already used with a different request payload"
             );
         }
 
-        log.info("Idempotent cache hit for merchant {} with key {}", merchantId, idempotencyKey);
+        log.info("Idempotent cache hit for merchant {}", merchantId);
         try {
             PaymentResponse cachedResponse = objectMapper.readValue(record.getResponseBody(), PaymentResponse.class);
             return Optional.of(cachedResponse);
         } catch (JsonProcessingException e) {
-            log.error("Failed to deserialize cached idempotency response body", e);
+            log.error("Failed to deserialize cached idempotency response body: {}", FailureDiagnostics.summary(e));
             throw new IllegalStateException("Failed to deserialize cached idempotency response", e);
         }
     }
@@ -96,9 +97,9 @@ public class IdempotencyService {
                     .build();
 
             idempotencyRecordRepository.save(record);
-            log.debug("Saved idempotency record for merchant {} and key {}", merchantId, idempotencyKey);
+            log.debug("Saved idempotency record for merchant {}", merchantId);
         } catch (JsonProcessingException e) {
-            log.error("Failed to serialize response for idempotency storage", e);
+            log.error("Failed to serialize response for idempotency storage: {}", FailureDiagnostics.summary(e));
             throw new IllegalStateException("Failed to serialize response for idempotency storage", e);
         }
     }

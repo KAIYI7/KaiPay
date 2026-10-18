@@ -21,6 +21,7 @@ final class SessionIdentityFilter extends OncePerRequestFilter {
             if (current.isEmpty() || !current.get().enabled()
                     || current.get().credentialVersion() != principal.credentialVersion()
                     || !current.get().role().equals(principal.role())) {
+                SecurityDiagnostics.record(SecurityDiagnostics.Event.SESSION_REVOKED, authentication, null);
                 SecurityContextHolder.clearContext();
                 var session = request.getSession(false);
                 if (session != null) session.invalidate();

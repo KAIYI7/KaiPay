@@ -77,7 +77,7 @@ class OutboxAdminControllerIntegrationTest extends AbstractPostgresIntegrationTe
         assertThat(firstItem.get("aggregateType").asText()).isEqualTo("PAYMENT");
         assertThat(firstItem.get("eventType").asText()).isEqualTo("PaymentInitiatedEvent");
         assertThat(firstItem.get("status").asText()).isEqualTo(PaymentEventOutboxStatus.PENDING.name());
-        assertThat(firstItem.get("payload").asText()).contains("paymentId");
+        assertThat(firstItem.get("payload").asText()).isEqualTo("[REDACTED]");
         assertThat(firstItem.get("headers")).isNotNull();
         assertThat(firstItem.get("createdAt")).isNotNull();
     }
@@ -154,11 +154,36 @@ class OutboxAdminControllerIntegrationTest extends AbstractPostgresIntegrationTe
         JsonNode retained = data.get("content").get(0);
         assertThat(retained.get("id").asText()).isEqualTo(quarantined.getId().toString());
         assertThat(retained.get("status").asText()).isEqualTo("QUARANTINED");
-        assertThat(retained.get("payload").asText()).contains("retained");
-        assertThat(retained.get("lastError").asText()).contains("RecordTooLargeException");
+        assertThat(retained.get("payload").asText()).isEqualTo("[REDACTED]");
+        assertThat(retained.get("lastError").asText()).isEqualTo("[REDACTED]");
         assertThat(retained.get("retryCount").asInt()).isEqualTo(1);
         assertThat(java.time.Instant.parse(retained.get("lastAttemptAt").asText())).isEqualTo(quarantined.getLastAttemptAt());
         assertThat(java.time.Instant.parse(retained.get("quarantinedAt").asText())).isEqualTo(quarantined.getQuarantinedAt());
         assertThat(retained.has("publishedAt")).isFalse();
+    }
+
+    @Test
+    void adminBrowserResponseOmitsHostileEvidenceWhileDatabaseRetainsIt() throws Exception {
+        String marker = "private-outbox-contact-credential";
+        PaymentEventOutbox event = outboxRepository.save(PaymentEventOutbox.builder().aggregateType("PAYMENT")
+                .aggregateId(UUID.randomUUID().toString()).eventType("PaymentInitiatedEvent")
+                .payload(objectMapper.writeValueAsString(Map.of("unexpected", marker)))
+                .lastError("SQL: " + marker).headers(Map.of("correlationId", "safe-correlation",
+                        "Authorization", marker, "unexpected", Map.of("nested", marker))).build());
+
+        ResponseEntity<String> response = restTemplate.exchange("/v1/events/outbox", HttpMethod.GET,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).doesNotContain(marker);
+        JsonNode item = objectMapper.readTree(response.getBody()).get("data").get("content").get(0);
+        assertThat(item.get("payload").asText()).isEqualTo("[REDACTED]");
+        assertThat(item.get("lastError").asText()).isEqualTo("[REDACTED]");
+        assertThat(item.get("headers").size()).isEqualTo(1);
+        assertThat(item.get("headers").get("X-Correlation-Id").asText()).isEqualTo("safe-correlation");
+        PaymentEventOutbox retained = outboxRepository.findById(event.getId()).orElseThrow();
+        assertThat(retained.getPayload()).contains(marker);
+        assertThat(retained.getLastError()).contains(marker);
+        assertThat(retained.getHeaders()).containsEntry("Authorization", marker);
     }
 }

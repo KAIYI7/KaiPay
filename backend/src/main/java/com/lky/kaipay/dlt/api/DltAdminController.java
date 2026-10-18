@@ -7,7 +7,6 @@ import com.lky.kaipay.dlt.repository.DeadLetterEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,7 +36,7 @@ public class DltAdminController {
     ) {
         access.admin();
         log.info("Fetching operational dead letter events with paymentId filter: {}, page: {}, size: {}", paymentId, page, size);
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = com.lky.kaipay.common.api.BoundedPageRequest.of(page, size);
         Page<DeadLetterEvent> events = (paymentId != null)
                 ? deadLetterEventRepository.findByPaymentIdOrderByCreatedAtDesc(paymentId, pageable)
                 : deadLetterEventRepository.findAllByOrderByCreatedAtDesc(pageable);

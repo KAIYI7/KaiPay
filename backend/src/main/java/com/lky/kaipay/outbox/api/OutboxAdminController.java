@@ -8,7 +8,6 @@ import com.lky.kaipay.outbox.repository.PaymentEventOutboxRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,7 +35,7 @@ public class OutboxAdminController {
     ) {
         access.admin();
         log.info("Fetching operational outbox events with status filter: {}, page: {}, size: {}", status, page, size);
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = com.lky.kaipay.common.api.BoundedPageRequest.of(page, size);
         Page<PaymentEventOutbox> events = (status != null)
                 ? outboxRepository.findByStatusOrderByCreatedAtDesc(status, pageable)
                 : outboxRepository.findAllByOrderByCreatedAtDesc(pageable);

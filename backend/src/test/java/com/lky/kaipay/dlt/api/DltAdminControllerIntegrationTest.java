@@ -83,12 +83,40 @@ class DltAdminControllerIntegrationTest extends AbstractPostgresIntegrationTest 
         assertThat(firstItem.get("originalOffset")).isNotNull();
         assertThat(firstItem.get("eventId")).isNotNull();
         assertThat(firstItem.get("paymentId")).isNotNull();
-        assertThat(firstItem.get("exceptionClass").asText()).isEqualTo("com.lky.kaipay.common.exception.GatewayTimeoutException");
-        assertThat(firstItem.get("failureMessage").asText()).contains("Gateway timeout on attempt");
+        assertThat(firstItem.get("exceptionClass").asText()).isEqualTo("[REDACTED]");
+        assertThat(firstItem.get("failureMessage").asText()).isEqualTo("[REDACTED]");
         assertThat(firstItem.get("retryCount")).isNotNull();
-        assertThat(firstItem.get("payload").asText()).contains("paymentId");
+        assertThat(firstItem.get("payload").asText()).isEqualTo("[REDACTED]");
         assertThat(firstItem.get("headers")).isNotNull();
         assertThat(firstItem.get("createdAt")).isNotNull();
+    }
+
+    @Test
+    void adminBrowserResponseOmitsHostileEvidenceWhileDatabaseRetainsIt() throws Exception {
+        String marker = "private-dlt-contact-credential";
+        DeadLetterEvent event = deadLetterEventRepository.save(DeadLetterEvent.builder()
+                .originalTopic("kaipay.payment.requests-dlt").originalPartition(1).originalOffset(99)
+                .exceptionClass(marker).failureMessage("SQL: " + marker)
+                .payload(objectMapper.writeValueAsString(Map.of("unexpected", marker)))
+                .headers(Map.of("X-Correlation-Id", "safe-correlation", "Authorization", marker,
+                        "exception-stacktrace", marker)).build());
+
+        ResponseEntity<String> response = restTemplate.exchange("/v1/events/dlt", HttpMethod.GET,
+                new org.springframework.http.HttpEntity<>(security().adminHeaders()), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).doesNotContain(marker);
+        JsonNode item = objectMapper.readTree(response.getBody()).get("data").get("content").get(0);
+        assertThat(item.get("payload").asText()).isEqualTo("[REDACTED]");
+        assertThat(item.get("failureMessage").asText()).isEqualTo("[REDACTED]");
+        assertThat(item.get("exceptionClass").asText()).isEqualTo("[REDACTED]");
+        assertThat(item.get("headers").size()).isEqualTo(1);
+        assertThat(item.get("headers").get("X-Correlation-Id").asText()).isEqualTo("safe-correlation");
+        DeadLetterEvent retained = deadLetterEventRepository.findById(event.getId()).orElseThrow();
+        assertThat(retained.getPayload()).contains(marker);
+        assertThat(retained.getFailureMessage()).contains(marker);
+        assertThat(retained.getExceptionClass()).isEqualTo(marker);
+        assertThat(retained.getHeaders()).containsEntry("Authorization", marker);
     }
 
     @Test
