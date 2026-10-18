@@ -18,9 +18,12 @@ import java.time.Instant;
 public class AcquirerAuthorizationResult {
 
     private boolean approved;
+    private boolean rejectedNoAcceptance;
     private String authorizationCode;
     private String declineCode;
     private String declineMessage;
+    private String failureCode;
+    private String failureMessage;
     private Instant timestamp;
 
     public static AcquirerAuthorizationResult approved(String authCode) {

@@ -116,6 +116,7 @@ class CorrelationPropagationIntegrationTest extends AbstractPostgresIntegrationT
             jdbc.update("delete from payment_events_outbox where aggregate_id in (select id::text from payments where merchant_id = ?) "
                     + "or aggregate_id in (select id::text from refunds where merchant_id = ?)", id, id);
             jdbc.update("delete from refunds where merchant_id = ?", id);
+            jdbc.update("delete from simulated_authorization_operations where merchant_id = ?", id);
             jdbc.update("delete from payments where merchant_id = ?", id);
             jdbc.update("delete from idempotency_records where merchant_id = ?", id);
             jdbc.update("delete from customers where merchant_id = ?", id);
@@ -199,7 +200,7 @@ class CorrelationPropagationIntegrationTest extends AbstractPostgresIntegrationT
                 .getBytes(StandardCharsets.UTF_8)).toString();
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
             assertThat(payments.findById(creation.paymentId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
-            assertThat(gateway.getExecutionCount(creation.paymentId())).isEqualTo(3);
+            assertThat(gateway.getEvaluationCount(creation.paymentId())).isEqualTo(3);
             assertThat(consumed.existsByIdEventIdAndIdConsumerGroup(eventId(creation.row()), GROUP)).isTrue();
             List<LogSnapshot> attempts = gatewayAttempts(creation.paymentId());
             assertThat(attempts).hasSize(3);
@@ -213,14 +214,15 @@ class CorrelationPropagationIntegrationTest extends AbstractPostgresIntegrationT
         Creation creation = createPayment(777700L, trace);
         publishAndObserve(creation.row(), trace);
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
-            assertThat(gateway.getExecutionCount(creation.paymentId())).isEqualTo(3);
-            assertThat(payments.findById(creation.paymentId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.FAILED);
+            assertThat(gateway.getEvaluationCount(creation.paymentId())).isEqualTo(3);
+            assertThat(payments.findById(creation.paymentId()).orElseThrow().getStatus()).isEqualTo(PaymentStatus.PROCESSING);
+            assertThat(consumed.findByPaymentIdOrderByProcessedAtAsc(creation.paymentId())).isEmpty();
             var events = deadLetters.findByPaymentIdOrderByCreatedAtDesc(creation.paymentId());
             assertThat(events).hasSize(1);
             assertThat(events.getFirst().getHeaders().get(HEADER)).isInstanceOf(String.class).isEqualTo(trace);
             assertThat(events.getFirst().getExceptionClass()).contains("GatewayTimeoutException");
             assertTraceLog("key=" + creation.paymentId(), "Handling Dead Letter", trace);
-            assertTraceLog("Marked payment " + creation.paymentId() + " as FAILED", trace);
+            assertTraceLog("Saved dead letter event record", trace);
         });
         assertGatewayAttempts(creation.paymentId(), trace, 3);
     }
@@ -313,7 +315,7 @@ class CorrelationPropagationIntegrationTest extends AbstractPostgresIntegrationT
     private void awaitAuthorized(UUID paymentId, PaymentEventOutbox row, String trace, int attempts) {
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
             assertThat(payments.findById(paymentId).orElseThrow().getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
-            assertThat(gateway.getExecutionCount(paymentId)).isEqualTo(attempts);
+            assertThat(gateway.getEvaluationCount(paymentId)).isEqualTo(attempts);
             assertThat(consumed.existsByIdEventIdAndIdConsumerGroup(eventId(row), GROUP)).isTrue();
             assertTraceLog("Completed authorization with deduplication for payment " + paymentId, trace);
         });

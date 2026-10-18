@@ -8,10 +8,10 @@ import com.lky.kaipay.common.exception.GatewayTimeoutException;
 import com.lky.kaipay.common.exception.GatewayUnavailableException;
 import com.lky.kaipay.common.exception.NonRetryableGatewayException;
 import com.lky.kaipay.common.observability.CorrelationContext;
-import com.lky.kaipay.consumer.service.ConsumerDeduplicationService;
 import com.lky.kaipay.dlt.domain.DeadLetterEvent;
 import com.lky.kaipay.dlt.repository.DeadLetterEventRepository;
-import com.lky.kaipay.payment.service.PaymentService;
+import com.lky.kaipay.payment.service.AuthorizationRecoveryService;
+import com.lky.kaipay.payment.service.acquirer.AuthorizationRequest;
 import com.lky.kaipay.payment.service.acquirer.AcquirerAuthorizationResult;
 import com.lky.kaipay.payment.service.acquirer.MockBankAcquirerClient;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -30,12 +30,12 @@ import org.springframework.kafka.support.Acknowledgment;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
@@ -46,9 +46,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class PaymentConsumerCorrelationUnitTest {
 
-    @Mock private PaymentService paymentService;
+    @Mock private AuthorizationRecoveryService recovery;
     @Mock private MockBankAcquirerClient acquirer;
-    @Mock private ConsumerDeduplicationService deduplication;
     @Mock private DeadLetterEventRepository dltRepository;
     @Mock private Acknowledgment acknowledgment;
 
@@ -59,7 +58,7 @@ class PaymentConsumerCorrelationUnitTest {
 
     @BeforeEach
     void setUp() {
-        consumer = new PaymentProcessingConsumer(paymentService, acquirer, deduplication, dltRepository,
+        consumer = new PaymentProcessingConsumer(recovery, acquirer, dltRepository,
                 new ObjectMapper().findAndRegisterModules());
         MDC.put("traceId", "previous-worker");
         MDC.put("user", "retained");
@@ -84,18 +83,18 @@ class PaymentConsumerCorrelationUnitTest {
     void allAuthorizationCallsAndAcknowledgmentRunWithinRecordContext() {
         ConsumerRecord<String, String> record = initiated();
         addHeader(record, "request-123");
-        when(paymentService.transitionToProcessing(any())).thenAnswer(invocation -> {
+        when(recovery.prepareAuthorization(any(), anyString())).thenAnswer(invocation -> {
             assertContext("request-123");
-            return null;
+            return Optional.of(request(record));
         });
-        when(acquirer.authorize(any(), anyLong(), anyString())).thenAnswer(invocation -> {
+        when(acquirer.authorize(any())).thenAnswer(invocation -> {
             assertContext("request-123");
             return AcquirerAuthorizationResult.approved("AUTH");
         });
-        when(paymentService.completeAuthorizationWithDeduplication(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        doAnswer(invocation -> {
             assertContext("request-123");
             return null;
-        });
+        }).when(recovery).completeAuthorization(any(), anyString(), any());
         assertAcknowledgmentContext("request-123");
 
         consumer.processPaymentRequest(record, acknowledgment);
@@ -112,18 +111,18 @@ class PaymentConsumerCorrelationUnitTest {
         assertAcknowledgmentContext("request-123");
         consumer.processPaymentRequest(notification, acknowledgment);
         assertRestored();
-        verifyNoInteractions(paymentService, acquirer, deduplication, dltRepository);
+        verifyNoInteractions(recovery, acquirer, dltRepository);
         assertThat(loggedIds).containsOnly("request-123");
 
         ConsumerRecord<String, String> duplicate = initiated();
         addHeader(duplicate, "request-123");
-        when(deduplication.isEventConsumed(any(), anyString())).thenAnswer(invocation -> {
+        when(recovery.prepareAuthorization(any(), anyString())).thenAnswer(invocation -> {
             assertContext("request-123");
-            return true;
+            return Optional.empty();
         });
         consumer.processPaymentRequest(duplicate, acknowledgment);
         assertRestored();
-        verifyNoInteractions(paymentService, acquirer, dltRepository);
+        verifyNoInteractions(acquirer, dltRepository);
         assertThat(loggedIds).containsOnly("request-123");
     }
 
@@ -138,7 +137,8 @@ class PaymentConsumerCorrelationUnitTest {
             case "unavailable" -> new GatewayUnavailableException("unavailable");
             default -> new NonRetryableGatewayException("nonRetryable");
         };
-        when(acquirer.authorize(any(), anyLong(), anyString())).thenAnswer(invocation -> {
+        when(recovery.prepareAuthorization(any(), anyString())).thenReturn(Optional.of(request(record)));
+        when(acquirer.authorize(any())).thenAnswer(invocation -> {
             assertContext("request-123");
             throw failure;
         });
@@ -173,10 +173,6 @@ class PaymentConsumerCorrelationUnitTest {
     void dltStoresFourAndEightByteIdsAsStringsAndScopesPersistenceAndAck(String correlationId) {
         ConsumerRecord<String, String> record = initiated();
         addHeader(record, correlationId);
-        when(paymentService.markPaymentFailed(any(), any(), any())).thenAnswer(invocation -> {
-            assertContext(correlationId);
-            return null;
-        });
         when(dltRepository.save(any())).thenAnswer(invocation -> {
             assertContext(correlationId);
             DeadLetterEvent saved = invocation.getArgument(0);
@@ -197,7 +193,6 @@ class PaymentConsumerCorrelationUnitTest {
     void dltPersistenceFailurePropagatesWithoutAcknowledgmentAndRestoresMdc() {
         ConsumerRecord<String, String> record = initiated();
         addHeader(record, "dlt-request");
-        when(paymentService.markPaymentFailed(any(), any(), any())).thenThrow(new IllegalStateException("payment unavailable"));
         IllegalStateException failure = new IllegalStateException("database unavailable");
         when(dltRepository.save(any())).thenAnswer(invocation -> {
             assertContext("dlt-request");
@@ -213,13 +208,9 @@ class PaymentConsumerCorrelationUnitTest {
     }
 
     @Test
-    void dltPaymentFailureRemainsBestEffortWhenEvidenceCanBePersisted() {
+    void dltNeverInvokesPaymentRecoveryWhenEvidenceCanBePersisted() {
         ConsumerRecord<String, String> record = initiated();
         addHeader(record, "dlt-request");
-        when(paymentService.markPaymentFailed(any(), any(), any())).thenAnswer(invocation -> {
-            assertContext("dlt-request");
-            throw new IllegalStateException("payment unavailable");
-        });
         when(dltRepository.save(any())).thenAnswer(invocation -> {
             assertContext("dlt-request");
             return invocation.getArgument(0);
@@ -229,6 +220,7 @@ class PaymentConsumerCorrelationUnitTest {
         consumer.handleDltMessage(record, "Failure", null, "failed", acknowledgment);
 
         verify(dltRepository).save(any());
+        verifyNoInteractions(recovery, acquirer);
         verify(acknowledgment).acknowledge();
         assertThat(loggedIds).containsOnly("dlt-request");
         assertRestored();
@@ -259,6 +251,10 @@ class PaymentConsumerCorrelationUnitTest {
         return new ConsumerRecord<>("requests", 0, 1, "key",
                 "{\"eventId\":\"" + UUID.randomUUID() + "\",\"payload\":{\"paymentId\":\"" + UUID.randomUUID()
                         + "\",\"amountCents\":100,\"currency\":\"USD\"}}");
+    }
+
+    private AuthorizationRequest request(ConsumerRecord<String, String> record) {
+        return new AuthorizationRequest(UUID.randomUUID(), UUID.randomUUID(), 100, "USD");
     }
 
     private void addHeader(ConsumerRecord<String, String> record, String id) {

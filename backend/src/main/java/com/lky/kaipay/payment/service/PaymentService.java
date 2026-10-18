@@ -6,7 +6,6 @@ import com.lky.kaipay.common.event.EventEnvelope;
 import com.lky.kaipay.common.observability.CorrelationContext;
 import com.lky.kaipay.common.exception.EntityNotFoundException;
 import com.lky.kaipay.common.exception.InvalidRequestException;
-import com.lky.kaipay.consumer.service.ConsumerDeduplicationService;
 import com.lky.kaipay.customer.domain.Customer;
 import com.lky.kaipay.customer.repository.CustomerRepository;
 import com.lky.kaipay.ledger.service.LedgerService;
@@ -24,7 +23,6 @@ import com.lky.kaipay.payment.domain.event.PaymentCapturedEvent;
 import com.lky.kaipay.payment.domain.event.PaymentInitiatedEvent;
 import com.lky.kaipay.payment.repository.PaymentMethodRepository;
 import com.lky.kaipay.payment.repository.PaymentRepository;
-import com.lky.kaipay.payment.service.acquirer.AcquirerAuthorizationResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -46,7 +44,6 @@ public class PaymentService {
     private final PaymentMethodRepository paymentMethodRepository;
     private final IdempotencyService idempotencyService;
     private final PaymentEventOutboxRepository paymentEventOutboxRepository;
-    private final ConsumerDeduplicationService consumerDeduplicationService;
     private final LedgerService ledgerService;
     private final ObjectMapper objectMapper;
 
@@ -176,101 +173,6 @@ public class PaymentService {
         Payment updatedPayment = paymentRepository.save(payment);
         log.info("Transitioned payment {} to {}", paymentId, targetStatus);
         return PaymentResponse.fromDomain(updatedPayment);
-    }
-
-    @Transactional
-    public Payment transitionToProcessing(UUID paymentId) {
-        Payment payment = paymentRepository.findById(paymentId)
-                .orElseThrow(() -> new EntityNotFoundException("Payment not found with ID: " + paymentId));
-
-        if (payment.getStatus() == PaymentStatus.CREATED) {
-            payment.transitionTo(PaymentStatus.PROCESSING);
-            Payment updated = paymentRepository.save(payment);
-            log.info("Transitioned payment {} to PROCESSING", paymentId);
-            return updated;
-        }
-
-        if (payment.getStatus() == PaymentStatus.PROCESSING) {
-            log.debug("Payment {} is already in PROCESSING status, returning directly", paymentId);
-            return payment;
-        }
-
-        return payment;
-    }
-
-    @Transactional
-    public Payment completeAuthorization(UUID paymentId, AcquirerAuthorizationResult authResult) {
-        Payment payment = paymentRepository.findById(paymentId)
-                .orElseThrow(() -> new EntityNotFoundException("Payment not found with ID: " + paymentId));
-
-        if (payment.getStatus() == PaymentStatus.PROCESSING) {
-            if (authResult.isApproved()) {
-                payment.setGatewayReference(authResult.getAuthorizationCode());
-                payment.transitionTo(PaymentStatus.AUTHORIZED);
-            } else {
-                payment.setFailureCode(authResult.getDeclineCode());
-                payment.setFailureMessage(authResult.getDeclineMessage());
-                payment.transitionTo(PaymentStatus.DECLINED);
-            }
-            Payment updated = paymentRepository.save(payment);
-            log.info("Completed authorization for payment {} with final status {}", paymentId, updated.getStatus());
-            return updated;
-        }
-
-        return payment;
-    }
-
-    @Transactional
-    public Payment completeAuthorizationWithDeduplication(
-            UUID paymentId,
-            AcquirerAuthorizationResult authResult,
-            UUID eventId,
-            String consumerGroup,
-            String eventType
-    ) {
-        Payment payment = paymentRepository.findById(paymentId)
-                .orElseThrow(() -> new EntityNotFoundException("Payment not found with ID: " + paymentId));
-
-        if (payment.getStatus() == PaymentStatus.PROCESSING) {
-            if (authResult.isApproved()) {
-                payment.setGatewayReference(authResult.getAuthorizationCode());
-                payment.transitionTo(PaymentStatus.AUTHORIZED);
-            } else {
-                payment.setFailureCode(authResult.getDeclineCode());
-                payment.setFailureMessage(authResult.getDeclineMessage());
-                payment.transitionTo(PaymentStatus.DECLINED);
-            }
-            Payment updated = paymentRepository.save(payment);
-            consumerDeduplicationService.recordConsumed(eventId, consumerGroup, paymentId, eventType, updated.getStatus().name());
-            log.info("Completed authorization with deduplication for payment {} with final status {}", paymentId, updated.getStatus());
-            return updated;
-        }
-
-        if (payment.getStatus() == PaymentStatus.AUTHORIZED || payment.getStatus() == PaymentStatus.DECLINED) {
-            if (!consumerDeduplicationService.isEventConsumed(eventId, consumerGroup)) {
-                consumerDeduplicationService.recordConsumed(eventId, consumerGroup, paymentId, eventType, payment.getStatus().name());
-            }
-            return payment;
-        }
-
-        return payment;
-    }
-
-    @Transactional
-    public Payment markPaymentFailed(UUID paymentId, String failureCode, String failureMessage) {
-        Payment payment = paymentRepository.findById(paymentId)
-                .orElseThrow(() -> new EntityNotFoundException("Payment not found with ID: " + paymentId));
-
-        if (payment.getStatus() == PaymentStatus.CREATED || payment.getStatus() == PaymentStatus.PROCESSING) {
-            payment.setFailureCode(failureCode);
-            payment.setFailureMessage(failureMessage);
-            payment.transitionTo(PaymentStatus.FAILED);
-            Payment updated = paymentRepository.save(payment);
-            log.info("Marked payment {} as FAILED with code={}", paymentId, failureCode);
-            return updated;
-        }
-
-        return payment;
     }
 
     @Transactional

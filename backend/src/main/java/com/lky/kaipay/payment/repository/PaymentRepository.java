@@ -16,6 +16,10 @@ import java.util.UUID;
 
 @Repository
 public interface PaymentRepository extends JpaRepository<Payment, UUID> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p WHERE p.id = :id")
+    Optional<Payment> findByIdForUpdate(@Param("id") UUID id);
+
     Optional<Payment> findByIdAndMerchantId(UUID id, UUID merchantId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

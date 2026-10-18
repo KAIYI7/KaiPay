@@ -25,7 +25,11 @@ public abstract class AbstractPostgresIntegrationTest {
     }
 
     @org.junit.jupiter.api.BeforeEach
-    void clearIdentityFixtures() { securityJdbc.update("DELETE FROM demo_users"); }
+    void clearIdentityFixtures() {
+        securityJdbc.update("DELETE FROM demo_users");
+        // Test-only fixture cleanup; runtime has no durable simulator reset API.
+        securityJdbc.update("DELETE FROM simulated_authorization_operations");
+    }
 
     protected static final PostgreSQLContainer<?> postgres;
 

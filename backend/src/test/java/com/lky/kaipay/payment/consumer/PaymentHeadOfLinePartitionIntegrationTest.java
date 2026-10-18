@@ -64,7 +64,6 @@ class PaymentHeadOfLinePartitionIntegrationTest extends AbstractPostgresIntegrat
 
     @BeforeEach
     void setUp() {
-        mockBankAcquirerClient.clearLedger();
         deadLetterEventRepository.deleteAll();
         paymentRepository.deleteAll();
         customerRepository.deleteAll();
@@ -110,8 +109,6 @@ class PaymentHeadOfLinePartitionIntegrationTest extends AbstractPostgresIntegrat
         Payment paymentC = paymentRepository.findById(responseC.getId()).orElseThrow();
         assertThat(paymentC.getStatus()).isEqualTo(PaymentStatus.CREATED);
 
-        // 3. Clear mockBankAcquirerClient ledger before sending events
-        mockBankAcquirerClient.clearLedger();
 
         // 4. Build serialized EventEnvelope<PaymentInitiatedEvent> for Payment A
         PaymentInitiatedEvent eventA = PaymentInitiatedEvent.fromPayment(paymentA);

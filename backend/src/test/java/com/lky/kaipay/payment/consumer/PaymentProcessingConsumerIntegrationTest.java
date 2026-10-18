@@ -65,7 +65,6 @@ class PaymentProcessingConsumerIntegrationTest extends AbstractPostgresIntegrati
 
     @BeforeEach
     void setUp() {
-        mockBankAcquirerClient.clearLedger();
         deadLetterEventRepository.deleteAll();
         consumedEventRepository.deleteAll();
         paymentRepository.deleteAll();
@@ -230,8 +229,8 @@ class PaymentProcessingConsumerIntegrationTest extends AbstractPostgresIntegrati
     }
 
     @Test
-    @DisplayName("DLT handler marks payment as FAILED and saves DeadLetterEvent record")
-    void testHandleDltMessage_MarksPaymentFailedAndSavesDeadLetterEvent() throws Exception {
+    @DisplayName("DLT handler preserves unresolved payment and saves DeadLetterEvent record")
+    void testHandleDltMessage_PreservesProcessingAndSavesDeadLetterEvent() throws Exception {
         Payment payment = paymentRepository.save(
                 Payment.builder()
                         .merchant(testMerchant)
@@ -264,9 +263,10 @@ class PaymentProcessingConsumerIntegrationTest extends AbstractPostgresIntegrati
         );
 
         Payment updatedPayment = paymentRepository.findById(payment.getId()).orElseThrow();
-        assertThat(updatedPayment.getStatus()).isEqualTo(PaymentStatus.FAILED);
-        assertThat(updatedPayment.getFailureCode()).isEqualTo("DLT_ROUTED");
-        assertThat(updatedPayment.getFailureMessage()).isEqualTo("Gateway timeout after max retry attempts");
+        assertThat(updatedPayment.getStatus()).isEqualTo(PaymentStatus.PROCESSING);
+        assertThat(updatedPayment.getFailureCode()).isNull();
+        assertThat(updatedPayment.getFailureMessage()).isNull();
+        assertThat(updatedPayment.getVersion()).isEqualTo(payment.getVersion());
 
         List<DeadLetterEvent> dltEvents = deadLetterEventRepository.findByPaymentIdOrderByCreatedAtDesc(payment.getId());
         assertThat(dltEvents).hasSize(1);

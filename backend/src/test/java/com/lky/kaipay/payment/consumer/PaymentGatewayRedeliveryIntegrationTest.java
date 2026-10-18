@@ -8,13 +8,12 @@ import com.lky.kaipay.customer.repository.CustomerRepository;
 import com.lky.kaipay.merchant.domain.Merchant;
 import com.lky.kaipay.merchant.domain.MerchantStatus;
 import com.lky.kaipay.merchant.repository.MerchantRepository;
-import com.lky.kaipay.payment.api.dto.CreatePaymentRequest;
-import com.lky.kaipay.payment.api.dto.PaymentResponse;
 import com.lky.kaipay.payment.domain.Payment;
 import com.lky.kaipay.payment.domain.PaymentStatus;
 import com.lky.kaipay.payment.domain.event.PaymentInitiatedEvent;
 import com.lky.kaipay.payment.repository.PaymentRepository;
-import com.lky.kaipay.payment.service.PaymentService;
+import com.lky.kaipay.payment.service.AuthorizationRecoveryService;
+import com.lky.kaipay.payment.service.AuthorizationDelivery;
 import com.lky.kaipay.payment.service.acquirer.AcquirerAuthorizationResult;
 import com.lky.kaipay.payment.service.acquirer.MockBankAcquirerClient;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -31,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PaymentGatewayRedeliveryIntegrationTest extends AbstractPostgresIntegrationTest {
 
     @Autowired
-    private PaymentService paymentService;
+    private AuthorizationRecoveryService recovery;
 
     @Autowired
     private PaymentRepository paymentRepository;
@@ -56,7 +55,6 @@ class PaymentGatewayRedeliveryIntegrationTest extends AbstractPostgresIntegratio
 
     @BeforeEach
     void setUp() {
-        mockBankAcquirerClient.clearLedger();
         paymentRepository.deleteAll();
         customerRepository.deleteAll();
         merchantRepository.deleteAll();
@@ -99,8 +97,6 @@ class PaymentGatewayRedeliveryIntegrationTest extends AbstractPostgresIntegratio
         UUID paymentId = createdPayment.getId();
         assertThat(createdPayment.getStatus()).isEqualTo(PaymentStatus.CREATED);
 
-        // Clear/prepare acquirer ledger
-        mockBankAcquirerClient.clearLedger();
 
         // Build serialized PaymentInitiatedEvent message payload
         PaymentInitiatedEvent initiatedEvent = PaymentInitiatedEvent.fromPayment(createdPayment);
@@ -116,11 +112,12 @@ class PaymentGatewayRedeliveryIntegrationTest extends AbstractPostgresIntegratio
         // -------------------------------------------------------------------------
         // Step 1: Simulate First Attempt with Crash before Tx 2
         // -------------------------------------------------------------------------
-        // Call paymentService.transitionToProcessing (Tx 1 commits)
-        paymentService.transitionToProcessing(paymentId);
+        // Durable intent and PROCESSING commit before simulator acceptance.
+        var delivery = AuthorizationDelivery.fromJson(objectMapper.readTree(messagePayload));
+        var request = recovery.prepareAuthorization(delivery, "kaipay-payment-processor-group").orElseThrow();
 
-        // Call acquirer client to authorize (Gateway returns auth code)
-        AcquirerAuthorizationResult firstAuth = mockBankAcquirerClient.authorize(paymentId, amountCents, currency);
+        // Simulator independently commits the durable result.
+        AcquirerAuthorizationResult firstAuth = mockBankAcquirerClient.authorize(request);
         assertThat(firstAuth.isApproved()).isTrue();
         assertThat(firstAuth.getAuthorizationCode()).isNotNull();
 
@@ -147,7 +144,7 @@ class PaymentGatewayRedeliveryIntegrationTest extends AbstractPostgresIntegratio
         Payment finalPayment = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(finalPayment.getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
         assertThat(finalPayment.getGatewayReference()).isEqualTo(firstAuth.getAuthorizationCode());
-        assertThat(mockBankAcquirerClient.getExecutionCount(paymentId)).isEqualTo(2);
+        assertThat(mockBankAcquirerClient.getEvaluationCount(paymentId)).isEqualTo(1);
         assertThat(mockBankAcquirerClient.getUniqueAuthorizationsCount()).isEqualTo(1);
     }
 }

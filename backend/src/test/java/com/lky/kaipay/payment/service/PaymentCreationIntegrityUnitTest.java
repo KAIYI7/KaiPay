@@ -1,7 +1,6 @@
 package com.lky.kaipay.payment.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lky.kaipay.consumer.service.ConsumerDeduplicationService;
 import com.lky.kaipay.customer.domain.Customer;
 import com.lky.kaipay.customer.repository.CustomerRepository;
 import com.lky.kaipay.ledger.service.LedgerService;
@@ -39,7 +38,6 @@ class PaymentCreationIntegrityUnitTest {
     @Mock private PaymentMethodRepository paymentMethodRepository;
     @Mock private IdempotencyService idempotencyService;
     @Mock private PaymentEventOutboxRepository outboxRepository;
-    @Mock private ConsumerDeduplicationService deduplicationService;
     @Mock private LedgerService ledgerService;
     @Mock private ObjectMapper objectMapper;
 
@@ -51,7 +49,7 @@ class PaymentCreationIntegrityUnitTest {
     void setUp() {
         service = new PaymentService(paymentRepository, merchantRepository, customerRepository,
                 paymentMethodRepository, idempotencyService, outboxRepository,
-                deduplicationService, ledgerService, objectMapper);
+                ledgerService, objectMapper);
         merchantId = UUID.randomUUID();
         Merchant merchant = Merchant.builder().id(merchantId).name("Test").apiKeyHash("hash").build();
         Customer customer = Customer.builder().id(UUID.randomUUID()).merchant(merchant)
@@ -71,7 +69,7 @@ class PaymentCreationIntegrityUnitTest {
         assertThatThrownBy(() -> service.createPayment(merchantId, "key", request)).isSameAs(failure);
 
         verifyOnlyInitialIdempotencyLookup();
-        verifyNoInteractions(outboxRepository, objectMapper, ledgerService, deduplicationService);
+        verifyNoInteractions(outboxRepository, objectMapper, ledgerService);
     }
 
     @Test
@@ -88,7 +86,7 @@ class PaymentCreationIntegrityUnitTest {
         assertThatThrownBy(() -> service.createPayment(merchantId, "key", request)).isSameAs(failure);
 
         verifyOnlyInitialIdempotencyLookup();
-        verifyNoInteractions(ledgerService, deduplicationService);
+        verifyNoInteractions(ledgerService);
     }
 
     private void verifyOnlyInitialIdempotencyLookup() {

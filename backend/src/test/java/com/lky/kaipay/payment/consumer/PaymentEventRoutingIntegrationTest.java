@@ -75,6 +75,7 @@ class PaymentEventRoutingIntegrationTest extends AbstractPostgresIntegrationTest
     @Autowired private AccountRepository accounts;
     @Autowired private IdempotencyRecordRepository idempotencyRecords;
     @Autowired private PaymentMethodRepository paymentMethods;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     private Merchant merchant;
     private Customer customer;
@@ -82,7 +83,6 @@ class PaymentEventRoutingIntegrationTest extends AbstractPostgresIntegrationTest
     @BeforeEach
     void setUp() {
         cleanup();
-        gateway.clearLedger();
         merchant = merchants.save(Merchant.builder().name("Routing Test Merchant")
                 .apiKeyHash("routing-" + UUID.randomUUID()).build());
         customer = customers.save(Customer.builder().merchant(merchant)
@@ -100,6 +100,7 @@ class PaymentEventRoutingIntegrationTest extends AbstractPostgresIntegrationTest
         accounts.deleteAll();
         outbox.deleteAll();
         idempotencyRecords.deleteAll();
+        jdbc.update("delete from simulated_authorization_operations");
         payments.deleteAll();
         paymentMethods.deleteAll();
         customers.deleteAll();
@@ -117,7 +118,7 @@ class PaymentEventRoutingIntegrationTest extends AbstractPostgresIntegrationTest
             publishAndAwaitCommit(admin);
             assertThat(payments.findById(paymentId).orElseThrow().getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
             assertThat(consumedEvents.existsByIdEventIdAndIdConsumerGroup(eventId(initiated), GROUP)).isTrue();
-            assertThat(gateway.getExecutionCount(paymentId)).isEqualTo(1);
+            assertThat(gateway.getEvaluationCount(paymentId)).isEqualTo(1);
             String authorizationCode = payments.findById(paymentId).orElseThrow().getGatewayReference();
 
             paymentService.capturePayment(merchant.getId(), paymentId, "capture-" + UUID.randomUUID());
@@ -190,11 +191,13 @@ class PaymentEventRoutingIntegrationTest extends AbstractPostgresIntegrationTest
             awaitMainOffsetsCommitted(admin);
 
             assertThat(endOffsets(admin, retryTopics)).isEqualTo(retryOffsets);
-            assertThat(gateway.getExecutionCount(payment.getId())).isZero();
+            assertThat(gateway.getEvaluationCount(payment.getId())).isZero();
             assertThat(consumedEvents.findAll()).isEmpty();
-            Payment failed = payments.findById(payment.getId()).orElseThrow();
-            assertThat(failed.getStatus()).isEqualTo(PaymentStatus.FAILED);
-            assertThat(failed.getFailureCode()).isEqualTo("DLT_ROUTED");
+            Payment unchanged = payments.findById(payment.getId()).orElseThrow();
+            assertThat(unchanged.getStatus()).isEqualTo(PaymentStatus.CREATED);
+            assertThat(unchanged.getFailureCode()).isNull();
+            assertThat(unchanged.getVersion()).isEqualTo(payment.getVersion());
+            assertThat(jdbc.queryForObject("select count(*) from simulated_authorization_operations where payment_id = ?", Long.class, payment.getId())).isZero();
         }
     }
 
@@ -216,7 +219,7 @@ class PaymentEventRoutingIntegrationTest extends AbstractPostgresIntegrationTest
     }
 
     private void assertSkipped(UUID paymentId, String authorizationCode, PaymentEventOutbox record) throws Exception {
-        assertThat(gateway.getExecutionCount(paymentId)).isEqualTo(1);
+        assertThat(gateway.getEvaluationCount(paymentId)).isEqualTo(1);
         assertThat(payments.findById(paymentId).orElseThrow().getGatewayReference()).isEqualTo(authorizationCode);
         assertThat(consumedEvents.existsByIdEventIdAndIdConsumerGroup(eventId(record), GROUP)).isFalse();
     }

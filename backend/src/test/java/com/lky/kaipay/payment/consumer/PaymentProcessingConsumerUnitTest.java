@@ -4,322 +4,239 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.common.event.EventEnvelope;
 import com.lky.kaipay.common.exception.GatewayTimeoutException;
 import com.lky.kaipay.common.exception.GatewayUnavailableException;
-import com.lky.kaipay.consumer.service.ConsumerDeduplicationService;
+import com.lky.kaipay.common.exception.NonRetryableGatewayException;
 import com.lky.kaipay.dlt.domain.DeadLetterEvent;
 import com.lky.kaipay.dlt.repository.DeadLetterEventRepository;
-import com.lky.kaipay.payment.domain.Payment;
 import com.lky.kaipay.payment.domain.event.PaymentCapturedEvent;
-import com.lky.kaipay.payment.service.PaymentService;
+import com.lky.kaipay.payment.service.AuthorizationDelivery;
+import com.lky.kaipay.payment.service.AuthorizationRecoveryService;
 import com.lky.kaipay.payment.service.acquirer.AcquirerAuthorizationResult;
+import com.lky.kaipay.payment.service.acquirer.AuthorizationRequest;
 import com.lky.kaipay.payment.service.acquirer.MockBankAcquirerClient;
 import com.lky.kaipay.refund.domain.event.PaymentRefundedEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.support.Acknowledgment;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("PaymentProcessingConsumer Unit Tests")
 class PaymentProcessingConsumerUnitTest {
-
-    @Mock
-    private PaymentService paymentService;
-    @Mock
-    private MockBankAcquirerClient mockBankAcquirerClient;
-    @Mock
-    private ConsumerDeduplicationService consumerDeduplicationService;
-    @Mock
-    private DeadLetterEventRepository deadLetterEventRepository;
-    @Mock
-    private Acknowledgment acknowledgment;
-
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
-
+    private static final String GROUP = "kaipay-payment-processor-group";
+    @Mock private AuthorizationRecoveryService recovery;
+    @Mock private MockBankAcquirerClient acquirer;
+    @Mock private DeadLetterEventRepository deadLetters;
+    @Mock private Acknowledgment ack;
+    private final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
     private PaymentProcessingConsumer consumer;
 
     @BeforeEach
     void setUp() {
-        consumer = new PaymentProcessingConsumer(
-                paymentService,
-                mockBankAcquirerClient,
-                consumerDeduplicationService,
-                deadLetterEventRepository,
-                objectMapper
-        );
+        consumer = new PaymentProcessingConsumer(recovery, acquirer, deadLetters, mapper);
     }
 
-    @Nested
-    @DisplayName("processPaymentRequest Tests")
-    class ProcessPaymentRequestTests {
-
-        @Test
-        @DisplayName("Should acknowledge and return early if event is already consumed (deduplication hit)")
-        void fastPreCheckDeduplicationHit() {
-            UUID eventId = UUID.randomUUID();
-            UUID paymentId = UUID.randomUUID();
-            String payload = String.format("{\"eventId\":\"%s\",\"payload\":{\"paymentId\":\"%s\",\"amountCents\":5000}}",
-                    eventId, paymentId);
-
-            when(consumerDeduplicationService.isEventConsumed(eventId, "kaipay-payment-processor-group")).thenReturn(true);
-
-            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests", 0, 1L, paymentId.toString(), payload);
-            consumer.processPaymentRequest(record, acknowledgment);
-
-            verify(acknowledgment).acknowledge();
-            verify(paymentService, never()).transitionToProcessing(any());
-            verify(mockBankAcquirerClient, never()).authorize(any(), anyLong(), anyString());
-            verify(paymentService, never()).completeAuthorizationWithDeduplication(any(), any(), any(), any(), any());
-        }
-
-        @Test
-        @DisplayName("Should execute two-transaction flow when event is not consumed")
-        void standardTwoTransactionFlow() {
-            UUID eventId = UUID.randomUUID();
-            UUID paymentId = UUID.randomUUID();
-            String payload = String.format("{\"eventId\":\"%s\",\"eventType\":\"PaymentInitiatedEvent\",\"payload\":{\"paymentId\":\"%s\",\"amountCents\":5000,\"currency\":\"USD\"}}",
-                    eventId, paymentId);
-
-            when(consumerDeduplicationService.isEventConsumed(eventId, "kaipay-payment-processor-group")).thenReturn(false);
-            when(paymentService.transitionToProcessing(paymentId)).thenReturn(mock(Payment.class));
-            AcquirerAuthorizationResult authResult = AcquirerAuthorizationResult.approved("AUTH-1234");
-            when(mockBankAcquirerClient.authorize(paymentId, 5000L, "USD")).thenReturn(authResult);
-
-            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests", 0, 1L, paymentId.toString(), payload);
-            consumer.processPaymentRequest(record, acknowledgment);
-
-            verify(paymentService).transitionToProcessing(paymentId);
-            verify(mockBankAcquirerClient).authorize(paymentId, 5000L, "USD");
-            verify(paymentService).completeAuthorizationWithDeduplication(
-                    eq(paymentId),
-                    eq(authResult),
-                    eq(eventId),
-                    eq("kaipay-payment-processor-group"),
-                    eq("PaymentInitiatedEvent")
-            );
-            verify(acknowledgment).acknowledge();
-        }
-
-        @Test
-        @DisplayName("Should explicitly acknowledge capture notifications without authorization or deduplication")
-        void acknowledgeCapturedNotification() throws Exception {
-            UUID paymentId = UUID.randomUUID();
-            EventEnvelope<PaymentCapturedEvent> envelope = EventEnvelope.of(
-                    "PaymentCapturedEvent", "PAYMENT", paymentId.toString(), UUID.randomUUID(),
-                    PaymentCapturedEvent.builder().paymentId(paymentId).amountCents(5000L).currency("USD").build()
-            );
-
-            consumer.processPaymentRequest(new ConsumerRecord<>("kaipay.payment.requests", 0, 1L,
-                    paymentId.toString(), objectMapper.writeValueAsString(envelope)), acknowledgment);
-
-            verify(acknowledgment).acknowledge();
-            verifyNoInteractions(paymentService, mockBankAcquirerClient, consumerDeduplicationService,
-                    deadLetterEventRepository);
-        }
-
-        @Test
-        @DisplayName("Should explicitly acknowledge refund notifications that have no amountCents field")
-        void acknowledgeRefundedNotification() throws Exception {
-            UUID paymentId = UUID.randomUUID();
-            UUID refundId = UUID.randomUUID();
-            EventEnvelope<PaymentRefundedEvent> envelope = EventEnvelope.of(
-                    "PaymentRefundedEvent", "REFUND", refundId.toString(), UUID.randomUUID(),
-                    PaymentRefundedEvent.builder().paymentId(paymentId).refundId(refundId)
-                            .refundAmountCents(2000L).currency("USD").build()
-            );
-            String payload = objectMapper.writeValueAsString(envelope);
-            assertThat(objectMapper.readTree(payload).get("payload").has("amountCents")).isFalse();
-
-            consumer.processPaymentRequest(new ConsumerRecord<>("kaipay.payment.requests", 0, 1L,
-                    refundId.toString(), payload), acknowledgment);
-
-            verify(acknowledgment).acknowledge();
-            verifyNoInteractions(paymentService, mockBankAcquirerClient, consumerDeduplicationService,
-                    deadLetterEventRepository);
-        }
-
-        @Test
-        @DisplayName("Should reject unknown event types before reading authorization fields")
-        void rejectUnknownEventType() throws Exception {
-            UUID paymentId = UUID.randomUUID();
-            EventEnvelope<Map<String, UUID>> envelope = EventEnvelope.of(
-                    "UnsupportedPaymentEvent", "PAYMENT", paymentId.toString(), UUID.randomUUID(),
-                    Map.of("paymentId", paymentId)
-            );
-            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests", 0, 1L,
-                    paymentId.toString(), objectMapper.writeValueAsString(envelope));
-
-            assertThatThrownBy(() -> consumer.processPaymentRequest(record, acknowledgment))
-                    .isInstanceOf(RuntimeException.class)
-                    .hasMessage("Fatal payment event processing failed")
-                    .hasRootCauseInstanceOf(IllegalArgumentException.class)
-                    .hasRootCauseMessage("Unsupported payment event type: UnsupportedPaymentEvent");
-
-            verifyNoInteractions(acknowledgment, paymentService, mockBankAcquirerClient,
-                    consumerDeduplicationService, deadLetterEventRepository);
-        }
-
-        @Test
-        @DisplayName("Should authorize legacy payloads without eventType, including unwrapped payloads")
-        void authorizeWhenEventTypeMissing() {
-            UUID eventId = UUID.randomUUID();
-            UUID paymentId = UUID.randomUUID();
-            String payload = String.format("{\"eventId\":\"%s\",\"paymentId\":\"%s\",\"amountCents\":5000}",
-                    eventId, paymentId);
-            AcquirerAuthorizationResult authResult = AcquirerAuthorizationResult.approved("AUTH-LEGACY");
-            when(mockBankAcquirerClient.authorize(paymentId, 5000L, "USD")).thenReturn(authResult);
-
-            consumer.processPaymentRequest(new ConsumerRecord<>("kaipay.payment.requests", 0, 1L,
-                    paymentId.toString(), payload), acknowledgment);
-
-            verify(paymentService).transitionToProcessing(paymentId);
-            verify(mockBankAcquirerClient).authorize(paymentId, 5000L, "USD");
-            verify(paymentService).completeAuthorizationWithDeduplication(paymentId, authResult,
-                    eventId, "kaipay-payment-processor-group", "PaymentInitiatedEvent");
-            verify(acknowledgment).acknowledge();
-        }
-
-        @Test
-        @DisplayName("Should rethrow GatewayTimeoutException to trigger non-blocking retry")
-        void rethrowGatewayTimeoutException() {
-            UUID eventId = UUID.randomUUID();
-            UUID paymentId = UUID.randomUUID();
-            String payload = String.format("{\"eventId\":\"%s\",\"payload\":{\"paymentId\":\"%s\",\"amountCents\":5000}}",
-                    eventId, paymentId);
-
-            when(consumerDeduplicationService.isEventConsumed(eventId, "kaipay-payment-processor-group")).thenReturn(false);
-            when(paymentService.transitionToProcessing(paymentId)).thenReturn(mock(Payment.class));
-            when(mockBankAcquirerClient.authorize(paymentId, 5000L, "USD"))
-                    .thenThrow(new GatewayTimeoutException("Gateway read timed out"));
-
-            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests", 0, 1L, paymentId.toString(), payload);
-
-            assertThatThrownBy(() -> consumer.processPaymentRequest(record, acknowledgment))
-                    .isInstanceOf(GatewayTimeoutException.class)
-                    .hasMessageContaining("Gateway read timed out");
-
-            verify(acknowledgment, never()).acknowledge();
-        }
-
-        @Test
-        @DisplayName("Should rethrow GatewayUnavailableException to trigger non-blocking retry")
-        void rethrowGatewayUnavailableException() {
-            UUID eventId = UUID.randomUUID();
-            UUID paymentId = UUID.randomUUID();
-            String payload = String.format("{\"eventId\":\"%s\",\"payload\":{\"paymentId\":\"%s\",\"amountCents\":5000}}",
-                    eventId, paymentId);
-
-            when(consumerDeduplicationService.isEventConsumed(eventId, "kaipay-payment-processor-group")).thenReturn(false);
-            when(paymentService.transitionToProcessing(paymentId)).thenReturn(mock(Payment.class));
-            when(mockBankAcquirerClient.authorize(paymentId, 5000L, "USD"))
-                    .thenThrow(new GatewayUnavailableException("Gateway 503 unavailable"));
-
-            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests", 0, 1L, paymentId.toString(), payload);
-
-            assertThatThrownBy(() -> consumer.processPaymentRequest(record, acknowledgment))
-                    .isInstanceOf(GatewayUnavailableException.class)
-                    .hasMessageContaining("Gateway 503 unavailable");
-
-            verify(acknowledgment, never()).acknowledge();
-        }
-
-        @Test
-        @DisplayName("Should throw RuntimeException on poison pill missing paymentId")
-        void throwFatalOnPoisonPill() {
-            String payload = "{\"somethingElse\":\"invalid\"}";
-            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests", 0, 1L, "key-1", payload);
-
-            assertThatThrownBy(() -> consumer.processPaymentRequest(record, acknowledgment))
-                    .isInstanceOf(RuntimeException.class)
-                    .hasMessageContaining("Fatal payment event processing failed");
-
-            verify(acknowledgment, never()).acknowledge();
-        }
+    @Test
+    void compatibleReplayAcknowledgesOnlyAfterValidatedPreparation() throws Exception {
+        var record = initiated();
+        AuthorizationDelivery delivery = AuthorizationDelivery.fromJson(mapper.readTree(record.value()));
+        when(recovery.prepareAuthorization(delivery, GROUP)).thenReturn(Optional.empty());
+        consumer.processPaymentRequest(record, ack);
+        var order = inOrder(recovery, ack);
+        order.verify(recovery).prepareAuthorization(delivery, GROUP);
+        order.verify(ack).acknowledge();
+        verifyNoInteractions(acquirer, deadLetters);
     }
 
-    @Nested
-    @DisplayName("handleDltMessage Tests")
-    class HandleDltMessageTests {
+    @Test
+    void approvalPreparesAuthorizesAndCompletesBeforeAcknowledgment() throws Exception {
+        var record = initiated();
+        var delivery = AuthorizationDelivery.fromJson(mapper.readTree(record.value()));
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var result = AcquirerAuthorizationResult.approved("AUTH-1234");
+        when(recovery.prepareAuthorization(delivery, GROUP)).thenReturn(Optional.of(request));
+        when(acquirer.authorize(request)).thenReturn(result);
+        consumer.processPaymentRequest(record, ack);
+        var order = inOrder(recovery, acquirer, ack);
+        order.verify(recovery).prepareAuthorization(delivery, GROUP);
+        order.verify(acquirer).authorize(request);
+        order.verify(recovery).completeAuthorization(delivery, GROUP, result);
+        order.verify(ack).acknowledge();
+    }
 
-        @Test
-        @DisplayName("Should mark payment failed and save dead letter event record")
-        void handleDltMessageWithValidPaymentId() {
-            UUID eventId = UUID.randomUUID();
-            UUID paymentId = UUID.randomUUID();
-            String payload = String.format("{\"eventId\":\"%s\",\"payload\":{\"paymentId\":\"%s\"}}", eventId, paymentId);
+    @ParameterizedTest
+    @ValueSource(strings = {"timeout", "unavailable"})
+    void gatewayTransientFailureLeavesCompletionAndAcknowledgmentForRetry(String kind) throws Exception {
+        var record = initiated();
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        RuntimeException failure = kind.equals("timeout") ? new GatewayTimeoutException("timeout")
+                : new GatewayUnavailableException("unavailable");
+        when(recovery.prepareAuthorization(any(), eq(GROUP))).thenReturn(Optional.of(request));
+        when(acquirer.authorize(request)).thenThrow(failure);
+        assertThatThrownBy(() -> consumer.processPaymentRequest(record, ack)).isSameAs(failure);
+        verify(recovery, never()).completeAuthorization(any(), any(), any());
+        verifyNoInteractions(ack, deadLetters);
+    }
 
-            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests-dlt", 1, 200L, paymentId.toString(), payload);
+    @ParameterizedTest
+    @ValueSource(strings = {"08006", "08007", "23505", "non-sql", "no-cause"})
+    void transactionSystemFailureRetriesOnlySqlConnectionFailures(String sqlState) {
+        var record = initiated();
+        Throwable cause = switch (sqlState) {
+            case "non-sql" -> new IllegalStateException("transaction callback failed");
+            case "no-cause" -> null;
+            default -> new java.sql.SQLException("injected commit failure", sqlState);
+        };
+        var failure = new org.springframework.transaction.TransactionSystemException("commit failed", cause);
+        when(recovery.prepareAuthorization(any(), eq(GROUP))).thenThrow(failure);
 
-            consumer.handleDltMessage(
-                    record,
-                    "org.springframework.kafka.listener.ListenerExecutionFailedException",
-                    "com.lky.kaipay.common.exception.GatewayTimeoutException",
-                    "Exhausted 3 retries",
-                    acknowledgment
-            );
-
-            verify(paymentService).markPaymentFailed(paymentId, "DLT_ROUTED", "Exhausted 3 retries");
-
-            ArgumentCaptor<DeadLetterEvent> captor = ArgumentCaptor.forClass(DeadLetterEvent.class);
-            verify(deadLetterEventRepository).save(captor.capture());
-            DeadLetterEvent saved = captor.getValue();
-            assertThat(saved.getOriginalTopic()).isEqualTo("kaipay.payment.requests-dlt");
-            assertThat(saved.getOriginalPartition()).isEqualTo(1);
-            assertThat(saved.getOriginalOffset()).isEqualTo(200L);
-            assertThat(saved.getEventId()).isEqualTo(eventId);
-            assertThat(saved.getPaymentId()).isEqualTo(paymentId);
-            assertThat(saved.getExceptionClass()).isEqualTo("com.lky.kaipay.common.exception.GatewayTimeoutException");
-            assertThat(saved.getFailureMessage()).isEqualTo("Exhausted 3 retries");
-            assertThat(saved.getPayload()).isEqualTo(payload);
-
-            verify(acknowledgment).acknowledge();
+        var assertion = assertThatThrownBy(() -> consumer.processPaymentRequest(record, ack));
+        if (sqlState.startsWith("08")) {
+            assertion.isInstanceOf(com.lky.kaipay.common.exception.AuthorizationPersistenceException.class)
+                    .hasCause(failure);
+        } else {
+            assertion.isSameAs(failure);
         }
+        verifyNoInteractions(acquirer, ack, deadLetters);
+    }
 
-        @Test
-        @DisplayName("Should handle unparseable payload gracefully and still save DeadLetterEvent")
-        void handleDltMessageUnparseablePayload() {
-            String unparseablePayload = "not-json-content";
-            ConsumerRecord<String, String> record = new ConsumerRecord<>("kaipay.payment.requests-dlt", 0, 50L, "bad-key", unparseablePayload);
+    @Test
+    void definitiveRejectionFinalizesBeforeNonRetryableRouting() throws Exception {
+        var record = initiated();
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var result = AcquirerAuthorizationResult.builder().rejectedNoAcceptance(true)
+                .failureCode("SIMULATED_NO_ACCEPTANCE").failureMessage("rejected").build();
+        when(recovery.prepareAuthorization(any(), eq(GROUP))).thenReturn(Optional.of(request));
+        when(acquirer.authorize(request)).thenReturn(result);
+        assertThatThrownBy(() -> consumer.processPaymentRequest(record, ack))
+                .isInstanceOf(NonRetryableGatewayException.class);
+        var order = inOrder(recovery, acquirer);
+        order.verify(recovery).prepareAuthorization(any(), eq(GROUP));
+        order.verify(acquirer).authorize(request);
+        order.verify(recovery).completeAuthorization(any(), eq(GROUP), eq(result));
+        verifyNoInteractions(ack);
+    }
 
-            consumer.handleDltMessage(
-                    record,
-                    "java.lang.IllegalArgumentException",
-                    null,
-                    "Cannot parse message",
-                    acknowledgment
-            );
+    @Test
+    void completionFailureDoesNotAcknowledge() throws Exception {
+        var record = initiated();
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var result = AcquirerAuthorizationResult.approved("AUTH");
+        when(recovery.prepareAuthorization(any(), eq(GROUP))).thenReturn(Optional.of(request));
+        when(acquirer.authorize(request)).thenReturn(result);
+        doThrow(new IllegalStateException("completion failed")).when(recovery).completeAuthorization(any(), any(), any());
+        assertThatThrownBy(() -> consumer.processPaymentRequest(record, ack)).hasRootCauseMessage("completion failed");
+        verifyNoInteractions(ack);
+    }
 
-            verify(paymentService, never()).markPaymentFailed(any(), any(), any());
+    @Test
+    void transientCompletionFailurePrecedesDefinitiveRejectionDiagnostic() throws Exception {
+        var record = initiated();
+        var request = new AuthorizationRequest(UUID.fromString(record.key()), UUID.randomUUID(), 5000, "USD");
+        var result = AcquirerAuthorizationResult.builder().rejectedNoAcceptance(true)
+                .failureCode("SIMULATED_NO_ACCEPTANCE").failureMessage("rejected").build();
+        when(recovery.prepareAuthorization(any(), eq(GROUP))).thenReturn(Optional.of(request));
+        when(acquirer.authorize(request)).thenReturn(result);
+        var failure = new org.springframework.dao.CannotAcquireLockException("temporary completion conflict");
+        doThrow(failure).when(recovery).completeAuthorization(any(), any(), any());
+        assertThatThrownBy(() -> consumer.processPaymentRequest(record, ack))
+                .isInstanceOf(com.lky.kaipay.common.exception.AuthorizationPersistenceException.class)
+                .hasCause(failure);
+        verifyNoInteractions(ack, deadLetters);
+    }
 
-            ArgumentCaptor<DeadLetterEvent> captor = ArgumentCaptor.forClass(DeadLetterEvent.class);
-            verify(deadLetterEventRepository).save(captor.capture());
-            DeadLetterEvent saved = captor.getValue();
-            assertThat(saved.getOriginalTopic()).isEqualTo("kaipay.payment.requests-dlt");
-            assertThat(saved.getPaymentId()).isNull();
-            assertThat(saved.getEventId()).isNull();
-            assertThat(saved.getPayload()).contains(unparseablePayload);
+    @Test
+    void lifecycleNotificationsNeverAuthorizeOrPrepare() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        var capture = EventEnvelope.of("PaymentCapturedEvent", "PAYMENT", paymentId.toString(), UUID.randomUUID(),
+                PaymentCapturedEvent.builder().paymentId(paymentId).amountCents(5000L).currency("USD").build());
+        var refund = EventEnvelope.of("PaymentRefundedEvent", "REFUND", UUID.randomUUID().toString(), UUID.randomUUID(),
+                PaymentRefundedEvent.builder().paymentId(paymentId).refundId(UUID.randomUUID())
+                        .refundAmountCents(2000L).currency("USD").build());
+        consumer.processPaymentRequest(record(mapper.writeValueAsString(capture), paymentId), ack);
+        consumer.processPaymentRequest(record(mapper.writeValueAsString(refund), paymentId), ack);
+        verify(ack, org.mockito.Mockito.times(2)).acknowledge();
+        verifyNoInteractions(recovery, acquirer, deadLetters);
+    }
 
-            verify(acknowledgment).acknowledge();
-        }
+    @Test
+    void unknownEventTypeRejectsBeforeAuthorizationFields() throws Exception {
+        UUID paymentId = UUID.randomUUID();
+        var envelope = EventEnvelope.of("UnsupportedPaymentEvent", "PAYMENT", paymentId.toString(), UUID.randomUUID(),
+                Map.of("paymentId", paymentId));
+        assertThatThrownBy(() -> consumer.processPaymentRequest(record(mapper.writeValueAsString(envelope), paymentId), ack))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("Unsupported payment event type: UnsupportedPaymentEvent");
+        verifyNoInteractions(recovery, acquirer, deadLetters, ack);
+    }
+
+    @Test
+    void missingPaymentIdRejectsWithoutSideEffects() {
+        assertThatThrownBy(() -> consumer.processPaymentRequest(record("{}", UUID.randomUUID()), ack))
+                .hasMessage("Fatal payment event processing failed");
+        verifyNoInteractions(recovery, acquirer, deadLetters, ack);
+    }
+
+    @Test
+    void dltSavesEvidenceWithoutInvokingPaymentRecovery() {
+        UUID eventId = UUID.randomUUID();
+        UUID paymentId = UUID.randomUUID();
+        String payload = "{\"eventId\":\"" + eventId + "\",\"payload\":{\"paymentId\":\"" + paymentId + "\"}}";
+        var record = new ConsumerRecord<>("kaipay.payment.requests-dlt", 1, 200L, paymentId.toString(), payload);
+        consumer.handleDltMessage(record, "ListenerFailure", "GatewayTimeoutException", "Exhausted retries", ack);
+        var captured = ArgumentCaptor.forClass(DeadLetterEvent.class);
+        verify(deadLetters).save(captured.capture());
+        var saved = captured.getValue();
+        assertThat(saved.getOriginalTopic()).isEqualTo(record.topic());
+        assertThat(saved.getOriginalPartition()).isEqualTo(1);
+        assertThat(saved.getOriginalOffset()).isEqualTo(200L);
+        assertThat(saved.getEventId()).isEqualTo(eventId);
+        assertThat(saved.getPaymentId()).isEqualTo(paymentId);
+        assertThat(saved.getExceptionClass()).isEqualTo("GatewayTimeoutException");
+        assertThat(saved.getFailureMessage()).isEqualTo("Exhausted retries");
+        assertThat(saved.getPayload()).isEqualTo(payload);
+        verify(ack).acknowledge();
+        verifyNoInteractions(recovery, acquirer);
+    }
+
+    @Test
+    void unparseableDltStillPersistsEvidence() {
+        consumer.handleDltMessage(record("not-json-content", UUID.randomUUID()), "IllegalArgumentException", null, "Cannot parse", ack);
+        var captured = ArgumentCaptor.forClass(DeadLetterEvent.class);
+        verify(deadLetters).save(captured.capture());
+        assertThat(captured.getValue().getPaymentId()).isNull();
+        assertThat(captured.getValue().getEventId()).isNull();
+        assertThat(captured.getValue().getPayload()).contains("not-json-content");
+        verify(ack).acknowledge();
+        verifyNoInteractions(recovery, acquirer);
+    }
+
+    private ConsumerRecord<String, String> initiated() {
+        UUID paymentId = UUID.randomUUID();
+        return record("{\"eventId\":\"" + UUID.randomUUID() + "\",\"payload\":{\"paymentId\":\"" + paymentId
+                + "\",\"amountCents\":5000,\"currency\":\"USD\"}}", paymentId);
+    }
+
+    private ConsumerRecord<String, String> record(String payload, UUID id) {
+        return new ConsumerRecord<>("kaipay.payment.requests", 0, 1, id.toString(), payload);
     }
 }

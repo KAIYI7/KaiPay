@@ -22,7 +22,7 @@ class DemoIdentityMigrationIntegrationTest extends AbstractPostgresIntegrationTe
                     + "VALUES ('PAYMENT','legacy','PaymentInitiatedEvent','{}'::jsonb,'PENDING',2,'synthetic legacy error')");
             var merchantRows = sql.queryForList("SELECT * FROM " + schema + ".merchants ORDER BY id");
             var outboxRows = sql.queryForList("SELECT * FROM " + schema + ".payment_events_outbox ORDER BY id");
-            var flyway = Flyway.configure().dataSource(source).schemas(schema).load();
+            var flyway = Flyway.configure().dataSource(source).schemas(schema).target("7").load();
             assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
             flyway.validate();
             assertThat(sql.queryForList("SELECT * FROM " + schema + ".merchants ORDER BY id")).isEqualTo(merchantRows);

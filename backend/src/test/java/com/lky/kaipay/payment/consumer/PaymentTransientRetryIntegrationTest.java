@@ -35,6 +35,9 @@ class PaymentTransientRetryIntegrationTest extends AbstractPostgresIntegrationTe
     @Autowired
     private PaymentService paymentService;
 
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired private com.lky.kaipay.dlt.repository.DeadLetterEventRepository deadLetters;
+
     @Autowired
     private PaymentRepository paymentRepository;
 
@@ -61,7 +64,6 @@ class PaymentTransientRetryIntegrationTest extends AbstractPostgresIntegrationTe
 
     @BeforeEach
     void setUp() {
-        mockBankAcquirerClient.clearLedger();
         consumedEventRepository.deleteAll();
         paymentRepository.deleteAll();
         customerRepository.deleteAll();
@@ -104,8 +106,6 @@ class PaymentTransientRetryIntegrationTest extends AbstractPostgresIntegrationTe
         Payment initialPayment = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(initialPayment.getStatus()).isEqualTo(PaymentStatus.CREATED);
 
-        // 2. Clear mockBankAcquirerClient ledger
-        mockBankAcquirerClient.clearLedger();
 
         // 3. Build serialized EventEnvelope<PaymentInitiatedEvent> with distinct UUID eventId = UUID.randomUUID()
         UUID eventId = UUID.randomUUID();
@@ -129,8 +129,8 @@ class PaymentTransientRetryIntegrationTest extends AbstractPostgresIntegrationTe
                 .atMost(Duration.ofSeconds(10))
                 .pollInterval(Duration.ofMillis(200))
                 .untilAsserted(() -> {
-                    // Assert mockBankAcquirerClient.getExecutionCount(paymentId) == 3
-                    assertThat(mockBankAcquirerClient.getExecutionCount(paymentId)).isEqualTo(3);
+                    // Assert mockBankAcquirerClient.getEvaluationCount(paymentId) == 3
+                    assertThat(mockBankAcquirerClient.getEvaluationCount(paymentId)).isEqualTo(3);
 
                     // Assert Payment in PostgreSQL has status PaymentStatus.AUTHORIZED and gatewayReference contains AUTH-RECOVERED-
                     Payment updatedPayment = paymentRepository.findById(paymentId).orElseThrow();
@@ -144,5 +144,49 @@ class PaymentTransientRetryIntegrationTest extends AbstractPostgresIntegrationTe
                     );
                     assertThat(eventConsumed).isTrue();
                 });
+    }
+
+    @Test
+    @DisplayName("A real transient Tx2 serialization failure retries through Kafka using the durable simulator result")
+    void localTransientCompletionFailureRollsBackThenRetriesWithoutReevaluation() throws Exception {
+        Payment initial = paymentRepository.saveAndFlush(Payment.builder().merchant(testMerchant).customer(testCustomer)
+                .amountCents(5000L).currency("USD").status(PaymentStatus.CREATED)
+                .idempotencyKey("local-retry-" + UUID.randomUUID()).build());
+        var envelope = EventEnvelope.of("PaymentInitiatedEvent", "PAYMENT", initial.getId().toString(),
+                testMerchant.getId(), PaymentInitiatedEvent.fromPayment(initial));
+        String suffix = UUID.randomUUID().toString().replace("-", "");
+        String sequence = "kp_retry_seq_" + suffix;
+        String function = "kp_retry_function_" + suffix;
+        String trigger = "kp_retry_trigger_" + suffix;
+        jdbc.execute("CREATE SEQUENCE " + sequence);
+        try {
+            jdbc.execute("CREATE FUNCTION " + function + "() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                    + "IF NEW.payment_id = '" + initial.getId() + "'::uuid THEN "
+                    + "IF nextval('" + sequence + "') = 1 THEN RAISE EXCEPTION 'injected serialization conflict' USING ERRCODE = '40001'; "
+                    + "END IF; END IF; RETURN NEW; END $$");
+            jdbc.execute("CREATE TRIGGER " + trigger + " BEFORE INSERT ON consumed_events FOR EACH ROW EXECUTE FUNCTION " + function + "()");
+            kafkaTemplate.send("kaipay.payment.requests", initial.getId().toString(),
+                    objectMapper.writeValueAsString(envelope)).get();
+            Awaitility.await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+                Payment completed = paymentRepository.findById(initial.getId()).orElseThrow();
+                assertThat(completed.getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
+                assertThat(completed.getGatewayReference()).startsWith("AUTH-");
+                assertThat(completed.getVersion()).isEqualTo(initial.getVersion() + 2);
+                assertThat(consumedEventRepository.findByPaymentIdOrderByProcessedAtAsc(initial.getId()))
+                        .singleElement().satisfies(marker -> {
+                            assertThat(marker.getId().getEventId()).isEqualTo(envelope.getEventId());
+                            assertThat(marker.getStatus()).isEqualTo("AUTHORIZED");
+                        });
+                assertThat(jdbc.queryForObject("select last_value from " + sequence, Long.class)).isEqualTo(2);
+                assertThat(mockBankAcquirerClient.getEvaluationCount(initial.getId())).isEqualTo(1);
+                assertThat(jdbc.queryForObject("select disposition from simulated_authorization_operations where payment_id = ?",
+                        String.class, initial.getId())).isEqualTo("APPROVED");
+                assertThat(deadLetters.findByPaymentIdOrderByCreatedAtDesc(initial.getId())).isEmpty();
+            });
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS " + trigger + " ON consumed_events");
+            jdbc.execute("DROP FUNCTION IF EXISTS " + function + "()");
+            jdbc.execute("DROP SEQUENCE IF EXISTS " + sequence);
+        }
     }
 }

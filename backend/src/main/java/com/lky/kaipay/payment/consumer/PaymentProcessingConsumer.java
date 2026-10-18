@@ -7,11 +7,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lky.kaipay.common.exception.GatewayTimeoutException;
 import com.lky.kaipay.common.exception.GatewayUnavailableException;
 import com.lky.kaipay.common.exception.NonRetryableGatewayException;
-import com.lky.kaipay.consumer.service.ConsumerDeduplicationService;
+import com.lky.kaipay.common.exception.AuthorizationPersistenceException;
 import com.lky.kaipay.dlt.domain.DeadLetterEvent;
 import com.lky.kaipay.dlt.repository.DeadLetterEventRepository;
-import com.lky.kaipay.payment.domain.Payment;
-import com.lky.kaipay.payment.service.PaymentService;
+import com.lky.kaipay.payment.service.AuthorizationDelivery;
+import com.lky.kaipay.payment.service.AuthorizationRecoveryService;
 import com.lky.kaipay.payment.service.acquirer.AcquirerAuthorizationResult;
 import com.lky.kaipay.payment.service.acquirer.MockBankAcquirerClient;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +27,12 @@ import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
+import org.springframework.dao.TransientDataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
@@ -35,9 +41,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PaymentProcessingConsumer {
 
-    private final PaymentService paymentService;
+    private final AuthorizationRecoveryService authorizationRecoveryService;
     private final MockBankAcquirerClient mockBankAcquirerClient;
-    private final ConsumerDeduplicationService consumerDeduplicationService;
     private final DeadLetterEventRepository deadLetterEventRepository;
     private final ObjectMapper objectMapper;
 
@@ -51,12 +56,13 @@ public class PaymentProcessingConsumer {
             retryTopicSuffix = "-retry",
             sameIntervalTopicReuseStrategy = SameIntervalTopicReuseStrategy.SINGLE_TOPIC,
             autoCreateTopics = "true",
-            include = {GatewayTimeoutException.class, GatewayUnavailableException.class}
+            include = {GatewayTimeoutException.class, GatewayUnavailableException.class, AuthorizationPersistenceException.class}
     )
     @KafkaListener(
             topics = "${kaipay.kafka.topics.payment-requests:kaipay.payment.requests}",
             groupId = "${spring.kafka.consumer.group-id:kaipay-payment-processor-group}"
     )
+    @Transactional(propagation = Propagation.NEVER)
     public void processPaymentRequest(ConsumerRecord<String, String> record, Acknowledgment ack) {
         try (var ignored = CorrelationContext.open(CorrelationContext.normalizeKafka(record))) {
             try {
@@ -66,7 +72,6 @@ public class PaymentProcessingConsumer {
                     throw new IllegalArgumentException("Unresolvable poison pill: missing paymentId");
                 }
 
-                UUID eventId = rootNode.has("eventId") ? UUID.fromString(rootNode.get("eventId").asText()) : UUID.randomUUID();
                 UUID paymentId = UUID.fromString(payloadNode.get("paymentId").asText());
                 String eventType = rootNode.has("eventType") ? rootNode.get("eventType").asText() : "PaymentInitiatedEvent";
 
@@ -75,7 +80,7 @@ public class PaymentProcessingConsumer {
                         // State and accounting already committed in the synchronous capture/refund transaction.
                         // This authorization group owns no side effect or deduplication record for notifications.
                         log.info("Skipping lifecycle notification in authorization consumer: eventId={}, paymentId={}, eventType={}",
-                                eventId, paymentId, eventType);
+                                rootNode.path("eventId").asText("legacy"), paymentId, eventType);
                         if (ack != null) ack.acknowledge();
                         return;
                     }
@@ -83,26 +88,28 @@ public class PaymentProcessingConsumer {
                     default -> throw new IllegalArgumentException("Unsupported payment event type: " + eventType);
                 }
 
-                long amountCents = payloadNode.get("amountCents").asLong();
-                String currency = payloadNode.has("currency") ? payloadNode.get("currency").asText() : "USD";
-
-                // Fast Pre-Check Deduplication
-                if (consumerDeduplicationService.isEventConsumed(eventId, consumerGroup)) {
-                    log.info("Consumer event deduplication hit: eventId {} already processed by {}", eventId, consumerGroup);
+                AuthorizationDelivery delivery = AuthorizationDelivery.fromJson(rootNode);
+                var prepared = authorizationRecoveryService.prepareAuthorization(delivery, consumerGroup);
+                if (prepared.isEmpty()) {
                     if (ack != null) ack.acknowledge();
                     return;
                 }
-
-                // Tx 1: Persist and commit observable PROCESSING state (idempotent if already PROCESSING)
-                paymentService.transitionToProcessing(paymentId);
-
-                // Non-transactional external gateway call
-                AcquirerAuthorizationResult authResult = mockBankAcquirerClient.authorize(paymentId, amountCents, currency);
-
-                // Tx 2: Persist final AUTHORIZED/DECLINED state + ConsumedEvent atomically
-                paymentService.completeAuthorizationWithDeduplication(paymentId, authResult, eventId, consumerGroup, eventType);
+                // Tx1 is committed before the independently durable simulator operation.
+                AcquirerAuthorizationResult authResult = mockBankAcquirerClient.authorize(prepared.get());
+                authorizationRecoveryService.completeAuthorization(delivery, consumerGroup, authResult);
+                // Definitive rejection is durable together with FAILED+marker before diagnostic routing.
+                if (authResult.isRejectedNoAcceptance()) {
+                    throw new NonRetryableGatewayException("Simulated authorization rejected without acceptance");
+                }
 
                 if (ack != null) ack.acknowledge();
+            } catch (TransientDataAccessException | DataAccessResourceFailureException
+                     | CannotCreateTransactionException e) {
+                throw new AuthorizationPersistenceException(e);
+            } catch (TransactionSystemException e) {
+                // Only a connection-class SQL failure establishes a potentially uncertain commit.
+                if (connectionFailure(e)) throw new AuthorizationPersistenceException(e);
+                throw e;
             } catch (GatewayTimeoutException | GatewayUnavailableException e) {
                 log.warn("Transient gateway error during event processing [key={}]: {}", record.key(), e.getMessage());
                 throw e; // Rethrow to trigger @RetryableTopic
@@ -146,14 +153,6 @@ public class PaymentProcessingConsumer {
                 }
             } catch (Exception parseEx) {
                 log.warn("Could not parse payload for DLT message: {}", parseEx.getMessage());
-            }
-
-            if (paymentId != null) {
-                try {
-                    paymentService.markPaymentFailed(paymentId, "DLT_ROUTED", exceptionMessage != null ? exceptionMessage : "Exhausted retries or fatal poison pill");
-                } catch (Exception e) {
-                    log.error("Failed to mark payment {} as FAILED in DLT handler", paymentId, e);
-                }
             }
 
             String rawPayload = record.value();
@@ -218,5 +217,13 @@ public class PaymentProcessingConsumer {
 
             if (ack != null) ack.acknowledge();
         }
+    }
+
+    private static boolean connectionFailure(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.sql.SQLException sql && sql.getSQLState() != null
+                    && sql.getSQLState().startsWith("08")) return true;
+        }
+        return false;
     }
 }

@@ -36,6 +36,8 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
 
     @Autowired
     private PaymentService paymentService;
+    @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired private com.lky.kaipay.consumer.repository.ConsumedEventRepository consumedEvents;
 
     @Autowired
     private PaymentRepository paymentRepository;
@@ -63,7 +65,6 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
 
     @BeforeEach
     void setUp() {
-        mockBankAcquirerClient.clearLedger();
         deadLetterEventRepository.deleteAll();
         paymentRepository.deleteAll();
         customerRepository.deleteAll();
@@ -87,8 +88,8 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
     }
 
     @Test
-    @DisplayName("Persistent timeout exhausts retries (3 attempts), fails payment, and routes to DLT")
-    void testRetryExhaustion_PaymentFailsAndRoutesToDlt() throws Exception {
+    @DisplayName("Persistent timeout exhausts retries (3 attempts), preserves PROCESSING and routes to DLT")
+    void testRetryExhaustion_PaymentRemainsProcessingAndRoutesToDlt() throws Exception {
         long amountCents = 777700L; // $7,777.00 - persistent timeout
         String currency = "USD";
         String idempotencyKey = "dlt-exhaustion-" + UUID.randomUUID();
@@ -105,7 +106,6 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
         Payment initialPayment = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(initialPayment.getStatus()).isEqualTo(PaymentStatus.CREATED);
 
-        mockBankAcquirerClient.clearLedger();
 
         UUID eventId = UUID.randomUUID();
         PaymentInitiatedEvent initiatedEvent = PaymentInitiatedEvent.fromPayment(initialPayment);
@@ -125,11 +125,14 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
                 .atMost(Duration.ofSeconds(15))
                 .pollInterval(Duration.ofMillis(200))
                 .untilAsserted(() -> {
-                    assertThat(mockBankAcquirerClient.getExecutionCount(paymentId)).isEqualTo(3);
+                    assertThat(mockBankAcquirerClient.getEvaluationCount(paymentId)).isEqualTo(3);
 
                     Payment updatedPayment = paymentRepository.findById(paymentId).orElseThrow();
-                    assertThat(updatedPayment.getStatus()).isEqualTo(PaymentStatus.FAILED);
-                    assertThat(updatedPayment.getFailureCode()).isEqualTo("DLT_ROUTED");
+                    assertThat(updatedPayment.getStatus()).isEqualTo(PaymentStatus.PROCESSING);
+                    assertThat(updatedPayment.getFailureCode()).isNull();
+                    assertThat(updatedPayment.getGatewayReference()).isNull();
+                    assertThat(jdbc.queryForObject("select disposition from simulated_authorization_operations where payment_id = ?", String.class, paymentId)).isEqualTo("UNRESOLVED");
+                    assertThat(consumedEvents.findByPaymentIdOrderByProcessedAtAsc(paymentId)).isEmpty();
 
                     List<DeadLetterEvent> dltEvents = deadLetterEventRepository.findByPaymentIdOrderByCreatedAtDesc(paymentId);
                     assertThat(dltEvents).hasSize(1);
@@ -158,7 +161,7 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
     }
 
     @Test
-    @DisplayName("Resolvable poison pill with fatal error marks payment FAILED and routes directly to DLT bypassing retries")
+    @DisplayName("Durable definitive no-acceptance finalizes FAILED and marker before direct DLT")
     void testPoisonPill_ResolvableIdentity_FatalError_MarksPaymentFailedAndRoutesToDlt() throws Exception {
         long amountCents = 666600L; // $6,666.00 - non-retryable fatal error
         String currency = "USD";
@@ -176,7 +179,6 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
         Payment initialPayment = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(initialPayment.getStatus()).isEqualTo(PaymentStatus.CREATED);
 
-        mockBankAcquirerClient.clearLedger();
 
         UUID eventId = UUID.randomUUID();
         PaymentInitiatedEvent initiatedEvent = PaymentInitiatedEvent.fromPayment(initialPayment);
@@ -196,10 +198,13 @@ class PaymentPoisonPillAndDltIntegrationTest extends AbstractPostgresIntegration
                 .atMost(Duration.ofSeconds(10))
                 .pollInterval(Duration.ofMillis(200))
                 .untilAsserted(() -> {
-                    assertThat(mockBankAcquirerClient.getExecutionCount(paymentId)).isEqualTo(1);
+                    assertThat(mockBankAcquirerClient.getEvaluationCount(paymentId)).isEqualTo(1);
 
                     Payment updatedPayment = paymentRepository.findById(paymentId).orElseThrow();
                     assertThat(updatedPayment.getStatus()).isEqualTo(PaymentStatus.FAILED);
+                    assertThat(updatedPayment.getFailureCode()).isEqualTo("SIMULATED_NO_ACCEPTANCE");
+                    assertThat(jdbc.queryForObject("select disposition from simulated_authorization_operations where payment_id = ?", String.class, paymentId)).isEqualTo("REJECTED_NO_ACCEPTANCE");
+                    assertThat(consumedEvents.findByPaymentIdOrderByProcessedAtAsc(paymentId)).singleElement().satisfies(marker -> assertThat(marker.getStatus()).isEqualTo("FAILED"));
 
                     List<DeadLetterEvent> dltEvents = deadLetterEventRepository.findByPaymentIdOrderByCreatedAtDesc(paymentId);
                     assertThat(dltEvents).hasSize(1);

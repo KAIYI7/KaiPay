@@ -15,7 +15,6 @@ import com.lky.kaipay.payment.domain.Payment;
 import com.lky.kaipay.payment.domain.PaymentStatus;
 import com.lky.kaipay.payment.domain.event.PaymentInitiatedEvent;
 import com.lky.kaipay.payment.repository.PaymentRepository;
-import com.lky.kaipay.payment.service.PaymentService;
 import com.lky.kaipay.payment.service.acquirer.MockBankAcquirerClient;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,17 +25,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import org.springframework.kafka.support.Acknowledgment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 @DisplayName("Payment Consumer Deduplication & Crash-Window Integration Tests")
 class PaymentDeduplicationIntegrationTest extends AbstractPostgresIntegrationTest {
 
     private static final String CONSUMER_GROUP = "kaipay-payment-processor-group";
     private static final String TOPIC = "kaipay.payment.requests";
-
-    @Autowired
-    private PaymentService paymentService;
 
     @Autowired
     private PaymentRepository paymentRepository;
@@ -67,7 +69,6 @@ class PaymentDeduplicationIntegrationTest extends AbstractPostgresIntegrationTes
 
     @BeforeEach
     void setUp() {
-        mockBankAcquirerClient.clearLedger();
         consumedEventRepository.deleteAll();
         paymentRepository.deleteAll();
         customerRepository.deleteAll();
@@ -91,8 +92,8 @@ class PaymentDeduplicationIntegrationTest extends AbstractPostgresIntegrationTes
     }
 
     @Test
-    @DisplayName("Duplicate event delivery with pre-existing ConsumedEvent skips processing and acquirer call")
-    void testDuplicateEventDelivery_PreCheckSkipsProcessing() throws Exception {
+    @DisplayName("A success marker on CREATED is inconsistent and quarantined before the gateway")
+    void testInconsistentConsumedMarker_DoesNotAuthorizeOrAcknowledge() throws Exception {
         // 1. Setup test payment (status = CREATED)
         Payment payment = paymentRepository.save(
                 Payment.builder()
@@ -136,11 +137,15 @@ class PaymentDeduplicationIntegrationTest extends AbstractPostgresIntegrationTes
                 payload
         );
 
-        // 4. Invoke paymentProcessingConsumer.processPaymentRequest(record, null)
-        paymentProcessingConsumer.processPaymentRequest(record, null);
+        // A marker cannot conceal an incompatible payment lifecycle.
+        Acknowledgment acknowledgment = mock(Acknowledgment.class);
+        assertThatThrownBy(() -> paymentProcessingConsumer.processPaymentRequest(record, acknowledgment))
+                .isInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage("Conflicting authorization marker");
+        org.mockito.Mockito.verifyNoInteractions(acknowledgment);
 
-        // 5. Assert mockBankAcquirerClient.getExecutionCount(paymentId) == 0
-        assertThat(mockBankAcquirerClient.getExecutionCount(paymentId)).isEqualTo(0);
+        // 5. Assert mockBankAcquirerClient.getEvaluationCount(paymentId) == 0
+        assertThat(mockBankAcquirerClient.getEvaluationCount(paymentId)).isEqualTo(0);
 
         // 6. Assert Payment in PostgreSQL remains in CREATED status
         Payment reloadedPayment = paymentRepository.findById(paymentId).orElseThrow();
@@ -191,13 +196,13 @@ class PaymentDeduplicationIntegrationTest extends AbstractPostgresIntegrationTes
         assertThat(authorizedPayment.getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
         assertThat(authorizedPayment.getGatewayReference()).isNotNull().startsWith("AUTH-");
         assertThat(consumedEventRepository.existsByIdEventIdAndIdConsumerGroup(eventId, CONSUMER_GROUP)).isTrue();
-        assertThat(mockBankAcquirerClient.getExecutionCount(paymentId)).isEqualTo(1);
+        assertThat(mockBankAcquirerClient.getEvaluationCount(paymentId)).isEqualTo(1);
 
         // 3. Simulate crash before offset ack & Kafka redelivery: Invoke processPaymentRequest again with identical record
         paymentProcessingConsumer.processPaymentRequest(record, null);
 
-        // 4. Assert zero extra gateway calls and Payment remains AUTHORIZED
-        assertThat(mockBankAcquirerClient.getExecutionCount(paymentId)).isEqualTo(1);
+        // 4. Assert zero extra simulator evaluations and Payment remains AUTHORIZED
+        assertThat(mockBankAcquirerClient.getEvaluationCount(paymentId)).isEqualTo(1);
         Payment recheckedPayment = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(recheckedPayment.getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
         assertThat(recheckedPayment.getGatewayReference()).isEqualTo(authorizedPayment.getGatewayReference());
@@ -232,40 +237,30 @@ class PaymentDeduplicationIntegrationTest extends AbstractPostgresIntegrationTes
                 .build();
 
         String payload = objectMapper.writeValueAsString(envelope);
-        ConsumerRecord<String, String> record = new ConsumerRecord<>(
-                TOPIC,
-                0,
-                0L,
-                paymentId.toString(),
-                payload
-        );
-
-        // 3. Run 2 concurrent tasks via CompletableFuture.runAsync(...) invoking processPaymentRequest
-        CompletableFuture<Void> future1 = CompletableFuture.runAsync(() -> {
-            try {
-                paymentProcessingConsumer.processPaymentRequest(record, null);
-            } catch (Exception ignored) {
-                // If concurrent optimistic locking or duplicate key occurs on one branch, it is swallowed/handled
-            }
-        });
-        CompletableFuture<Void> future2 = CompletableFuture.runAsync(() -> {
-            try {
-                paymentProcessingConsumer.processPaymentRequest(record, null);
-            } catch (Exception ignored) {
-                // If concurrent optimistic locking or duplicate key occurs on one branch, it is swallowed/handled
-            }
-        });
-
-        // 4. Wait for completion
-        CompletableFuture.allOf(future1, future2).join();
+        // Each delivery has independent headers and acknowledgment; collect both outcomes.
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        Acknowledgment ack1 = mock(Acknowledgment.class);
+        Acknowledgment ack2 = mock(Acknowledgment.class);
+        CompletableFuture<Void> future1 = CompletableFuture.runAsync(() ->
+                consumeTogether(new ConsumerRecord<>(TOPIC, 0, 0L, paymentId.toString(), payload), ack1, ready, start));
+        CompletableFuture<Void> future2 = CompletableFuture.runAsync(() ->
+                consumeTogether(new ConsumerRecord<>(TOPIC, 0, 0L, paymentId.toString(), payload), ack2, ready, start));
+        assertThat(ready.await(5, TimeUnit.SECONDS)).as("both competing deliveries ready").isTrue();
+        start.countDown();
+        Throwable failure1 = future1.handle((unused, failure) -> failure).get(10, TimeUnit.SECONDS);
+        Throwable failure2 = future2.handle((unused, failure) -> failure).get(10, TimeUnit.SECONDS);
+        assertThat(java.util.Arrays.asList(failure1, failure2)).as("every competing delivery outcome").containsOnlyNulls();
+        verify(ack1).acknowledge();
+        verify(ack2).acknowledge();
 
         // 5. Assert Payment in PostgreSQL is AUTHORIZED
         Payment finalPayment = paymentRepository.findById(paymentId).orElseThrow();
         assertThat(finalPayment.getStatus()).isEqualTo(PaymentStatus.AUTHORIZED);
         assertThat(finalPayment.getGatewayReference()).isNotNull().startsWith("AUTH-");
 
-        // 6. Assert mockBankAcquirerClient.getUniqueAuthorizationsCount() == 1
-        assertThat(mockBankAcquirerClient.getUniqueAuthorizationsCount()).isEqualTo(1);
+        // Definitive replay never reevaluates or replaces the durable operation.
+        assertThat(mockBankAcquirerClient.getEvaluationCount(paymentId)).isEqualTo(1);
 
         // 7. Assert consumedEventRepository.findAll() contains exactly 1 record for eventId
         List<ConsumedEvent> matchingEvents = consumedEventRepository.findAll().stream()
@@ -274,5 +269,16 @@ class PaymentDeduplicationIntegrationTest extends AbstractPostgresIntegrationTes
         assertThat(matchingEvents).hasSize(1);
         assertThat(matchingEvents.get(0).getId().getConsumerGroup()).isEqualTo(CONSUMER_GROUP);
         assertThat(matchingEvents.get(0).getPaymentId()).isEqualTo(paymentId);
+    }
+    private void consumeTogether(ConsumerRecord<String, String> record, Acknowledgment ack,
+                                 CountDownLatch ready, CountDownLatch start) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("start barrier timed out");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("delivery interrupted", interrupted);
+        }
+        paymentProcessingConsumer.processPaymentRequest(record, ack);
     }
 }

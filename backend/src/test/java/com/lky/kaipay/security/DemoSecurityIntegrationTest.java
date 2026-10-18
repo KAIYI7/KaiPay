@@ -11,7 +11,9 @@ import com.lky.kaipay.payment.domain.Payment;
 import com.lky.kaipay.payment.domain.PaymentStatus;
 import com.lky.kaipay.payment.repository.PaymentRepository;
 import com.lky.kaipay.payment.service.PaymentService;
-import com.lky.kaipay.payment.service.acquirer.AcquirerAuthorizationResult;
+import com.lky.kaipay.payment.service.AuthorizationDelivery;
+import com.lky.kaipay.payment.service.AuthorizationRecoveryService;
+import com.lky.kaipay.payment.service.acquirer.MockBankAcquirerClient;
 import org.apache.catalina.Session;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +48,8 @@ class DemoSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
     @Autowired private CustomerRepository customers;
     @Autowired private PaymentRepository payments;
     @Autowired private PaymentService paymentService;
+    @Autowired private AuthorizationRecoveryService recovery;
+    @Autowired private MockBankAcquirerClient simulator;
     @Autowired private MerchantApplicationService merchantApplication;
     @Autowired private ServletWebServerApplicationContext application;
     private Merchant merchantA;
@@ -73,6 +77,7 @@ class DemoSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
             jdbc.update("DELETE FROM dead_letter_events WHERE payment_id IN (SELECT id FROM payments WHERE merchant_id=?)", id);
             jdbc.update("DELETE FROM payment_events_outbox WHERE aggregate_id IN (SELECT id::text FROM payments WHERE merchant_id=?) OR aggregate_id IN (SELECT id::text FROM refunds WHERE merchant_id=?)", id, id);
             jdbc.update("DELETE FROM refunds WHERE merchant_id=?", id);
+            jdbc.update("DELETE FROM simulated_authorization_operations WHERE merchant_id=?", id);
             jdbc.update("DELETE FROM payments WHERE merchant_id=?", id);
             jdbc.update("DELETE FROM idempotency_records WHERE merchant_id=?", id);
             jdbc.update("DELETE FROM payment_methods WHERE customer_id IN (SELECT id FROM customers WHERE merchant_id=?)", id);
@@ -296,8 +301,11 @@ class DemoSecurityIntegrationTest extends AbstractPostgresIntegrationTest {
         assertThat(created.getStatusCode().value()).isEqualTo(201);
         UUID id = UUID.fromString(data(created).path("id").asText());
         assertThat(data(request("/v1/payments", HttpMethod.POST, paymentBody(customerA), headers)).path("id").asText()).isEqualTo(id.toString());
-        paymentService.transitionToProcessing(id);
-        paymentService.completeAuthorization(id, AcquirerAuthorizationResult.approved("synthetic-security-test"));
+        var payment = payments.findById(id).orElseThrow();
+        var delivery = AuthorizationDelivery.fromJson(mapper.valueToTree(Map.of("paymentId", id,
+                "amountCents", payment.getAmountCents(), "currency", payment.getCurrency())));
+        var authorization = recovery.prepareAuthorization(delivery, "security-test-authorization").orElseThrow();
+        recovery.completeAuthorization(delivery, "security-test-authorization", simulator.authorize(authorization));
         assertThat(request("/v1/payments/" + id + "/capture", HttpMethod.POST, null, headers).getStatusCode().value()).isEqualTo(200);
         var refund = request("/v1/payments/" + id + "/refunds", HttpMethod.POST, Map.of("amountCents", 1000L), headers);
         assertThat(refund.getStatusCode().value()).isEqualTo(201);
