@@ -17,6 +17,11 @@ public final class Model {
         }
     }
     public record CreateRequest(Integer amountMinor) {}
+    public enum PayerEvidence { NONE, SYNTHETIC, NOTIFICATION_UNVERIFIED }
+    // Explicit allowlist: payer access never serializes request observation IDs or candidate metadata.
+    public record Checkout(UUID id, int amountMinor, Instant createdAt, Instant expiresAt,
+                           Status status, PayerEvidence evidence) {}
+    public record PayerLink(UUID requestId, String token) {}
     public record Confirmation(Boolean historyChecked) {}
     public record Resolution(UUID requestId, Boolean historyChecked) {}
     public record Invalidation(String reason) {}

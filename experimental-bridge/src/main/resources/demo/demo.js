@@ -1,76 +1,162 @@
 'use strict';
 const byId = id => document.getElementById(id);
-let polling;
+const names = {AWAITING_PAYMENT: 'Awaiting payment', PAYMENT_DETECTED: 'Potential payment detected — unverified', AWAITING_VERIFICATION: 'Awaiting receiver verification', MANUALLY_CONFIRMED: 'Manually confirmed', AMBIGUOUS: 'Ambiguous — receiver review required', EXPIRED: 'Expired'};
+const payerLinks = new Map();
+let polling, generation = 0, refreshSequence = 0, lastRendered = '', controller = new AbortController();
+const money = minor => 'RM ' + (minor / 100).toFixed(2);
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
 function amountMinor() {
-  const value = byId('amount').value;
-  if (!/^(0|[1-9][0-9]{0,4})\.[0-9]{2}$/.test(value)) throw Error('Use a synthetic amount with exactly two decimal places.');
+  const value = byId('amount').value.trim();
+  if (!/^(0|[1-9][0-9]{0,4})\.[0-9]{2}$/.test(value)) throw Error('Enter an RM amount with exactly two decimal places.');
   const [whole, fraction] = value.split('.');
   const minor = Number(whole) * 100 + Number(fraction);
-  if (minor < 1 || minor > 1000000) throw Error('Amount must be between 0.01 and 10000.00.');
+  if (minor < 1 || minor > 1000000) throw Error('Amount must be between RM 0.01 and RM 10,000.00.');
   return minor;
 }
-async function api(path, body, role = 'receiver') {
-  const token = byId(role).value;
-  const result = await fetch(path, {method: body === undefined ? 'GET' : 'POST', credentials: 'omit', cache: 'no-store',
-    headers: {Authorization: 'Bearer ' + token, ...(body === undefined ? {} : {'Content-Type': 'application/json'})},
-    body: body === undefined ? undefined : JSON.stringify(body)});
-  const payload = await result.json();
-  if (!result.ok) throw Error(payload.error || 'Request failed');
-  return payload;
+function ensureCurrent(epoch) {
+  if (epoch !== generation) throw new DOMException('Private session cleared', 'AbortError');
 }
-async function refresh() {
-  const state = await api('/api/state');
-  byId('requests').replaceChildren();
-  for (const request of state.requests) {
-    const row = document.createElement('article');
-    const label = document.createElement('p');
-    const names = {PAYMENT_DETECTED: 'Potential incoming payment — unverified', AWAITING_VERIFICATION: 'Awaiting separate manual confirmation', MANUALLY_CONFIRMED: 'Receiver manually confirmed (experimental)', AWAITING_PAYMENT: 'Awaiting payment (experimental checkout)', AMBIGUOUS: 'Ambiguous — receiver review required', EXPIRED: 'Expired — cannot confirm'};
-    label.textContent = 'Synthetic MYR ' + (request.amountMinor / 100).toFixed(2) + ' • ' + names[request.status] + ' • ' + request.id;
-    row.append(label);
+async function api(path, body, role = 'receiver') {
+  const epoch = generation;
+  const token = byId(role).value.trim();
+  if (!token) throw Error('Enter the ' + (role === 'receiver' ? 'receiver' : 'simulation device') + ' credential first.');
+  const sessionSignal = controller.signal;
+  const attempt = new AbortController();
+  const cancel = () => attempt.abort();
+  sessionSignal.addEventListener('abort', cancel, {once: true});
+  const timeout = setTimeout(cancel, 10000);
+  try {
+    const result = await fetch(path, {method: body === undefined ? 'GET' : 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error', signal: attempt.signal,
+      headers: {Authorization: 'Bearer ' + token, ...(body === undefined ? {} : {'Content-Type': 'application/json'})},
+      body: body === undefined ? undefined : JSON.stringify(body)});
+    const payload = await result.json();
+    ensureCurrent(epoch);
+    if (!result.ok) throw Error(payload.error || 'Request failed. Check credentials and retry.');
+    return payload;
+  } catch (error) {
+    if (epoch === generation && error.name === 'AbortError') throw Error('The connection timed out. Refresh to check the current state before retrying an action.');
+    throw error;
+  } finally { clearTimeout(timeout); sessionSignal.removeEventListener('abort', cancel); }
+}
+function addPrivateLink(row, request) {
+  const linkValue = payerLinks.get(request.id);
+  if (!linkValue) return;
+  const box = element('div', undefined, 'private-link');
+  const link = element('a', 'Open private payer checkout');
+  link.href = linkValue;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  const input = element('input');
+  input.value = linkValue;
+  input.readOnly = true;
+  input.setAttribute('aria-label', 'Private payer checkout link for ' + request.id);
+  input.addEventListener('focus', () => input.select());
+  box.append(link, input, element('p', 'Sensitive read-only link: anyone holding it can view this request. Share only with the intended private payer. Server restart invalidates it; generate another link if needed.', 'muted'));
+  row.append(box);
+}
+function render(state) {
+  const requestRows = [];
+  for (const request of [...state.requests].reverse()) {
+    const row = element('article');
+    const evidence = state.observations.find(item => item.candidate.eventId === request.observationId);
+    const synthetic = evidence && evidence.candidate.source !== 'TNG_NOTIFICATION_CANDIDATE';
+    row.append(element('p', money(request.amountMinor), 'amount'), element('p', names[request.status] || 'Unknown state — refresh required', 'status ' + (request.status === 'MANUALLY_CONFIRMED' ? 'confirmed' : '')),
+      element('p', 'Request / order reference', 'muted'), element('p', request.id, 'reference'), element('p', 'Expires ' + new Date(request.expiresAt).toLocaleString(), 'muted'));
+    if (synthetic) row.append(element('p', 'SYNTHETIC DEMO — invented evidence; no actual funds received.', 'notice'));
+    else if (evidence) row.append(element('p', 'Notification candidate — unverified evidence, not settlement proof.', 'notice'));
+    if (request.status === 'AMBIGUOUS') row.append(element('p', 'Competing or changed evidence needs receiver review. Equal amount and time cannot identify the correct payer.'));
+    if (request.status === 'EXPIRED') row.append(element('p', 'This request can no longer be verified or confirmed. Create a new request if needed.'));
+    const linkButton = element('button', payerLinks.has(request.id) ? 'Show private payer link' : 'Get private payer link', 'secondary');
+    linkButton.type = 'button';
+    linkButton.onclick = () => run(async epoch => {
+      const access = await api('/api/requests/' + request.id + '/payer-access', {});
+      ensureCurrent(epoch);
+      if (access.requestId !== request.id || !/^[A-Za-z0-9_-]{43}$/.test(access.token)) throw Error('Invalid payer access response.');
+      payerLinks.set(request.id, location.origin + '/checkout#id=' + encodeURIComponent(request.id) + '&key=' + encodeURIComponent(access.token));
+      await refresh();
+    });
+    row.append(linkButton);
+    addPrivateLink(row, request);
     if (request.status === 'PAYMENT_DETECTED' || request.status === 'AWAITING_VERIFICATION') {
-      const button = document.createElement('button');
-      button.textContent = request.status === 'PAYMENT_DETECTED' ? 'Begin manual verification' : 'Confirm after independent history check';
+      const verifying = request.status === 'PAYMENT_DETECTED';
+      const button = element('button', verifying ? 'Begin receiver verification' : 'Explicitly confirm after verification');
+      button.type = 'button';
       button.onclick = () => run(async () => {
-        if (!window.confirm('Receiver only: check actual TNG transaction history independently before verifying a real candidate. For synthetic evidence, acknowledge the invented scenario. Matching amount and notification detection do not prove settlement.')) return;
-        await api('/api/requests/' + request.id + (request.status === 'PAYMENT_DETECTED' ? '/verify' : '/confirm'), {historyChecked: true});
+        const warning = synthetic ? 'SYNTHETIC DEMO: this is invented evidence and no actual funds were received. ' : 'Independently inspect the actual TNG transaction history and the correct request. A notification and matching amount do not prove settlement. ';
+        if (!window.confirm(warning + (verifying ? 'Begin the separate receiver verification step?' : 'Explicitly record your manual confirmation?'))) return;
+        await api('/api/requests/' + request.id + (verifying ? '/verify' : '/confirm'), {historyChecked: true});
         await refresh();
       });
       row.append(button);
     }
-    byId('requests').append(row);
+    requestRows.push(row);
   }
-  byId('observations').replaceChildren();
-  for (const item of state.observations) {
-    const row = document.createElement('article');
-    const label = document.createElement('p');
+  byId('requests').replaceChildren(...(requestRows.length ? requestRows : [element('p', 'No requests yet. Create a checkout above.', 'empty')]));
+  const observationRows = [];
+  for (const item of [...state.observations].reverse()) {
+    const row = element('article');
     const candidate = item.candidate;
-    const source = candidate.source === 'TNG_NOTIFICATION_CANDIDATE' ? 'TNG notification evidence (UNVERIFIED)' : 'SYNTHETIC invented evidence';
-    label.textContent = source + ' • ' + item.disposition + ' • MYR ' + (candidate.amountMinor / 100).toFixed(2) + ' • ' + candidate.observedAt + ' • event ' + candidate.eventId;
-    row.append(label);
+    const synthetic = candidate.source !== 'TNG_NOTIFICATION_CANDIDATE';
+    row.append(element('p', synthetic ? 'SYNTHETIC · invented evidence · no funds received' : 'TNG notification candidate · UNVERIFIED', 'eyebrow'), element('p', money(candidate.amountMinor) + ' · ' + item.disposition, 'status'), element('p', 'Observed ' + new Date(candidate.observedAt).toLocaleString(), 'muted'), element('p', 'Event ' + candidate.eventId, 'reference'));
+    if (item.disposition === 'UNMATCHED') row.append(element('p', 'No eligible matching request. This evidence does not change any checkout to paid.'));
+    if (['EXPIRED', 'DELAYED', 'INVALIDATED', 'UPDATE_IGNORED'].includes(item.disposition)) row.append(element('p', 'Review-only evidence. This observation cannot establish payment completion.'));
     if (candidate.source !== 'SIMULATED' && ['UNMATCHED', 'AMBIGUOUS'].includes(item.disposition)) {
       const eligible = state.requests.filter(request => ['AWAITING_PAYMENT', 'AMBIGUOUS'].includes(request.status) && request.amountMinor === candidate.amountMinor
         && new Date(candidate.observedAt) >= new Date(request.createdAt) && new Date(candidate.observedAt) < new Date(request.expiresAt));
       if (eligible.length) {
-        const choices = document.createElement('select');
+        const choices = element('select');
         choices.setAttribute('aria-label', 'Request for independent receiver resolution');
-        for (const request of eligible) { const option = document.createElement('option'); option.value = request.id; option.textContent = request.id; choices.append(option); }
-        const button = document.createElement('button');
-        button.textContent = 'Resolve after independent history check';
+        for (const request of eligible) { const option = element('option', request.id); option.value = request.id; choices.append(option); }
+        const button = element('button', 'Resolve to selected request after independent check', 'secondary');
+        button.type = 'button';
         button.onclick = () => run(async () => {
-          if (!window.confirm('Receiver only: independently check transaction history and the correct request. This selects an unverified candidate; separate verification and confirmation are still required. Delayed, obsolete, changed or consumed evidence cannot be resolved.')) return;
+          if (!window.confirm((synthetic ? 'Invented synthetic scenario only; no actual funds received. ' : 'Independently check actual TNG history and the correct request. ') + 'Resolve this unverified evidence? Separate verification and confirmation remain required. Stale or consumed evidence is rejected by the server.')) return;
           await api('/api/observations/' + candidate.eventId + '/resolve', {requestId: choices.value, historyChecked: true});
           await refresh();
         });
         row.append(choices, button);
       }
     }
-    byId('observations').append(row);
+    observationRows.push(row);
   }
+  byId('observations').replaceChildren(...(observationRows.length ? observationRows : [element('p', 'No candidate evidence yet.', 'empty')]));
+}
+async function refresh() {
+  const sequence = ++refreshSequence;
+  const state = await api('/api/state');
+  if (sequence !== refreshSequence) return;
+  const fingerprint = JSON.stringify([state, [...payerLinks]]);
+  if (fingerprint !== lastRendered) { render(state); lastRendered = fingerprint; }
+  byId('connection').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 function startPolling() { clearInterval(polling); polling = setInterval(() => run(refresh), 3000); }
-async function run(action) { try { await action(); byId('message').textContent = ''; } catch (error) { byId('message').textContent = error.message; } }
+async function run(action) {
+  const epoch = generation;
+  try { await action(epoch); ensureCurrent(epoch); byId('message').textContent = ''; }
+  catch (error) { if (epoch === generation && error.name !== 'AbortError') { byId('message').textContent = error.message; byId('connection').textContent = 'Refresh failed — displayed evidence may be stale'; } }
+}
+function clearSession() {
+  generation++;
+  refreshSequence++;
+  clearInterval(polling);
+  controller.abort();
+  controller = new AbortController();
+  payerLinks.clear();
+  lastRendered = '';
+  byId('receiver').value = '';
+  byId('device').value = '';
+  byId('requests').replaceChildren();
+  byId('observations').replaceChildren();
+  byId('connection').textContent = 'Disconnected';
+  byId('message').textContent = 'Private data and credentials cleared; polling stopped.';
+}
 byId('create').onclick = () => run(async () => { await api('/api/requests', {amountMinor: amountMinor()}); await refresh(); startPolling(); });
 byId('observe').onclick = () => run(async () => { await api('/api/observations', {eventId: crypto.randomUUID(), notificationId: crypto.randomUUID(), sequence: 1, observedAt: new Date().toISOString(), amountMinor: amountMinor(), source: 'SIMULATED'}, 'device'); await refresh(); });
 byId('refresh').onclick = () => run(async () => { await refresh(); startPolling(); });
-byId('clear').onclick = () => { clearInterval(polling); byId('receiver').value = ''; byId('device').value = ''; byId('requests').replaceChildren(); byId('observations').textContent = ''; byId('message').textContent = 'Credentials cleared; polling stopped.'; };
-window.addEventListener('pagehide', () => { clearInterval(polling); byId('receiver').value = ''; byId('device').value = ''; });
+byId('clear').onclick = clearSession;
+window.addEventListener('pagehide', clearSession);

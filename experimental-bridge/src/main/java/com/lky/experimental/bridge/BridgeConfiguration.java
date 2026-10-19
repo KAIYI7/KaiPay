@@ -41,6 +41,7 @@ class BridgeConfiguration {
 
 final class BridgeAccess {
     final boolean enabled;
+    final PayerTokens payers = new PayerTokens();
     private final byte[] device, receiver, liveDevice;
     final java.util.UUID deviceId;
 

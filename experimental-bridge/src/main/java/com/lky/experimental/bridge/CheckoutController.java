@@ -1,0 +1,33 @@
+package com.lky.experimental.bridge;
+
+import static com.lky.experimental.bridge.Model.*;
+import java.io.IOException;
+import java.util.UUID;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController @ConditionalOnProperty(name = "bridge.enabled", havingValue = "true")
+class CheckoutController {
+    private final ObservationService service;
+    private final BridgeAccess access;
+
+    CheckoutController(ObservationService service, BridgeAccess access) { this.service = service; this.access = access; }
+
+    @PostMapping("/api/requests/{id}/payer-access") PayerLink issue(@PathVariable UUID id) {
+        service.checkout(id); // Never issue access to nonexistent requests; receiver authentication is enforced by the filter.
+        return new PayerLink(id, access.payers.issue(id));
+    }
+
+    @GetMapping("/api/checkout/{id}") Checkout checkout(@PathVariable UUID id) { return service.checkout(id); }
+
+    @GetMapping(value = "/checkout", produces = MediaType.TEXT_HTML_VALUE) byte[] page() throws IOException { return resource("demo/checkout.html"); }
+    @GetMapping(value = "/checkout.js", produces = "text/javascript") byte[] script() throws IOException { return resource("demo/checkout.js"); }
+    private byte[] resource(String path) throws IOException {
+        try (var stream = new ClassPathResource(path).getInputStream()) { return stream.readAllBytes(); }
+    }
+}

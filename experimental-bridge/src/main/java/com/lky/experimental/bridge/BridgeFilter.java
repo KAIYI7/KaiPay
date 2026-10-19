@@ -17,6 +17,7 @@ import java.util.Collections;
 
 final class BridgeFilter implements Filter {
     private static final int MAX_BODY = 4096;
+    private static final String UUID_PATH = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
     private final BridgeAccess access;
     BridgeFilter(BridgeAccess access) { this.access = access; }
 
@@ -32,12 +33,20 @@ final class BridgeFilter implements Filter {
             error(response, 403, "TLS_REQUIRED"); return;
         }
         String path = request.getRequestURI();
-        boolean publicResource = path.equals("/") || path.equals("/demo.js") || path.equals("/demo.css");
-        if (!publicResource) {
+        boolean publicResource = path.equals("/") || path.equals("/demo.js") || path.equals("/demo.css")
+                || path.equals("/checkout") || path.equals("/checkout.js");
+        if (path.matches("/api/checkout/" + UUID_PATH)) {
+            if (!"GET".equals(request.getMethod())) { error(response, 405, "METHOD_INVALID"); return; }
+            if (request.getQueryString() != null
+                    || Collections.list(request.getHeaders("Authorization")).size() != 1
+                    || !access.payers.authorized(java.util.UUID.fromString(path.substring("/api/checkout/".length())), request.getHeader("Authorization"))) {
+                error(response, 401, "UNAUTHORIZED"); return;
+            }
+        } else if (!publicResource) {
             boolean canonical = path.equals("/api/state") || path.equals("/api/requests") || path.equals("/api/observations") || path.equals("/api/notification-candidates")
                     || path.matches("/api/notification-candidates/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/invalidate")
                     || path.matches("/api/observations/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resolve")
-                    || path.matches("/api/requests/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(?:verify|confirm)");
+                    || path.matches("/api/requests/" + UUID_PATH + "/(?:verify|confirm|payer-access)");
             // Reject encoded/matrix paths before MVC normalizes them: roles use the same canonical route.
             if (!canonical) { error(response, 404, "NOT_FOUND"); return; }
             if (path.startsWith("/api/notification-candidates") && access.deviceId == null) { error(response, 404, "LIVE_DELIVERY_DISABLED"); return; }

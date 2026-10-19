@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>KaiPay · Private checkout</title><link rel="stylesheet" href="/demo.css"><script src="/checkout.js" defer></script></head>
+<body><main class="checkout"><header><p class="eyebrow">KaiPay · Private experiment</p><h1>Your checkout</h1><p class="intro">A read-only view of one experimental payment request.</p></header>
+<p class="notice">Demonstration only. No payable TNG QR is configured. Do not make a real payment for this demonstration.</p>
+<section class="panel checkout-card" aria-label="Checkout details"><p class="muted">Expected amount</p><p id="checkout-amount" class="amount">—</p><p class="muted">Request / order reference</p><p id="checkout-reference" class="reference">Loading private request…</p>
+<div id="checkout-status" class="checkout-status" role="status" aria-live="polite"><h2 id="status-title">Loading current status</h2><p id="status-detail">Checking this request with the server.</p></div><p id="evidence-note" class="notice hidden"></p><p id="checkout-expiry" class="muted"></p>
+<div class="placeholder" aria-label="Nonpayable demonstration placeholder"><strong>No payment QR configured</strong><span>Demonstration placeholder · not a payment code</span></div>
+<h2>Payment instructions</h2><p>This session uses invented synthetic evidence. Ask the receiver to run the demonstration and review this request. No funds need to move.</p><p>There is no automatic order-specific TNG mapping. A matching amount or notification alone never confirms payment. The receiver must separately verify and manually confirm.</p>
+<p id="updated" class="muted"></p><button id="retry" type="button" class="secondary">Check status now</button><button id="forget" type="button" class="secondary">Clear private checkout</button></section>
+<footer>Your private link permits viewing this request only. Keep it private. Access stays in this tab's memory; re-open the original link after reloading. If the server restarts, ask the receiver for a new link.</footer></main></body></html>

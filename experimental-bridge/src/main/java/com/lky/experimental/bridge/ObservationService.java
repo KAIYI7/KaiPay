@@ -45,6 +45,18 @@ final class ObservationService {
 
     synchronized Snapshot view() { expire(); return state; }
 
+    synchronized Checkout checkout(UUID id) {
+        expire();
+        PaymentRequest request = state.requests().stream().filter(r -> r.id().equals(id)).findFirst()
+                .orElseThrow(() -> new BridgeFailure(404, "CHECKOUT_NOT_FOUND"));
+        PayerEvidence evidence = state.observations().stream()
+                .filter(o -> o.candidate().eventId().equals(request.observationId()))
+                .map(o -> o.candidate().source() == Source.TNG_NOTIFICATION_CANDIDATE
+                        ? PayerEvidence.NOTIFICATION_UNVERIFIED : PayerEvidence.SYNTHETIC)
+                .findFirst().orElse(PayerEvidence.NONE);
+        return new Checkout(request.id(), request.amountMinor(), request.createdAt(), request.expiresAt(), request.status(), evidence);
+    }
+
     synchronized PaymentRequest create(CreateRequest input) {
         amount(input.amountMinor());
         expire();
