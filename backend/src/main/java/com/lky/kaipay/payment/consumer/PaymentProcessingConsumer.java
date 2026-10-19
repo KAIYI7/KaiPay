@@ -27,7 +27,7 @@ import org.springframework.kafka.retrytopic.SameIntervalTopicReuseStrategy;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
-import org.springframework.retry.annotation.Backoff;
+import org.springframework.kafka.annotation.BackOff;
 import org.springframework.stereotype.Component;
 import org.springframework.dao.TransientDataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -53,7 +53,7 @@ public class PaymentProcessingConsumer {
 
     @RetryableTopic(
             attempts = "3",
-            backoff = @Backoff(delay = 1000, multiplier = 2.0),
+            backOff = @BackOff(delay = 1000, multiplier = 2.0),
             dltTopicSuffix = "-dlt",
             retryTopicSuffix = "-retry",
             sameIntervalTopicReuseStrategy = SameIntervalTopicReuseStrategy.SINGLE_TOPIC,

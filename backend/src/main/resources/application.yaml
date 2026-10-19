@@ -26,6 +26,10 @@ server:
         same-site: strict
 
 spring:
+  http:
+    converters:
+      # Keep the strict minor-unit deserializer and existing API JSON contracts.
+      preferred-json-mapper: jackson2
   application:
     name: KaiPay
   datasource:
@@ -45,6 +49,9 @@ spring:
       ddl-auto: validate
     properties:
       hibernate:
+        type:
+          # Hibernate 7 also sees Jackson 3; retain historical JSONB semantics.
+          json_format_mapper: jackson
         format_sql: true
         jdbc:
           batch_size: 25
@@ -96,6 +103,7 @@ logging:
     # These framework loggers emit raw records, SQL row details or exception chains.
     # Application failure categories/SQLSTATE + correlation remain available instead.
     org.hibernate.engine.jdbc.spi.SqlExceptionHelper: OFF
+    org.hibernate.orm.jdbc.error: OFF
     org.springframework.kafka.support.LoggingProducerListener: OFF
     org.springframework.kafka.listener.DefaultErrorHandler: OFF
     org.springframework.kafka.listener.KafkaMessageListenerContainer: OFF

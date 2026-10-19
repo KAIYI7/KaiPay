@@ -1,15 +1,15 @@
 # KaiPay: High-Throughput Distributed Payment & Double-Entry Ledger Engine
 
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot 3.4](https://img.shields.io/badge/Spring%20Boot-3.4.3-green.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.1-green.svg)](https://spring.io/projects/spring-boot)
 [![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-3.8.0%20(KRaft)-black.svg)](https://kafka.apache.org/)
 [![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-blue.svg)](https://www.postgresql.org/)
-[![Testcontainers](https://img.shields.io/badge/Testcontainers-1.20.4-red.svg)](https://testcontainers.com/)
+[![Testcontainers](https://img.shields.io/badge/Testcontainers-2.0.5-red.svg)](https://testcontainers.com/)
 [![React 18](https://img.shields.io/badge/React-18.3.1-61dafb.svg)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4.17-38bdf8.svg)](https://tailwindcss.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-KaiPay is a distributed payment processing and financial accounting engine built with **Java 21**, **Spring Boot 3.4.3**, **Apache Kafka 3.8.0 (KRaft mode)**, and **PostgreSQL 16**. It is engineered to solve core distributed systems consistency and reliability challenges: the distributed dual-write problem, at-least-once message delivery, head-of-line blocking during downstream bank latency, idempotency under uncoordinated retries, and strict double-entry ledger accounting invariants.
+KaiPay is a distributed payment processing and financial accounting engine built with **Java 21**, **Spring Boot 4.1.1**, **Apache Kafka 3.8.0 (KRaft mode)**, and **PostgreSQL 16**. It is engineered to solve core distributed systems consistency and reliability challenges: the distributed dual-write problem, at-least-once message delivery, head-of-line blocking during downstream bank latency, idempotency under uncoordinated retries, and strict double-entry ledger accounting invariants.
 
 ---
 
@@ -116,16 +116,18 @@ flowchart TD
 | Layer / Component | Technology | Version | Purpose & Architectural Rationale |
 | :--- | :--- | :--- | :--- |
 | **Language** | Java | 21 (LTS) | Virtual threads readiness, pattern matching, record classes, strong type safety |
-| **Framework** | Spring Boot | 3.4.3 | Portfolio-grade DI container, Spring Data JPA, Spring Kafka, declarative transactions |
-| **Message Broker** | Apache Kafka | 3.8.0 (KRaft) | High-throughput distributed log, partition ordering, KRaft consensus (ZooKeeper-less) |
+| **Framework** | Spring Boot | 4.1.1 | Portfolio-grade DI container, Spring Data JPA, Spring Kafka, declarative transactions |
+| **Message Broker** | Apache Kafka | Client 4.2.1; dev broker 3.8.0 (KRaft) | High-throughput distributed log, partition ordering, KRaft consensus (ZooKeeper-less) |
 | **Database** | PostgreSQL | 16-alpine | ACID relational integrity, `SKIP LOCKED` row queuing, partial indexes, atomic constraints |
-| **Schema Migration**| Flyway | 10.x | Version-controlled relational database migrations (V1 through V9) |
-| **Integration Testing**| Testcontainers | 1.20.4 | Ephemeral, production-identical Docker containers for PostgreSQL 16 and Kafka 3.8 |
+| **Schema Migration**| Flyway | 12.4.0 | Version-controlled relational database migrations (V1 through V9) |
+| **Integration Testing**| Testcontainers | 2.0.5 | Ephemeral Docker containers for PostgreSQL 16 and Kafka 4.1.2 |
 | **Frontend Framework**| React | 18.3.1 | Declarative component UI for operational payments, double-entry ledger, outbox & DLT views |
 | **Build Tool** | Vite | 6.1.0 | Fast ESM development server and optimized TypeScript bundling |
 | **Type System** | TypeScript | 5.7.3 | Strict type safety for API contracts, event payloads, and ledger journal models |
 | **Styling** | Tailwind CSS | 3.4.17 | Modern utility-first CSS design system |
 | **Icons** | Lucide React | 0.475.0 | Clean financial and operational telemetry icon set |
+
+The backend uses Spring Boot 4.1.1 dependency management (Spring Framework 7.0.9, Security 7.1.1, Spring Kafka 4.1.1 and Hibernate 7.4.5.Final). Kafka clients 4.2.1 retain the producer corruption security fix. Java 21 and migrations V1–V9 are unchanged. Boot's supported Jackson 2 compatibility module preserves existing API and persisted JSON contracts; this deprecated integration will require migration before its future removal. The development Compose broker remains 3.8.0; it is not a supported hosting recommendation.
 
 ---
 
@@ -388,7 +390,7 @@ cd backend
 
 ```
 KaiPay/
-├── backend/                             # Spring Boot 3.4.3 Core Service (Java 21)
+├── backend/                             # Spring Boot 4.1.1 Core Service (Java 21)
 │   ├── src/main/java/com/lky/kaipay/
 │   │   ├── common/                      # EventEnvelope, Base DTOs, Kafka & DB Config
 │   │   ├── consumer/                    # Deduplication service & consumed_events tracking

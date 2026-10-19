@@ -7,7 +7,8 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -17,7 +18,8 @@ final class LoginAdmissionFilter extends OncePerRequestFilter {
     private final LoginAdmission admission;
     private final ObjectMapper mapper;
     // Match the same servlet path semantics as formLogin, including a deployed context path.
-    private final AntPathRequestMatcher login = new AntPathRequestMatcher("/v1/auth/login", "POST");
+    private final PathPatternRequestMatcher login = PathPatternRequestMatcher.withDefaults()
+            .matcher(HttpMethod.POST, "/v1/auth/login");
 
     LoginAdmissionFilter(LoginAdmission admission, ObjectMapper mapper) {
         this.admission = admission; this.mapper = mapper;

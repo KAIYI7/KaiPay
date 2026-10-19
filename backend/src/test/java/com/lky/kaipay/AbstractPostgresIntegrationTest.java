@@ -4,17 +4,18 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.KafkaContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.kafka.KafkaContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.utility.DockerImageName;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate
 @ActiveProfiles({"test", "local"})
 public abstract class AbstractPostgresIntegrationTest {
 
     @org.springframework.beans.factory.annotation.Autowired
-    private org.springframework.boot.test.web.client.TestRestTemplate securityHttp;
+    private org.springframework.boot.resttestclient.TestRestTemplate securityHttp;
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.jdbc.core.JdbcTemplate securityJdbc;
     @org.springframework.beans.factory.annotation.Autowired
@@ -31,19 +32,19 @@ public abstract class AbstractPostgresIntegrationTest {
         securityJdbc.update("DELETE FROM simulated_authorization_operations");
     }
 
-    protected static final PostgreSQLContainer<?> postgres;
+    protected static final PostgreSQLContainer postgres;
 
     @Container
     protected static final KafkaContainer KAFKA_CONTAINER;
 
     static {
-        postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+        postgres = new PostgreSQLContainer("postgres:16-alpine")
                 .withDatabaseName("kaipay_test")
                 .withUsername("test_user")
                 .withPassword("test_password");
         postgres.start();
 
-        KAFKA_CONTAINER = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.0"));
+        KAFKA_CONTAINER = new KafkaContainer(DockerImageName.parse("apache/kafka:4.1.2"));
         KAFKA_CONTAINER.start();
     }
 

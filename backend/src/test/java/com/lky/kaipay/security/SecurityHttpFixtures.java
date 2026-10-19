@@ -1,7 +1,7 @@
 package com.lky.kaipay.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
