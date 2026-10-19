@@ -30,6 +30,8 @@
   <properties>
     <!-- Patched compatible security line; Boot and Spring Framework remain unchanged. -->
     <spring-security.version>6.5.11</spring-security.version>
+    <!-- Compatible client patch for Kafka producer buffer-pool corruption (CVE-2026-35554). -->
+    <kafka.version>3.9.2</kafka.version>
     <java.version>21</java.version>
   </properties>
   <dependencies>
