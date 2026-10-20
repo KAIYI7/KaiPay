@@ -50,7 +50,7 @@ class CheckoutHttpTest {
 
     void configureMvc() {
         access = new BridgeAccess(NotificationHttpTest.environment());
-        mvc = MockMvcBuilders.standaloneSetup(new BridgeController(service), new CheckoutController(service, access))
+        mvc = MockMvcBuilders.standaloneSetup(new BridgeController(service), new CheckoutController(service, access, new ReceivingQr("")))
                 .setControllerAdvice(new BridgeErrors())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(mapper), new org.springframework.http.converter.ByteArrayHttpMessageConverter())
                 .addFilters(new BridgeFilter(access)).build();

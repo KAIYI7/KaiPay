@@ -34,7 +34,7 @@ class EnabledApplicationTest {
 
     @Test void realServerUsesFeatureAuthStrictJsonPersistenceAndSeparateManualSteps() throws Exception {
         try (HttpClient client = HttpClient.newHttpClient()) {
-            assertThat(send(client, "/", null, null).body()).contains("Placeholder QR", "UNVERIFIED");
+            assertThat(send(client, "/", null, null).body()).contains("nonpayable placeholder", "UNVERIFIED");
             assertThat(send(client, "/demo.js", null, null).statusCode()).isEqualTo(200);
             assertThat(send(client, "/api/state", null, null).statusCode()).isEqualTo(401);
             assertThat(send(client, "/api/state", BridgeHttpTest.DEVICE, null).statusCode()).isEqualTo(401);

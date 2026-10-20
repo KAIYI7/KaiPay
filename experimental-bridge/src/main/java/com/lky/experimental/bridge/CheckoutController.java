@@ -15,8 +15,11 @@ import org.springframework.web.bind.annotation.RestController;
 class CheckoutController {
     private final ObservationService service;
     private final BridgeAccess access;
+    private final ReceivingQr qr;
 
-    CheckoutController(ObservationService service, BridgeAccess access) { this.service = service; this.access = access; }
+    CheckoutController(ObservationService service, BridgeAccess access, ReceivingQr qr) {
+        this.service = service; this.access = access; this.qr = qr;
+    }
 
     @PostMapping("/api/requests/{id}/payer-access") PayerLink issue(@PathVariable UUID id) {
         service.checkout(id); // Never issue access to nonexistent requests; receiver authentication is enforced by the filter.
@@ -24,6 +27,14 @@ class CheckoutController {
     }
 
     @GetMapping("/api/checkout/{id}") Checkout checkout(@PathVariable UUID id) { return service.checkout(id); }
+
+    @GetMapping(value = "/api/checkout/{id}/qr", produces = MediaType.IMAGE_PNG_VALUE)
+    byte[] qr(@PathVariable UUID id) {
+        Checkout checkout = service.checkout(id);
+        if (checkout.status() == Status.EXPIRED || checkout.status() == Status.MANUALLY_CONFIRMED)
+            throw new BridgeFailure(409, "CHECKOUT_NOT_PAYABLE");
+        return qr.bytes();
+    }
 
     @GetMapping(value = "/checkout", produces = MediaType.TEXT_HTML_VALUE) byte[] page() throws IOException { return resource("demo/checkout.html"); }
     @GetMapping(value = "/checkout.js", produces = "text/javascript") byte[] script() throws IOException { return resource("demo/checkout.js"); }

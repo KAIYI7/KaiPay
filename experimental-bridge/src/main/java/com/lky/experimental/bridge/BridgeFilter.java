@@ -27,7 +27,7 @@ final class BridgeFilter implements Filter {
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("X-Content-Type-Options", "nosniff");
         response.setHeader("Referrer-Policy", "no-referrer");
-        response.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+        response.setHeader("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
         if (!access.enabled) { error(response, 404, "EXPERIMENT_DISABLED"); return; }
         if (!request.isSecure() && (!loopback(request.getRemoteAddr()) || !loopback(request.getLocalAddr()))) {
             error(response, 403, "TLS_REQUIRED"); return;
@@ -35,11 +35,11 @@ final class BridgeFilter implements Filter {
         String path = request.getRequestURI();
         boolean publicResource = path.equals("/") || path.equals("/demo.js") || path.equals("/demo.css")
                 || path.equals("/checkout") || path.equals("/checkout.js");
-        if (path.matches("/api/checkout/" + UUID_PATH)) {
+        if (path.matches("/api/checkout/" + UUID_PATH + "(?:/qr)?")) {
             if (!"GET".equals(request.getMethod())) { error(response, 405, "METHOD_INVALID"); return; }
             if (request.getQueryString() != null
                     || Collections.list(request.getHeaders("Authorization")).size() != 1
-                    || !access.payers.authorized(java.util.UUID.fromString(path.substring("/api/checkout/".length())), request.getHeader("Authorization"))) {
+                    || !access.payers.authorized(java.util.UUID.fromString(path.substring("/api/checkout/".length(), "/api/checkout/".length() + 36)), request.getHeader("Authorization"))) {
                 error(response, 401, "UNAUTHORIZED"); return;
             }
         } else if (!publicResource) {

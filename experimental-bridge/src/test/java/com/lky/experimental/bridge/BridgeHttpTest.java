@@ -123,7 +123,7 @@ class BridgeHttpTest {
     }
 
     @Test void publicDemoUsesPlaceholderAndSecurityHeaders() throws Exception {
-        mvc.perform(get("/")).andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("Placeholder QR")))
+        mvc.perform(get("/")).andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("nonpayable placeholder")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("UNVERIFIED")))
                 .andExpect(header().string("Cache-Control", "no-store"))
                 .andExpect(header().string("Content-Security-Policy", org.hamcrest.Matchers.containsString("frame-ancestors 'none'")));

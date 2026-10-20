@@ -23,6 +23,8 @@ class BridgeConfiguration {
     }
 
     @Bean BridgeAccess access(Environment env) { return new BridgeAccess(env); }
+    @Bean @ConditionalOnProperty(name = "bridge.enabled", havingValue = "true")
+    ReceivingQr receivingQr(Environment env) { return new ReceivingQr(env.getProperty("bridge.qr-directory", "")); }
     @Bean FilterRegistrationBean<BridgeFilter> bridgeFilter(BridgeAccess access) {
         FilterRegistrationBean<BridgeFilter> registration = new FilterRegistrationBean<>(new BridgeFilter(access));
         registration.setOrder(Integer.MIN_VALUE);

@@ -2,6 +2,7 @@
 const byId = id => document.getElementById(id);
 const names = {AWAITING_PAYMENT: 'Awaiting payment', PAYMENT_DETECTED: 'Potential payment detected — unverified', AWAITING_VERIFICATION: 'Awaiting receiver verification', MANUALLY_CONFIRMED: 'Manually confirmed', AMBIGUOUS: 'Ambiguous — receiver review required', EXPIRED: 'Expired'};
 const payerLinks = new Map();
+const pendingConfirmations = new Set();
 let polling, generation = 0, refreshSequence = 0, lastRendered = '', controller = new AbortController();
 const money = minor => 'RM ' + (minor / 100).toFixed(2);
 function element(tag, text, className) {
@@ -65,7 +66,8 @@ function render(state) {
     const row = element('article');
     const evidence = state.observations.find(item => item.candidate.eventId === request.observationId);
     const synthetic = evidence && evidence.candidate.source !== 'TNG_NOTIFICATION_CANDIDATE';
-    row.append(element('p', money(request.amountMinor), 'amount'), element('p', names[request.status] || 'Unknown state — refresh required', 'status ' + (request.status === 'MANUALLY_CONFIRMED' ? 'confirmed' : '')),
+    const statusName = request.status === 'MANUALLY_CONFIRMED' ? (synthetic ? 'Demo manually confirmed — no funds received' : 'Payment confirmed (receiver verified)') : names[request.status];
+    row.append(element('p', money(request.amountMinor), 'amount'), element('p', statusName || 'Unknown state — refresh required', 'status ' + (request.status === 'MANUALLY_CONFIRMED' ? 'confirmed' : '')),
       element('p', 'Request / order reference', 'muted'), element('p', request.id, 'reference'), element('p', 'Expires ' + new Date(request.expiresAt).toLocaleString(), 'muted'));
     if (synthetic) row.append(element('p', 'SYNTHETIC DEMO — invented evidence; no actual funds received.', 'notice'));
     else if (evidence) row.append(element('p', 'Notification candidate — unverified evidence, not settlement proof.', 'notice'));
@@ -82,17 +84,54 @@ function render(state) {
     });
     row.append(linkButton);
     addPrivateLink(row, request);
-    if (request.status === 'PAYMENT_DETECTED' || request.status === 'AWAITING_VERIFICATION') {
-      const verifying = request.status === 'PAYMENT_DETECTED';
-      const button = element('button', verifying ? 'Begin receiver verification' : 'Explicitly confirm after verification');
-      button.type = 'button';
-      button.onclick = () => run(async () => {
-        const warning = synthetic ? 'SYNTHETIC DEMO: this is invented evidence and no actual funds were received. ' : 'Independently inspect the actual TNG transaction history and the correct request. A notification and matching amount do not prove settlement. ';
-        if (!window.confirm(warning + (verifying ? 'Begin the separate receiver verification step?' : 'Explicitly record your manual confirmation?'))) return;
-        await api('/api/requests/' + request.id + (verifying ? '/verify' : '/confirm'), {historyChecked: true});
-        await refresh();
-      });
-      row.append(button);
+    if (['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status) && evidence?.disposition === 'MATCHED') {
+      const form = element('form', undefined, 'confirmation-form');
+      const label = element('label', undefined, 'attestation');
+      const checkbox = element('input');
+      checkbox.type = 'checkbox';
+      checkbox.required = true;
+      checkbox.disabled = pendingConfirmations.has(request.id);
+      label.append(checkbox, element('span', synthetic
+        ? 'I acknowledge this is invented synthetic evidence for this checkout. No actual TNG transaction or funds are being asserted, and no unresolved ambiguity prevents this demo confirmation.'
+        : 'I independently checked actual TNG transaction history: the incoming transaction exists, its actual amount matches this checkout, I identified this intended checkout, and no unresolved ambiguity or conflicting evidence prevents confirmation.'));
+      const button = element('button', synthetic ? 'Confirm synthetic demo — no funds received' : "I've checked TNG history — Confirm payment");
+      button.type = 'submit';
+      button.disabled = true;
+      checkbox.onchange = () => { button.disabled = !checkbox.checked || pendingConfirmations.has(request.id); };
+      form.onsubmit = event => {
+        event.preventDefault();
+        if (!checkbox.checked || pendingConfirmations.has(request.id)) return;
+        pendingConfirmations.add(request.id);
+        button.disabled = true;
+        checkbox.disabled = true;
+        run(async epoch => {
+          try {
+            if (request.status === 'PAYMENT_DETECTED') {
+              const verified = await api('/api/requests/' + request.id + '/verify', {historyChecked: true});
+              ensureCurrent(epoch);
+              if (verified.id !== request.id || verified.status !== 'AWAITING_VERIFICATION') throw Error('Verification was not acknowledged in the expected state.');
+            }
+            const confirmed = await api('/api/requests/' + request.id + '/confirm', {historyChecked: true});
+            ensureCurrent(epoch);
+            if (confirmed.id !== request.id || confirmed.status !== 'MANUALLY_CONFIRMED') throw Error('Confirmation was not acknowledged in the expected state.');
+          } catch (error) {
+            if (epoch !== generation) throw error;
+            try { await refresh(); } catch { /* Keep the failure explicit if the current state is unavailable. */ }
+            throw Error('Confirmation response unavailable or rejected. Check the current server status before retrying; verification may have succeeded separately. ' + error.message);
+          } finally {
+            pendingConfirmations.delete(request.id);
+            checkbox.checked = false;
+            checkbox.disabled = false;
+            button.disabled = true;
+            lastRendered = '';
+          }
+          await refresh();
+        });
+      };
+      form.append(label, button, element('p', request.status === 'AWAITING_VERIFICATION'
+        ? 'Verification is recorded; confirmation is still outstanding. Check the attestation again to resume.'
+        : 'This submission records verification, then separately requests confirmation. The server validates each transition.', 'muted'));
+      row.append(form);
     }
     requestRows.push(row);
   }
@@ -147,6 +186,7 @@ function clearSession() {
   controller.abort();
   controller = new AbortController();
   payerLinks.clear();
+  pendingConfirmations.clear();
   lastRendered = '';
   byId('receiver').value = '';
   byId('device').value = '';

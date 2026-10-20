@@ -8,13 +8,63 @@
   const states = {
     AWAITING_PAYMENT: ['Awaiting payment', 'No matching candidate has been detected for this request.'],
     PAYMENT_DETECTED: ['Potential payment detected — unverified', 'Candidate evidence has tentatively matched. Detection is not proof of settlement. The receiver has not completed verification.'],
-    AWAITING_VERIFICATION: ['Awaiting receiver verification', 'The receiver has begun verification. Explicit manual confirmation is still required.'],
-    MANUALLY_CONFIRMED: ['Manually confirmed', 'The receiver explicitly recorded manual confirmation after the separate verification step. This is an experimental receiver assertion.'],
+    AWAITING_VERIFICATION: ['Awaiting receiver confirmation', 'The receiver has recorded the verification step. Explicit confirmation is still required. Do not pay again.'],
+    MANUALLY_CONFIRMED: ['Payment confirmed (receiver verified)', 'The receiver independently checked TNG history and explicitly recorded confirmation. This remains a receiver assertion, not authenticated provider settlement.'],
     AMBIGUOUS: ['Ambiguous — receiver review required', 'Competing or changed evidence cannot safely identify the payment for this request. Contact the receiver; completion has not been confirmed.'],
     EXPIRED: ['Expired', 'This request can no longer be verified or confirmed. Ask the receiver for a new checkout.']
   };
-  let timer, busy = false, cleared = false, controller = new AbortController();
+  let timer, busy = false, cleared = false, qrUrl = null, qrChecked = false, controller = new AbortController();
+  function hideQr(title, detail) {
+    byId('receiving-qr').removeAttribute('src');
+    if (qrUrl) URL.revokeObjectURL(qrUrl);
+    qrUrl = null;
+    byId('qr-display').classList.add('hidden');
+    byId('qr-placeholder').classList.remove('hidden');
+    byId('qr-placeholder-title').textContent = title;
+    byId('qr-placeholder-detail').textContent = detail;
+    byId('payment-instructions').textContent = 'No payment code is displayed. Do not attempt a payment from this page while the QR is unavailable.';
+  }
+  async function loadQr(request, signal) {
+    if (['EXPIRED', 'MANUALLY_CONFIRMED', 'AMBIGUOUS'].includes(request.status)) {
+      hideQr('Payment QR hidden', request.status === 'EXPIRED' ? 'This checkout has expired. Ask the receiver for a new checkout.' : request.status === 'MANUALLY_CONFIRMED' ? 'This checkout is already confirmed. Do not pay again.' : 'Receiver review is required. Do not pay while this checkout is ambiguous.');
+      qrChecked = false;
+      return;
+    }
+    if (request.evidence === 'SYNTHETIC') {
+      hideQr('Synthetic demonstration — no payment needed', 'Invented evidence only. No actual funds were received; do not make a transfer for this demonstration.');
+      qrChecked = false;
+      return;
+    }
+    if (!qrChecked) {
+      const result = await fetch('/api/checkout/' + requestId + '/qr', {method: 'GET', headers: {Authorization: 'Bearer ' + key}, credentials: 'omit', cache: 'no-store', redirect: 'error', signal});
+      if (cleared) return;
+      if (result.status === 404) {
+        hideQr('No payment QR configured', 'Nonpayable placeholder · ask the receiver to configure their genuine receiving QR privately.');
+        qrChecked = true;
+        return;
+      }
+      if (!result.ok || result.headers.get('Content-Type')?.split(';')[0].trim() !== 'image/png') throw Error('The payment QR is unavailable. Check the current status before attempting payment.');
+      const bytes = await result.blob();
+      if (cleared || signal.aborted) return;
+      const nextUrl = URL.createObjectURL(bytes);
+      try {
+        byId('receiving-qr').src = nextUrl;
+        await byId('receiving-qr').decode();
+        if (cleared || signal.aborted) { byId('receiving-qr').removeAttribute('src'); URL.revokeObjectURL(nextUrl); return; }
+        if (qrUrl) URL.revokeObjectURL(qrUrl);
+        qrUrl = nextUrl;
+        qrChecked = true;
+        byId('qr-display').classList.remove('hidden');
+        byId('qr-placeholder').classList.add('hidden');
+      } catch (error) { URL.revokeObjectURL(nextUrl); throw error; }
+    }
+    if (qrUrl) byId('payment-instructions').textContent = request.status === 'AWAITING_PAYMENT'
+      ? 'Scan this receiver-supplied QR using the official TNG app, with another screen if needed. Check the receiving destination yourself. Enter exactly RM ' + (request.amountMinor / 100).toFixed(2) + ' manually unless the official app already shows that exact amount. Independently review and authorize in TNG. Keep this checkout open for status updates.'
+      : 'Potential payment evidence has been detected. Do not pay again. Wait for the receiver to check actual TNG history and confirm this checkout.';
+  }
   function unavailable(title, detail) {
+    hideQr('Payment QR unavailable', 'Current checkout status could not be verified. Retry before attempting a payment.');
+    qrChecked = false;
     byId('status-title').textContent = title;
     byId('status-detail').textContent = detail;
     byId('checkout-status').className = 'checkout-status';
@@ -43,6 +93,8 @@
       byId('checkout-status').className = 'checkout-status' + (request.status === 'MANUALLY_CONFIRMED' ? ' confirmed' : '');
       byId('evidence-note').textContent = request.evidence === 'SYNTHETIC' ? 'SYNTHETIC DEMO · invented evidence · no actual funds received.' : request.evidence === 'NOTIFICATION_UNVERIFIED' ? 'Android notification candidate evidence is unverified and does not prove settlement.' : '';
       byId('evidence-note').className = 'notice' + (request.evidence === 'NONE' ? ' hidden' : '');
+      await loadQr(request, attempt.signal);
+      if (cleared) return;
       byId('updated').textContent = 'Updated ' + new Date().toLocaleTimeString() + ' · checks automatically every 3 seconds';
     } catch (error) {
       if (!cleared) unavailable('Unable to retrieve current status', error.name === 'AbortError' ? 'The connection timed out. Retrying automatically.' : error.message || 'Connection unavailable. Retrying automatically.');
