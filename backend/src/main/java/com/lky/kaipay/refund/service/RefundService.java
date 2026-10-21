@@ -43,6 +43,7 @@ public class RefundService {
     private final LedgerService ledgerService;
     private final PaymentEventOutboxRepository paymentEventOutboxRepository;
     private final ObjectMapper objectMapper;
+    private final com.lky.kaipay.webhook.WebhookIntentService webhookIntents;
 
     @Transactional
     public RefundResponse createRefund(UUID merchantId, UUID paymentId, String idempotencyKey, CreateRefundRequest request) {
@@ -148,6 +149,7 @@ public class RefundService {
 
         // 8. Post reversing journal
         ledgerService.recordPaymentRefund(payment, savedRefund, envelope.getEventId());
+        webhookIntents.refunded(payment, savedRefund, envelope.getEventId(), envelope.getTimestamp());
 
         return RefundResponse.fromEntity(savedRefund);
     }

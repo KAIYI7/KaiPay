@@ -398,7 +398,7 @@ class MyrCurrencyIntegrationTest extends AbstractPostgresIntegrationTest {
             for (String table : List.of("payments", "accounts", "journals", "ledger_entries", "refunds")) {
                 before.put(table, sql.queryForList("SELECT * FROM " + schema + "." + table + " ORDER BY id"));
             }
-            var flyway = Flyway.configure().dataSource(source).schemas(schema).load();
+            var flyway = Flyway.configure().dataSource(source).schemas(schema).target("9").load();
             assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
             flyway.validate();
             before.forEach((table, rows) -> assertThat(sql.queryForList("SELECT * FROM " + schema + "." + table + " ORDER BY id")).as(table).isEqualTo(rows));

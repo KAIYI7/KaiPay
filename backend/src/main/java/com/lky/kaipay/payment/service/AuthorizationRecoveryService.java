@@ -26,6 +26,7 @@ public class AuthorizationRecoveryService {
     private final PaymentRepository payments;
     private final SimulatedAuthorizationOperationRepository operations;
     private final ConsumedEventRepository markers;
+    private final com.lky.kaipay.webhook.WebhookIntentService webhookIntents;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Optional<AuthorizationRequest> prepareAuthorization(AuthorizationDelivery delivery, String group) {
@@ -64,7 +65,8 @@ public class AuthorizationRecoveryService {
         AcquirerAuthorizationResult authoritative = operation.result();
         require(authoritative != null && authoritative.equals(returned), "Conflicting authorization result");
 
-        if (payment.getStatus() == PaymentStatus.PROCESSING) {
+        boolean transitioned = payment.getStatus() == PaymentStatus.PROCESSING;
+        if (transitioned) {
             if (authoritative.isRejectedNoAcceptance()) {
                 payment.setGatewayReference(null);
                 payment.setFailureCode(authoritative.getFailureCode());
@@ -84,6 +86,7 @@ public class AuthorizationRecoveryService {
         }
         String outcome = validateFinal(payment, operation);
         recordMarker(delivery, group, payment, outcome);
+        if (transitioned) webhookIntents.authorization(payment, delivery.eventId());
         log.info("Completed authorization with deduplication for payment {}", payment.getId());
     }
 

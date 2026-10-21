@@ -433,6 +433,8 @@ KaiPay/
 
 ## 11. Public Documentation Catalog
 
+The [merchant webhook contract](docs/webhooks.md) covers signed lifecycle notifications, receiver deduplication, delivery visibility and retry limits. Delivery is currently exercised only through isolated local tests; the application runtime keeps nonlocal dispatch disabled pending separate operational verification.
+
 For implementation reviews, event contracts, accounting models, and engineering tradeoffs, refer to the public documents in [`docs/`](docs/):
 
 | Document | Description |

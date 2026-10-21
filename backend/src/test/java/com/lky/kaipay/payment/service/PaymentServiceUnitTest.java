@@ -61,7 +61,8 @@ class PaymentServiceUnitTest {
                 idempotencyService,
                 paymentEventOutboxRepository,
                 ledgerService,
-                objectMapper
+                objectMapper,
+                org.mockito.Mockito.mock(com.lky.kaipay.webhook.WebhookIntentService.class)
         );
     }
 

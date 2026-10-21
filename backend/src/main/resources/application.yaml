@@ -81,6 +81,11 @@ spring:
       ack-mode: manual_immediate
 
 kaipay:
+  webhooks:
+    # Nonlocal activation is unavailable until separately verified ownership and network egress controls.
+    mode: disabled
+    poll-interval-ms: 1000
+    secret-directory: ${WEBHOOK_SECRET_DIRECTORY:}
   security:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:}
   kafka:

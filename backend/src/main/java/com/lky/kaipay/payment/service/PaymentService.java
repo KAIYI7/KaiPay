@@ -48,6 +48,7 @@ public class PaymentService {
     private final PaymentEventOutboxRepository paymentEventOutboxRepository;
     private final LedgerService ledgerService;
     private final ObjectMapper objectMapper;
+    private final com.lky.kaipay.webhook.WebhookIntentService webhookIntents;
 
     @Transactional
     public PaymentResponse createPayment(UUID merchantId, String idempotencyKey, CreatePaymentRequest request) {
@@ -237,6 +238,7 @@ public class PaymentService {
         paymentEventOutboxRepository.save(outboxRecord);
 
         ledgerService.recordPaymentCapture(savedPayment, envelope.getEventId());
+        webhookIntents.captured(savedPayment, envelope.getEventId(), envelope.getTimestamp());
 
         return PaymentResponse.fromEntity(savedPayment);
     }

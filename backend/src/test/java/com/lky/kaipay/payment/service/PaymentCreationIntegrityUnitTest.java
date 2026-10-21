@@ -49,7 +49,7 @@ class PaymentCreationIntegrityUnitTest {
     void setUp() {
         service = new PaymentService(paymentRepository, merchantRepository, customerRepository,
                 paymentMethodRepository, idempotencyService, outboxRepository,
-                ledgerService, objectMapper);
+                ledgerService, objectMapper, org.mockito.Mockito.mock(com.lky.kaipay.webhook.WebhookIntentService.class));
         merchantId = UUID.randomUUID();
         Merchant merchant = Merchant.builder().id(merchantId).name("Test").apiKeyHash("hash").build();
         Customer customer = Customer.builder().id(UUID.randomUUID()).merchant(merchant)

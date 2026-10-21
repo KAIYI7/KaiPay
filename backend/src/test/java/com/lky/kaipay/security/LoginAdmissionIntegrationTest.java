@@ -17,6 +17,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LoginAdmissionIntegrationTest extends AbstractPostgresIntegrationTest {
     @Autowired private TestRestTemplate http;
     @Test void actualCsrfLoginBudgetIsIdentityIndependentAndRejectedSwitchRevokesOldSession() {
+        // Observe the original 429. An optional Apache client on the classpath otherwise
+        // honors Retry-After, repeats this identity switch and hides the first response.
+        http.getRestTemplate().setRequestFactory(new org.springframework.http.client.SimpleClientHttpRequestFactory());
         var account = security().provision("ADMIN",true);
         // Invalid CSRF is checked before admission and cannot consume the login budget.
         for (int i=0;i<5;i++) {

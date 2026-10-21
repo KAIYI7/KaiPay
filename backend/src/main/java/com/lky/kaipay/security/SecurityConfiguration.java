@@ -58,6 +58,8 @@ public class SecurityConfiguration {
                     .requestMatchers(HttpMethod.GET, "/v1/ledger/journals", "/v1/ledger/journals/*").hasAnyRole("MERCHANT", "ADMIN")
                     .requestMatchers(HttpMethod.GET, "/v1/payments", "/v1/payments/*", "/v1/payments/*/refunds",
                             "/v1/ledger/balance", "/v1/merchants/balance").hasRole("MERCHANT")
+                    .requestMatchers(HttpMethod.GET, "/v1/webhooks/endpoint", "/v1/webhooks/deliveries",
+                            "/v1/webhooks/deliveries/*").hasRole("MERCHANT")
                     .requestMatchers(HttpMethod.POST, "/v1/payments", "/v1/payments/*/capture", "/v1/payments/*/refunds").hasRole("MERCHANT")
                     .anyRequest().denyAll())
             .formLogin(login -> login.loginPage("/v1/auth/login").loginProcessingUrl("/v1/auth/login")
