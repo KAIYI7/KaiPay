@@ -6,7 +6,7 @@ import java.util.UUID;
 
 public final class Model {
     private Model() {}
-    public enum Status { AWAITING_PAYMENT, PAYMENT_DETECTED, AWAITING_VERIFICATION, MANUALLY_CONFIRMED, AMBIGUOUS, EXPIRED }
+    public enum Status { AWAITING_PAYMENT, PAYMENT_DETECTED, AWAITING_VERIFICATION, MANUALLY_CONFIRMED, AMBIGUOUS, EXPIRED, REVIEW_EXPIRED }
     public enum Disposition { MATCHED, AMBIGUOUS, UNMATCHED, EXPIRED, UPDATE_IGNORED, DELAYED, INVALIDATED }
     public enum Source {
         SIMULATED, TNG_NOTIFICATION_CANDIDATE, SYNTHETIC;
@@ -20,9 +20,12 @@ public final class Model {
     public enum PayerEvidence { NONE, SYNTHETIC, NOTIFICATION_UNVERIFIED }
     // Explicit allowlist: payer access never serializes request observation IDs or candidate metadata.
     public record Checkout(UUID id, int amountMinor, Instant createdAt, Instant expiresAt,
-                           Status status, PayerEvidence evidence) {}
+                           Status status, PayerEvidence evidence, boolean paymentWindowClosed,
+                           Instant reviewExpiresAt, boolean reviewAvailable) {}
     public record PayerLink(UUID requestId, String token) {}
-    public record Confirmation(Boolean historyChecked) {}
+    public record Confirmation(Boolean historyChecked, UUID expectedEventId) {
+        public Confirmation(Boolean historyChecked) { this(historyChecked, null); }
+    }
     public record Resolution(UUID requestId, Boolean historyChecked) {}
     public record Invalidation(String reason) {}
     // A separate wire type keeps legacy simulation parsing unchanged and requires textual UTC timestamps.
@@ -45,12 +48,20 @@ public final class Model {
             this(eventId, notificationId, sequence, observedAt, amountMinor, source, null, null, null, null);
         }
     }
+    public record ReviewGrant(UUID eventId, Instant reviewExpiresAt, boolean revoked) {}
     public record PaymentRequest(UUID id, int amountMinor, Instant createdAt, Instant expiresAt,
-                                 Status status, UUID observationId) {
+                                 Status status, UUID observationId, Integer lifecycleVersion,
+                                 boolean paymentClosed, ReviewGrant reviewGrant) {
+        public PaymentRequest(UUID id, int amountMinor, Instant createdAt, Instant expiresAt, Status status, UUID observationId) {
+            this(id, amountMinor, createdAt, expiresAt, status, observationId, null, false, null);
+        }
         PaymentRequest withStatus(Status next, UUID observation) {
-            return new PaymentRequest(id, amountMinor, createdAt, expiresAt, next, observation);
+            return new PaymentRequest(id, amountMinor, createdAt, expiresAt, next, observation, lifecycleVersion, paymentClosed, reviewGrant);
         }
     }
-    public record Observation(Candidate candidate, Disposition disposition, UUID requestId) {}
+    public record Observation(Candidate candidate, Disposition disposition, UUID requestId, Instant acceptedAt) {
+        public Observation(Candidate candidate, Disposition disposition, UUID requestId) { this(candidate, disposition, requestId, null); }
+        Observation withDisposition(Disposition next) { return new Observation(candidate, next, requestId, acceptedAt); }
+    }
     public record Snapshot(List<PaymentRequest> requests, List<Observation> observations) {}
 }

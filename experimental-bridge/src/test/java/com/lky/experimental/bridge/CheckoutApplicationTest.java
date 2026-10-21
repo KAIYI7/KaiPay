@@ -72,7 +72,7 @@ class CheckoutApplicationTest {
             assertThat(send(client, "/api/requests/" + id + "/confirm", BridgeHttpTest.RECEIVER, "{\"historyChecked\":true}").statusCode()).isEqualTo(409);
             for (String action : new String[]{"verify", "confirm"}) {
                 assertThat(send(client, "/api/requests/" + id + "/" + action, link.token(), "{\"historyChecked\":true}").statusCode()).isEqualTo(401);
-                assertThat(send(client, "/api/requests/" + id + "/" + action, BridgeHttpTest.RECEIVER, "{\"historyChecked\":true}").statusCode()).isEqualTo(200);
+                assertThat(send(client, "/api/requests/" + id + "/" + action, BridgeHttpTest.RECEIVER, mapper.writeValueAsString(new Confirmation(true, candidate.eventId()))).statusCode()).isEqualTo(200);
                 Status expected = action.equals("verify") ? Status.AWAITING_VERIFICATION : Status.MANUALLY_CONFIRMED;
                 assertThat(mapper.readValue(send(client, path, link.token(), null).body(), Checkout.class).status()).isEqualTo(expected);
             }

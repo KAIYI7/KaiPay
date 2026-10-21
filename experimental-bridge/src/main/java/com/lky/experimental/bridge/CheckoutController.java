@@ -31,7 +31,7 @@ class CheckoutController {
     @GetMapping(value = "/api/checkout/{id}/qr", produces = MediaType.IMAGE_PNG_VALUE)
     byte[] qr(@PathVariable UUID id) {
         Checkout checkout = service.checkout(id);
-        if (checkout.status() == Status.EXPIRED || checkout.status() == Status.MANUALLY_CONFIRMED)
+        if (checkout.status() != Status.AWAITING_PAYMENT || checkout.paymentWindowClosed() || checkout.evidence() != PayerEvidence.NONE)
             throw new BridgeFailure(409, "CHECKOUT_NOT_PAYABLE");
         return qr.bytes();
     }

@@ -25,7 +25,7 @@ class BridgeController {
     @PostMapping("/api/observations/{id}/resolve") Observation resolve(@PathVariable UUID id, @RequestBody Resolution input) { return service.resolve(id, input); }
     @PostMapping("/api/requests/{id}/verify") PaymentRequest verify(@PathVariable UUID id, @RequestBody Confirmation input) {
         if (!Boolean.TRUE.equals(input.historyChecked())) throw new BridgeFailure(422, "HISTORY_CHECK_REQUIRED");
-        return service.beginVerification(id);
+        return service.beginVerification(id, input);
     }
     @PostMapping("/api/requests/{id}/confirm") PaymentRequest confirm(@PathVariable UUID id, @RequestBody Confirmation input) { return service.confirm(id, input); }
     @GetMapping(value = "/", produces = MediaType.TEXT_HTML_VALUE) byte[] demo() throws IOException { return resource("demo/index.html"); }

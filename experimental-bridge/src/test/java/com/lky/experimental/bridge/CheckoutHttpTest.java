@@ -63,6 +63,13 @@ class CheckoutHttpTest {
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return mapper.readValue(json, PaymentRequest.class);
     }
+    PaymentRequest legacyCreate(int minor) {
+        Snapshot previous = service.view();
+        PaymentRequest request = new PaymentRequest(UUID.randomUUID(), minor, clock.instant(), clock.instant().plusSeconds(600), Status.AWAITING_PAYMENT, null);
+        var requests = new java.util.ArrayList<>(previous.requests()); requests.add(request);
+        store.save(new Snapshot(requests, previous.observations()));
+        service = new ObservationService(store, clock, NotificationCandidateTest.DEVICE_ID); configureMvc(); return request;
+    }
     PayerLink link(UUID id) throws Exception {
         String json = mvc.perform(post("/api/requests/" + id + "/payer-access")
                 .header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER).contentType(MediaType.APPLICATION_JSON).content("{}"))
@@ -85,7 +92,7 @@ class CheckoutHttpTest {
     }
     void step(UUID id, String action, boolean checked, int status) throws Exception {
         mvc.perform(post("/api/requests/" + id + "/" + action).header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER)
-                .contentType(MediaType.APPLICATION_JSON).content("{\"historyChecked\":" + checked + "}"))
+                .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(new Confirmation(checked, service.view().requests().stream().filter(r -> r.id().equals(id)).findFirst().map(r -> r.observationId() != null ? r.observationId() : r.reviewGrant() != null ? r.reviewGrant().eventId() : null).orElse(null)))))
                 .andExpect(status().is(status));
     }
 
@@ -96,7 +103,7 @@ class CheckoutHttpTest {
         assertThat(link.token()).matches("[A-Za-z0-9_-]{43}");
         String json = read(request.id(), link.token(), Status.AWAITING_PAYMENT, PayerEvidence.NONE);
         var tree = mapper.readTree(json); Set<String> fields = new HashSet<>(); tree.fieldNames().forEachRemaining(fields::add);
-        assertThat(fields).isEqualTo(Set.of("id", "amountMinor", "createdAt", "expiresAt", "status", "evidence"));
+        assertThat(fields).isEqualTo(Set.of("id", "amountMinor", "createdAt", "expiresAt", "status", "evidence", "paymentWindowClosed", "reviewExpiresAt", "reviewAvailable"));
         assertThat(tree.path("id").asText()).isEqualTo(request.id().toString());
         assertThat(tree.path("amountMinor").asInt()).isEqualTo(1234);
         assertThat(tree.path("createdAt").asText()).isEqualTo(clock.instant().toString());
@@ -169,25 +176,35 @@ class CheckoutHttpTest {
         read(request.id(), link.token(), Status.MANUALLY_CONFIRMED, PayerEvidence.SYNTHETIC);
     }
 
+    @Test void versionTwoHttpActionsRequireExactDisplayedCandidateAndAttestation() throws Exception {
+        PaymentRequest request = create(1234); Candidate event = candidate(1234); ingest(event, "MATCHED");
+        for (String action : new String[]{"verify", "confirm"}) {
+            for (String body : new String[]{"{\"historyChecked\":true}", mapper.writeValueAsString(new Confirmation(true, UUID.randomUUID()))})
+                mvc.perform(post("/api/requests/" + request.id() + "/" + action)
+                        .header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER).contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(status().isConflict());
+        }
+        assertThat(service.checkout(request.id()).status()).isEqualTo(Status.PAYMENT_DETECTED);
+        step(request.id(), "verify", true, 200); step(request.id(), "confirm", true, 200);
+    }
+
     @Test void unmatchedEvidenceDoesNotLeakAndCompetingCandidatesRequireExplicitReceiverResolution() throws Exception {
         PaymentRequest one = create(1234); PayerLink first = link(one.id());
         Candidate unmatched = candidate(7777); ingest(unmatched, "UNMATCHED");
         read(one.id(), first.token(), Status.AWAITING_PAYMENT, PayerEvidence.NONE);
         Candidate event = candidate(1234); ingest(event, "MATCHED"); step(one.id(), "verify", true, 200);
         Candidate competing = candidate(1234); ingest(competing, "AMBIGUOUS");
-        read(one.id(), first.token(), Status.AMBIGUOUS, PayerEvidence.NONE);
+        read(one.id(), first.token(), Status.AMBIGUOUS, PayerEvidence.SYNTHETIC);
         step(one.id(), "confirm", true, 409);
         String path = "/api/observations/" + competing.eventId() + "/resolve";
         for (boolean checked : new boolean[]{false, true}) mvc.perform(post(path).header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER)
                 .contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(new Resolution(one.id(), checked))))
-                .andExpect(status().is(checked ? 200 : 422));
-        read(one.id(), first.token(), Status.PAYMENT_DETECTED, PayerEvidence.SYNTHETIC);
-        step(one.id(), "confirm", true, 409); step(one.id(), "verify", true, 200); step(one.id(), "confirm", true, 200);
-        read(one.id(), first.token(), Status.MANUALLY_CONFIRMED, PayerEvidence.SYNTHETIC);
+                .andExpect(status().is(checked ? 409 : 422));
+        read(one.id(), first.token(), Status.AMBIGUOUS, PayerEvidence.SYNTHETIC);
     }
 
     @Test void identicalRequestAmountsStayAmbiguousWithoutAutomaticSelection() throws Exception {
-        PaymentRequest one = create(1234), two = create(1234); PayerLink first = link(one.id()), second = link(two.id());
+        PaymentRequest one = legacyCreate(1234), two = legacyCreate(1234); PayerLink first = link(one.id()), second = link(two.id());
         ingest(candidate(1234), "AMBIGUOUS");
         for (PayerLink link : new PayerLink[]{first, second}) {
             read(link.requestId(), link.token(), Status.AMBIGUOUS, PayerEvidence.NONE);
@@ -195,19 +212,24 @@ class CheckoutHttpTest {
         }
     }
 
-    @Test void payerPollingExpiresAwaitingDetectedAndVerificationStatesAndBlocksLateConfirmation() throws Exception {
+    @Test void payerPollingSeparatesPaymentClosureFromReviewExpiry() throws Exception {
         PaymentRequest awaiting = create(1001), detected = create(1002), verifying = create(1003);
         PayerLink a = link(awaiting.id()), d = link(detected.id()), v = link(verifying.id());
         ingest(candidate(1002), "MATCHED"); ingest(candidate(1003), "MATCHED"); step(verifying.id(), "verify", true, 200);
         clock.now = clock.now.plusSeconds(600);
-        for (PayerLink link : new PayerLink[]{a, d, v}) {
-            read(link.requestId(), link.token(), Status.EXPIRED, PayerEvidence.NONE);
-            step(link.requestId(), "confirm", true, 409);
+        read(a.requestId(), a.token(), Status.EXPIRED, PayerEvidence.NONE);
+        for (PayerLink link : new PayerLink[]{d, v}) {
+            String json = read(link.requestId(), link.token(), link == d ? Status.PAYMENT_DETECTED : Status.AWAITING_VERIFICATION, PayerEvidence.SYNTHETIC);
+            assertThat(mapper.readTree(json).path("paymentWindowClosed").asBoolean()).isTrue();
+            assertThat(mapper.readTree(json).path("reviewAvailable").asBoolean()).isTrue();
         }
         ingest(candidate(1001), "EXPIRED");
-        assertThat(mapper.readValue(file.toFile(), Snapshot.class).requests()).allMatch(r -> r.status() == Status.EXPIRED);
+        clock.now = clock.now.plusSeconds(1800);
+        for (PayerLink link : new PayerLink[]{d, v}) {
+            read(link.requestId(), link.token(), Status.REVIEW_EXPIRED, PayerEvidence.SYNTHETIC);
+            step(link.requestId(), "confirm", true, 409);
+        }
     }
-
     @Test void sessionRotationRevokesLinksWithoutChangingSnapshotsOrLosingReplayHistory() throws Exception {
         PaymentRequest request = create(1234); PayerLink old = link(request.id()); Candidate event = candidate(1234); ingest(event, "MATCHED");
         byte[] previous = Files.readAllBytes(file);

@@ -38,7 +38,10 @@ class BridgeConfiguration {
     }
 
     @Bean @ConditionalOnProperty(name = "bridge.enabled", havingValue = "true")
-    ObservationService observations(SnapshotStore store, BridgeAccess access) { return new ObservationService(store, Clock.systemUTC(), access.deviceId); }
+    ObservationService observations(SnapshotStore store, BridgeAccess access, Environment env) {
+        return new ObservationService(store, Clock.systemUTC(), access.deviceId,
+                env.getProperty("bridge.review-period-seconds", Integer.class, 1800));
+    }
 }
 
 final class BridgeAccess {

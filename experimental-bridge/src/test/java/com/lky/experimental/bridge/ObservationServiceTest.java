@@ -34,6 +34,17 @@ class ObservationServiceTest {
         store = new SnapshotStore(file, mapper);
         service = new ObservationService(store, clock);
     }
+    // Explicit historical-v1 fixtures retain the original regression scenarios; LifecycleTest covers new v2 creation.
+    private PaymentRequest legacyCreate(Integer minor) {
+        ObservationService.amount(minor);
+        Snapshot previous = service.view();
+        if (previous.requests().size() >= ObservationService.MAX_REQUESTS) throw new BridgeFailure(409, "REQUEST_CAPACITY");
+        PaymentRequest request = new PaymentRequest(UUID.randomUUID(), minor, clock.instant(), clock.instant().plusSeconds(600), Status.AWAITING_PAYMENT, null);
+        var requests = new java.util.ArrayList<>(previous.requests()); requests.add(request);
+        store.save(new Snapshot(requests, previous.observations()));
+        service = new ObservationService(store, clock, null);
+        return request;
+    }
     @AfterEach void close() throws Exception { store.close(); }
     private Candidate event(int amount) { return new Candidate(UUID.randomUUID(), UUID.randomUUID(), 1, clock.instant(), amount, Source.SIMULATED); }
     private void failure(Runnable action, int status, String code) {
@@ -43,7 +54,7 @@ class ObservationServiceTest {
     }
 
     @Test void detectionNeedsTwoReceiverStepsAndNeverAutomaticallyConfirms() {
-        PaymentRequest request = service.create(new CreateRequest(1234));
+        PaymentRequest request = legacyCreate(1234);
         Observation observation = service.ingest(event(1234));
         assertThat(observation.disposition()).isEqualTo(Disposition.MATCHED);
         assertThat(service.view().requests().getFirst().status()).isEqualTo(Status.PAYMENT_DETECTED);
@@ -97,22 +108,22 @@ class ObservationServiceTest {
 
     @Test void eventPredatingRequestRemainsUnmatched() {
         Candidate input = event(1200); clock.now = clock.now.plusSeconds(30);
-        PaymentRequest request = service.create(new CreateRequest(1200));
+        PaymentRequest request = legacyCreate(1200);
         assertThat(service.ingest(input).disposition()).isEqualTo(Disposition.UNMATCHED);
         failure(() -> service.beginVerification(request.id()), 409, "VERIFICATION_NOT_ELIGIBLE");
     }
 
     @Test void multipleIdenticalPendingAmountsStayAmbiguous() {
-        PaymentRequest one = service.create(new CreateRequest(1200));
-        PaymentRequest two = service.create(new CreateRequest(1200));
+        PaymentRequest one = legacyCreate(1200);
+        PaymentRequest two = legacyCreate(1200);
         assertThat(service.ingest(event(1200)).disposition()).isEqualTo(Disposition.AMBIGUOUS);
         assertThat(service.view().requests()).allMatch(r -> r.status() == Status.AMBIGUOUS && r.observationId() == null);
         for (UUID id : List.of(one.id(), two.id())) failure(() -> service.beginVerification(id), 409, "VERIFICATION_NOT_ELIGIBLE");
     }
 
     @Test void ambiguityDoesNotBecomeCertaintyWhenOneRequestExpires() {
-        service.create(new CreateRequest(1200)); clock.now = clock.now.plusSeconds(60);
-        PaymentRequest second = service.create(new CreateRequest(1200));
+        legacyCreate(1200); clock.now = clock.now.plusSeconds(60);
+        PaymentRequest second = legacyCreate(1200);
         Candidate first = event(1200); service.ingest(first);
         clock.now = clock.now.plusSeconds(550);
         Candidate update = new Candidate(UUID.randomUUID(), first.notificationId(), 2, clock.now, 1200, Source.SIMULATED);
@@ -122,10 +133,10 @@ class ObservationServiceTest {
     }
 
     @Test void updatedNotificationCannotMatchSecondRequestAndInvalidatesUnconfirmedMatch() {
-        PaymentRequest one = service.create(new CreateRequest(1200));
+        PaymentRequest one = legacyCreate(1200);
         Candidate first = event(1200); service.ingest(first);
         service.beginVerification(one.id());
-        PaymentRequest two = service.create(new CreateRequest(1300));
+        PaymentRequest two = legacyCreate(1300);
         Candidate update = new Candidate(UUID.randomUUID(), first.notificationId(), 2, clock.now, 1300, Source.SIMULATED);
         assertThat(service.ingest(update).disposition()).isEqualTo(Disposition.UPDATE_IGNORED);
         failure(() -> service.confirm(one.id(), new Confirmation(true)), 409, "VERIFICATION_NOT_ELIGIBLE");
@@ -140,7 +151,7 @@ class ObservationServiceTest {
     }
 
     @Test void expiryAppliesBeforeMatchingAndBeforeManualActions() {
-        PaymentRequest request = service.create(new CreateRequest(1200)); service.ingest(event(1200));
+        PaymentRequest request = legacyCreate(1200); service.ingest(event(1200));
         service.beginVerification(request.id()); clock.now = clock.now.plusSeconds(600);
         failure(() -> service.confirm(request.id(), new Confirmation(true)), 409, "VERIFICATION_NOT_ELIGIBLE");
         assertThat(service.ingest(event(1200)).disposition()).isEqualTo(Disposition.EXPIRED);
@@ -148,7 +159,7 @@ class ObservationServiceTest {
     }
 
     @Test void simultaneousIdenticalDuplicateDeliveriesHaveOneEffect() throws Exception {
-        PaymentRequest request = service.create(new CreateRequest(1200));
+        PaymentRequest request = legacyCreate(1200);
         Candidate input = event(1200);
         CyclicBarrier barrier = new CyclicBarrier(3);
         try (var pool = Executors.newFixedThreadPool(2)) {
@@ -163,7 +174,7 @@ class ObservationServiceTest {
     }
 
     @Test void competingDistinctCandidatesForIdenticalAmountsCannotConfirmOrDoubleMatch() throws Exception {
-        service.create(new CreateRequest(1200)); service.create(new CreateRequest(1200));
+        legacyCreate(1200); legacyCreate(1200);
         Candidate one = event(1200), two = event(1200);
         CyclicBarrier barrier = new CyclicBarrier(3);
         try (var pool = Executors.newFixedThreadPool(2)) {
@@ -186,7 +197,7 @@ class ObservationServiceTest {
     }
 
     @Test void diskFailureDoesNotPublishStateOrConsumeEventIdAndRetrySucceeds() throws Exception {
-        service.create(new CreateRequest(1200));
+        legacyCreate(1200);
         Files.delete(file); Files.createDirectory(file);
         Candidate input = event(1200);
         failure(() -> service.ingest(input), 503, "STORE_UNAVAILABLE");
@@ -227,7 +238,7 @@ class ObservationServiceTest {
     }
 
     @Test void confirmedManualStateIsNotReversedOrReplicatedByNotificationUpdate() {
-        PaymentRequest request = service.create(new CreateRequest(1200));
+        PaymentRequest request = legacyCreate(1200);
         Candidate initial = event(1200); service.ingest(initial);
         service.beginVerification(request.id()); service.confirm(request.id(), new Confirmation(true));
         service.ingest(new Candidate(UUID.randomUUID(), initial.notificationId(), 2, clock.now, 1200, Source.SIMULATED));

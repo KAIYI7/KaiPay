@@ -48,7 +48,7 @@ class LiveApplicationTest {
             assertThat(persisted.observations()).hasSize(1);
             assertThat(persisted.observations().getFirst().candidate()).isEqualTo(candidate);
             assertThat(send(client, "/api/requests/" + id + "/confirm", NotificationHttpTest.LIVE, "{\"historyChecked\":true}").statusCode()).isEqualTo(401);
-            for (String step : new String[]{"verify", "confirm"}) assertThat(send(client, "/api/requests/" + id + "/" + step, BridgeHttpTest.RECEIVER, "{\"historyChecked\":true}").statusCode()).isEqualTo(200);
+            for (String step : new String[]{"verify", "confirm"}) assertThat(send(client, "/api/requests/" + id + "/" + step, BridgeHttpTest.RECEIVER, mapper.writeValueAsString(new Confirmation(true, candidate.eventId()))).statusCode()).isEqualTo(200);
             assertThat(mapper.readValue(FILE.toFile(), Snapshot.class).requests().getFirst().status()).isEqualTo(Status.MANUALLY_CONFIRMED);
         }
     }

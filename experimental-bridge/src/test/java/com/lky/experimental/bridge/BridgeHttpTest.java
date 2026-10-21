@@ -65,12 +65,12 @@ class BridgeHttpTest {
     @Test void successfulHttpEndToEndRequiresReceiverVerificationAndConfirmation() throws Exception {
         String created = mvc.perform(post("/api/requests").header("Authorization", "Bearer " + RECEIVER).contentType(MediaType.APPLICATION_JSON).content("{\"amountMinor\":1234}")).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AWAITING_PAYMENT")).andReturn().getResponse().getContentAsString();
         UUID id = mapper.readValue(created, PaymentRequest.class).id();
-        String event = mapper.writeValueAsString(candidate());
+        Candidate input = candidate(); String event = mapper.writeValueAsString(input);
         mvc.perform(post("/api/observations").header("Authorization", "Bearer " + DEVICE).contentType(MediaType.APPLICATION_JSON).content(event)).andExpect(status().isOk()).andExpect(jsonPath("$.disposition").value("MATCHED"));
         mvc.perform(get("/api/state").header("Authorization", "Bearer " + RECEIVER)).andExpect(status().isOk()).andExpect(jsonPath("$.requests[0].status").value("PAYMENT_DETECTED"));
         mvc.perform(post("/api/requests/" + id + "/confirm").header("Authorization", "Bearer " + RECEIVER).contentType(MediaType.APPLICATION_JSON).content("{\"historyChecked\":true}")).andExpect(status().isConflict());
-        mvc.perform(post("/api/requests/" + id + "/verify").header("Authorization", "Bearer " + RECEIVER).contentType(MediaType.APPLICATION_JSON).content("{\"historyChecked\":true}")).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AWAITING_VERIFICATION"));
-        mvc.perform(post("/api/requests/" + id + "/confirm").header("Authorization", "Bearer " + RECEIVER).contentType(MediaType.APPLICATION_JSON).content("{\"historyChecked\":true}")).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("MANUALLY_CONFIRMED"));
+        mvc.perform(post("/api/requests/" + id + "/verify").header("Authorization", "Bearer " + RECEIVER).contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(new Confirmation(true, input.eventId())))).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AWAITING_VERIFICATION"));
+        mvc.perform(post("/api/requests/" + id + "/confirm").header("Authorization", "Bearer " + RECEIVER).contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(new Confirmation(true, input.eventId())))).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("MANUALLY_CONFIRMED"));
         mvc.perform(post("/api/observations").header("Authorization", "Bearer " + DEVICE).contentType(MediaType.APPLICATION_JSON).content(event)).andExpect(status().isOk());
         assertThat(service.view().observations()).hasSize(1);
     }

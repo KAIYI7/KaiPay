@@ -96,13 +96,13 @@ class NotificationHttpTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.disposition").value("MATCHED")).andExpect(jsonPath("$.candidate.source").value("SYNTHETIC"));
         mvc.perform(get("/api/state").header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER)).andExpect(status().isOk()).andExpect(jsonPath("$.requests[0].status").value("PAYMENT_DETECTED"));
         mvc.perform(post("/api/requests/" + request + "/confirm").header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER).contentType(MediaType.APPLICATION_JSON).content("{\"historyChecked\":true}")).andExpect(status().isConflict());
-        for (String step : new String[]{"verify", "confirm"}) mvc.perform(post("/api/requests/" + request + "/" + step).header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER).contentType(MediaType.APPLICATION_JSON).content("{\"historyChecked\":true}")).andExpect(status().isOk());
+        for (String step : new String[]{"verify", "confirm"}) mvc.perform(post("/api/requests/" + request + "/" + step).header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER).contentType(MediaType.APPLICATION_JSON).content(mapper.writeValueAsString(new Confirmation(true, input.eventId())))).andExpect(status().isOk());
         assertThat(service.view().observations()).hasSize(1);
         assertThat(service.view().requests().getFirst().status()).isEqualTo(Status.MANUALLY_CONFIRMED);
     }
 
     @Test void invalidationAndManualResolutionHaveIndependentRolesAndGuardConditions() throws Exception {
-        UUID one = service.create(new CreateRequest(1234)).id(); service.create(new CreateRequest(1234));
+        Instant now = Instant.now(); UUID one = UUID.randomUUID(); store.save(new Snapshot(java.util.List.of(new PaymentRequest(one, 1234, now, now.plusSeconds(600), Status.AWAITING_PAYMENT, null), new PaymentRequest(UUID.randomUUID(), 1234, now, now.plusSeconds(600), Status.AWAITING_PAYMENT, null)), java.util.List.of())); service = new ObservationService(store, Clock.systemUTC(), NotificationCandidateTest.DEVICE_ID); mvc = mvc(environment());
         Candidate event = candidate(); service.ingestNotification(event);
         mvc.perform(post("/api/observations/" + event.eventId() + "/resolve").header("Authorization", "Bearer " + BridgeHttpTest.RECEIVER).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"" + one + "\",\"historyChecked\":false}")).andExpect(status().isUnprocessableEntity());

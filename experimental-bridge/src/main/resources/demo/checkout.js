@@ -11,9 +11,10 @@
     AWAITING_VERIFICATION: ['Awaiting receiver confirmation', 'The receiver has recorded the verification step. Explicit confirmation is still required. Do not pay again.'],
     MANUALLY_CONFIRMED: ['Payment confirmed (receiver verified)', 'The receiver independently checked TNG history and explicitly recorded confirmation. This remains a receiver assertion, not authenticated provider settlement.'],
     AMBIGUOUS: ['Ambiguous — receiver review required', 'Competing or changed evidence cannot safely identify the payment for this request. Contact the receiver; completion has not been confirmed.'],
-    EXPIRED: ['Expired', 'This request can no longer be verified or confirmed. Ask the receiver for a new checkout.']
+    EXPIRED: ['Payment window closed — unconfirmed', 'This request can no longer accept candidates or be confirmed. Contact the receiver. If money may have been sent, do not pay again automatically.'],
+    REVIEW_EXPIRED: ['Receiver review ended — unconfirmed', 'The receiver review deadline has passed without confirmation. Contact the receiver. If money may have been sent, do not pay again automatically.']
   };
-  let timer, busy = false, cleared = false, qrUrl = null, qrChecked = false, controller = new AbortController();
+  let timer, deadlineTimer, busy = false, cleared = false, qrUrl = null, qrChecked = false, paymentDeadline = null, controller = new AbortController();
   function hideQr(title, detail) {
     byId('receiving-qr').removeAttribute('src');
     if (qrUrl) URL.revokeObjectURL(qrUrl);
@@ -25,8 +26,8 @@
     byId('payment-instructions').textContent = 'No payment code is displayed. Do not attempt a payment from this page while the QR is unavailable.';
   }
   async function loadQr(request, signal) {
-    if (['EXPIRED', 'MANUALLY_CONFIRMED', 'AMBIGUOUS'].includes(request.status)) {
-      hideQr('Payment QR hidden', request.status === 'EXPIRED' ? 'This checkout has expired. Ask the receiver for a new checkout.' : request.status === 'MANUALLY_CONFIRMED' ? 'This checkout is already confirmed. Do not pay again.' : 'Receiver review is required. Do not pay while this checkout is ambiguous.');
+    if (request.paymentWindowClosed || request.status !== 'AWAITING_PAYMENT' || Date.now() >= Date.parse(request.expiresAt)) {
+      hideQr('Payment QR hidden', request.status === 'MANUALLY_CONFIRMED' ? 'This checkout is already confirmed. Do not pay again.' : 'The payment window is closed or candidate evidence requires review. Do not pay again while awaiting the receiver.');
       qrChecked = false;
       return;
     }
@@ -50,7 +51,7 @@
       try {
         byId('receiving-qr').src = nextUrl;
         await byId('receiving-qr').decode();
-        if (cleared || signal.aborted) { byId('receiving-qr').removeAttribute('src'); URL.revokeObjectURL(nextUrl); return; }
+        if (cleared || signal.aborted || Date.now() >= Date.parse(request.expiresAt)) { byId('receiving-qr').removeAttribute('src'); URL.revokeObjectURL(nextUrl); return; }
         if (qrUrl) URL.revokeObjectURL(qrUrl);
         qrUrl = nextUrl;
         qrChecked = true;
@@ -84,12 +85,18 @@
       if (!result.ok) throw Error(result.status === 401 || result.status === 403 || result.status === 404 ? 'Private access was not accepted. Ask the receiver for a current payer link.' : 'The server could not provide a current status. Retrying automatically.');
       const request = await result.json();
       if (cleared) return;
-      if (request.id !== requestId || !Number.isInteger(request.amountMinor) || request.amountMinor < 1 || request.amountMinor > 1000000 || !Object.hasOwn(states, request.status) || !['NONE', 'SYNTHETIC', 'NOTIFICATION_UNVERIFIED'].includes(request.evidence) || !Number.isFinite(Date.parse(request.expiresAt))) throw Error('The server returned an unexpected checkout response. Ask the receiver to check it.');
+      if (request.id !== requestId || !Number.isInteger(request.amountMinor) || request.amountMinor < 1 || request.amountMinor > 1000000 || !Object.hasOwn(states, request.status) || !['NONE', 'SYNTHETIC', 'NOTIFICATION_UNVERIFIED'].includes(request.evidence) || !Number.isFinite(Date.parse(request.expiresAt)) || typeof request.paymentWindowClosed !== 'boolean' || typeof request.reviewAvailable !== 'boolean' || (request.reviewExpiresAt !== null && !Number.isFinite(Date.parse(request.reviewExpiresAt)))) throw Error('The server returned an unexpected checkout response. Ask the receiver to check it.');
       byId('checkout-amount').textContent = 'RM ' + (request.amountMinor / 100).toFixed(2);
       byId('checkout-reference').textContent = request.id;
-      byId('checkout-expiry').textContent = 'Request expiry: ' + new Date(request.expiresAt).toLocaleString();
+      paymentDeadline = Date.parse(request.expiresAt);
+      byId('checkout-expiry').textContent = 'Payment deadline: ' + new Date(request.expiresAt).toLocaleString() + (request.paymentWindowClosed ? ' · closed to new candidates' : '');
+      byId('checkout-review').textContent = request.reviewExpiresAt ? 'Receiver review deadline: ' + new Date(request.reviewExpiresAt).toLocaleString() + (request.reviewAvailable ? ' · review available, still unconfirmed' : request.status === 'MANUALLY_CONFIRMED' ? ' · receiver confirmation recorded' : ' · review unavailable') : 'No extended receiver-review period has been granted.';
       byId('status-title').textContent = request.evidence === 'SYNTHETIC' && request.status === 'MANUALLY_CONFIRMED' ? 'Demo manually confirmed' : states[request.status][0];
       byId('status-detail').textContent = request.evidence === 'SYNTHETIC' && request.status === 'MANUALLY_CONFIRMED' ? 'The receiver manually confirmed an invented demonstration scenario. No actual funds were received.' : states[request.status][1];
+      if (request.paymentWindowClosed && request.reviewAvailable && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status)) {
+        byId('status-title').textContent = request.status === 'PAYMENT_DETECTED' ? 'Payment window closed — receiver review pending (unverified)' : 'Payment window closed — awaiting receiver confirmation';
+        byId('status-detail').textContent = request.status === 'PAYMENT_DETECTED' ? (request.evidence === 'SYNTHETIC' ? 'An invented candidate was accepted before the payment deadline. The receiver must acknowledge the synthetic scenario and explicitly confirm before the review deadline. No actual history check or funds are asserted. Do not make a payment for this demo.' : 'An eligible candidate was accepted before the payment deadline. It remains unverified. The receiver must independently check actual history and explicitly confirm before the review deadline. Do not pay again.') : 'Verification is recorded, but explicit receiver confirmation is still outstanding. The review deadline has not changed. Do not pay again.';
+      }
       byId('checkout-status').className = 'checkout-status' + (request.status === 'MANUALLY_CONFIRMED' ? ' confirmed' : '');
       byId('evidence-note').textContent = request.evidence === 'SYNTHETIC' ? 'SYNTHETIC DEMO · invented evidence · no actual funds received.' : request.evidence === 'NOTIFICATION_UNVERIFIED' ? 'Android notification candidate evidence is unverified and does not prove settlement.' : '';
       byId('evidence-note').className = 'notice' + (request.evidence === 'NONE' ? ' hidden' : '');
@@ -103,11 +110,14 @@
   function clear() {
     cleared = true;
     clearInterval(timer);
+    clearInterval(deadlineTimer);
     controller.abort();
     key = null; requestId = null;
     byId('checkout-amount').textContent = '—';
     byId('checkout-reference').textContent = 'Private checkout cleared';
     byId('checkout-expiry').textContent = '';
+    byId('checkout-review').textContent = '';
+    paymentDeadline = null;
     unavailable('Private checkout cleared', 'Re-open the original private payer link to view this request.');
     byId('retry').disabled = true;
   }
@@ -119,5 +129,14 @@
     byId('checkout-reference').textContent = 'Private link required';
     unavailable('Open your private checkout link', 'Use the complete payer link supplied by the receiver. Reloading clears this tab\'s private access.');
     byId('retry').disabled = true;
-  } else { refresh(); timer = setInterval(refresh, 3000); }
+  } else {
+    refresh(); timer = setInterval(refresh, 3000);
+    // A stale page may hide a QR using local time, but can never grant payment eligibility.
+    deadlineTimer = setInterval(() => {
+      if (!cleared && paymentDeadline !== null && Date.now() >= paymentDeadline) {
+        hideQr('Payment QR hidden', 'The displayed payment deadline has passed. Wait for a current server status and contact the receiver; do not pay again automatically.');
+        qrChecked = false;
+      }
+    }, 250);
+  }
 })();

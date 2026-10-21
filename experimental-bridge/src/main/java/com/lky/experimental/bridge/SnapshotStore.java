@@ -13,7 +13,8 @@ import java.util.List;
 
 /** Single-process ownership; atomic snapshots retain duplicate history until explicit offline reset. */
 final class SnapshotStore implements AutoCloseable {
-    private static final long MAX_BYTES = 2_000_000;
+    static final long MAX_BYTES = 2_000_000;
+    static final int EVIDENCE_HEADROOM = 8192;
     private final Path path;
     private final ObjectMapper mapper;
     private final FileChannel ownership;
@@ -46,6 +47,15 @@ final class SnapshotStore implements AutoCloseable {
         } catch (Exception ignored) {
             throw new IllegalStateException("Experimental store unavailable");
         }
+    }
+
+    int serializedSize(Model.Snapshot snapshot) {
+        try { return mapper.writeValueAsBytes(snapshot).length; }
+        catch (Exception ignored) { throw new BridgeFailure(503, "STORE_UNAVAILABLE"); }
+    }
+
+    boolean hasEvidenceHeadroom(Model.Snapshot snapshot) {
+        return serializedSize(snapshot) <= MAX_BYTES - EVIDENCE_HEADROOM;
     }
 
     void save(Model.Snapshot snapshot) {

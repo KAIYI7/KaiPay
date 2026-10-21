@@ -35,6 +35,17 @@ class NotificationCandidateTest {
         store = new SnapshotStore(file, mapper);
         service = new ObservationService(store, clock, DEVICE_ID);
     }
+    // Explicit historical-v1 fixtures retain the original regression scenarios; LifecycleTest covers new v2 creation.
+    private PaymentRequest legacyCreate(Integer minor) {
+        ObservationService.amount(minor);
+        Snapshot previous = service.view();
+        if (previous.requests().size() >= ObservationService.MAX_REQUESTS) throw new BridgeFailure(409, "REQUEST_CAPACITY");
+        PaymentRequest request = new PaymentRequest(UUID.randomUUID(), minor, clock.instant(), clock.instant().plusSeconds(600), Status.AWAITING_PAYMENT, null);
+        var requests = new java.util.ArrayList<>(previous.requests()); requests.add(request);
+        store.save(new Snapshot(requests, previous.observations()));
+        service = new ObservationService(store, clock, DEVICE_ID);
+        return request;
+    }
     @AfterEach void close() throws Exception { store.close(); }
     Candidate candidate() { return candidate(Source.SYNTHETIC, clock.now, UUID.randomUUID(), 1); }
     Candidate candidate(Source source, Instant observedAt, UUID lifecycle, int sequence) {
@@ -46,7 +57,7 @@ class NotificationCandidateTest {
             failure -> assertThat(failure.code).isEqualTo(code)); }
 
     @Test void realAndSyntheticSourcesStayDistinctAndNeverAutomaticallyConfirm() {
-        PaymentRequest request = service.create(new CreateRequest(1234));
+        PaymentRequest request = legacyCreate(1234);
         Candidate real = candidate(Source.TNG_NOTIFICATION_CANDIDATE, clock.now, UUID.randomUUID(), 1);
         assertThat(service.ingestNotification(real).disposition()).isEqualTo(Disposition.MATCHED);
         assertThat(service.view().observations().getFirst().candidate().source()).isEqualTo(Source.TNG_NOTIFICATION_CANDIDATE);
@@ -70,7 +81,7 @@ class NotificationCandidateTest {
     }
 
     @Test void delayedIsReviewOnlyObsoleteAndFutureRejectedAndLegacyFreshnessPreserved() {
-        PaymentRequest request = service.create(new CreateRequest(1234));
+        PaymentRequest request = legacyCreate(1234);
         clock.now = clock.now.plusSeconds(121);
         Candidate delayed = candidate(Source.SYNTHETIC, clock.now.minusSeconds(121), UUID.randomUUID(), 1);
         assertThat(service.ingestNotification(delayed).disposition()).isEqualTo(Disposition.DELAYED);
@@ -94,7 +105,7 @@ class NotificationCandidateTest {
     }
 
     @Test void distinctCandidatesInvalidateExistingUnconfirmedAssociation() {
-        PaymentRequest request = service.create(new CreateRequest(1234));
+        PaymentRequest request = legacyCreate(1234);
         service.ingestNotification(candidate());
         service.beginVerification(request.id());
         assertThat(service.ingestNotification(candidate()).disposition()).isEqualTo(Disposition.AMBIGUOUS);
@@ -104,8 +115,8 @@ class NotificationCandidateTest {
     }
 
     @Test void identicalAmountAmbiguityCanOnlyBeExplicitlyResolvedOnceWithHistoryAttestation() {
-        PaymentRequest one = service.create(new CreateRequest(1234));
-        PaymentRequest two = service.create(new CreateRequest(1234));
+        PaymentRequest one = legacyCreate(1234);
+        PaymentRequest two = legacyCreate(1234);
         Candidate event = candidate(); service.ingestNotification(event);
         rejected(() -> service.resolve(event.eventId(), new Resolution(one.id(), false)), "HISTORY_CHECK_REQUIRED");
         assertThat(service.resolve(event.eventId(), new Resolution(two.id(), true)).requestId()).isEqualTo(two.id());
@@ -119,9 +130,9 @@ class NotificationCandidateTest {
     @Test void unmatchedCannotResolveToLaterRequestWrongAmountOrExpiredRequest() {
         Candidate earlier = candidate(); service.ingestNotification(earlier);
         clock.now = clock.now.plusSeconds(1);
-        PaymentRequest later = service.create(new CreateRequest(1234));
+        PaymentRequest later = legacyCreate(1234);
         rejected(() -> service.resolve(earlier.eventId(), new Resolution(later.id(), true)), "RESOLUTION_NOT_ELIGIBLE");
-        PaymentRequest wrong = service.create(new CreateRequest(1235));
+        PaymentRequest wrong = legacyCreate(1235);
         rejected(() -> service.resolve(earlier.eventId(), new Resolution(wrong.id(), true)), "RESOLUTION_NOT_ELIGIBLE");
         clock.now = clock.now.plusSeconds(600);
         rejected(() -> service.resolve(earlier.eventId(), new Resolution(later.id(), true)), "RESOLUTION_NOT_ELIGIBLE");
@@ -129,9 +140,9 @@ class NotificationCandidateTest {
     }
 
     @Test void supportedUpdatesCannotMatchAnotherRequestOrResolveOldLifecycle() {
-        PaymentRequest one = service.create(new CreateRequest(1234));
+        PaymentRequest one = legacyCreate(1234);
         Candidate event = candidate(); service.ingestNotification(event);
-        PaymentRequest two = service.create(new CreateRequest(1234));
+        PaymentRequest two = legacyCreate(1234);
         Candidate update = candidate(Source.SYNTHETIC, clock.now, event.notificationId(), 2);
         assertThat(service.ingestNotification(update).disposition()).isEqualTo(Disposition.UPDATE_IGNORED);
         rejected(() -> service.resolve(event.eventId(), new Resolution(one.id(), true)), "RESOLUTION_NOT_ELIGIBLE");
@@ -140,7 +151,7 @@ class NotificationCandidateTest {
     }
 
     @Test void unsupportedChangeInvalidationPersistsAndPreventsVerificationButKeepsManualConfirmation() throws Exception {
-        PaymentRequest request = service.create(new CreateRequest(1234));
+        PaymentRequest request = legacyCreate(1234);
         Candidate event = candidate(); service.ingestNotification(event); service.beginVerification(request.id());
         Observation invalidated = service.invalidate(event.eventId(), new Invalidation("NOTIFICATION_CHANGED"));
         assertThat(invalidated.disposition()).isEqualTo(Disposition.INVALIDATED);
@@ -151,7 +162,7 @@ class NotificationCandidateTest {
         assertThat(service.ingestNotification(event).disposition()).isEqualTo(Disposition.INVALIDATED);
         rejected(() -> service.invalidate(UUID.randomUUID(), new Invalidation("NOTIFICATION_CHANGED")), "OBSERVATION_NOT_FOUND");
         rejected(() -> service.invalidate(event.eventId(), new Invalidation("raw text")), "INVALIDATION_INVALID");
-        PaymentRequest another = service.create(new CreateRequest(1235));
+        PaymentRequest another = legacyCreate(1235);
         Candidate different = candidate();
         different = new Candidate(different.eventId(), different.notificationId(), 1, clock.now, 1235, different.source(), DEVICE_ID, different.classification(), different.classifierProfile(), different.evidenceQuality());
         service.ingestNotification(different); service.beginVerification(another.id()); service.confirm(another.id(), new Confirmation(true));
@@ -160,7 +171,7 @@ class NotificationCandidateTest {
     }
 
     @Test void persistenceFailureDoesNotConsumeCandidateOrExposeTentativeMatch() throws Exception {
-        service.create(new CreateRequest(1234));
+        legacyCreate(1234);
         Files.delete(file); Files.createDirectory(file);
         Candidate event = candidate();
         rejected(() -> service.ingestNotification(event), "STORE_UNAVAILABLE");
@@ -171,7 +182,7 @@ class NotificationCandidateTest {
     }
 
     @Test void simultaneousRetryHasOneEffectAndDistinctCandidateConflictsAreSerialized() throws Exception {
-        service.create(new CreateRequest(1234)); Candidate event = candidate();
+        legacyCreate(1234); Candidate event = candidate();
         CyclicBarrier barrier = new CyclicBarrier(3);
         try (var pool = Executors.newFixedThreadPool(2)) {
             var first = pool.submit(() -> { barrier.await(5, TimeUnit.SECONDS); return service.ingestNotification(event); });

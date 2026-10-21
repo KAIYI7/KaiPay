@@ -53,11 +53,11 @@ class EnabledApplicationTest {
             assertThat(send(client, "/api/observations", BridgeHttpTest.DEVICE, event).statusCode()).isEqualTo(200);
             Snapshot snapshot = mapper.readValue(send(client, "/api/state", BridgeHttpTest.RECEIVER, null).body(), Snapshot.class);
             assertThat(snapshot.requests().getFirst().status()).isEqualTo(Status.PAYMENT_DETECTED);
-            String route = "/api/requests/" + request.id();
+            String route = "/api/requests/" + request.id(); String attestation = mapper.writeValueAsString(new Confirmation(true, snapshot.requests().getFirst().observationId()));
             assertThat(send(client, route + "/confirm", BridgeHttpTest.DEVICE, "{\"historyChecked\":true}").statusCode()).isEqualTo(401);
             assertThat(send(client, route + "/confirm", BridgeHttpTest.RECEIVER, "{\"historyChecked\":true}").statusCode()).isEqualTo(409);
-            assertThat(send(client, route + "/verify", BridgeHttpTest.RECEIVER, "{\"historyChecked\":true}").statusCode()).isEqualTo(200);
-            assertThat(send(client, route + "/confirm", BridgeHttpTest.RECEIVER, "{\"historyChecked\":true}").statusCode()).isEqualTo(200);
+            assertThat(send(client, route + "/verify", BridgeHttpTest.RECEIVER, attestation).statusCode()).isEqualTo(200);
+            assertThat(send(client, route + "/confirm", BridgeHttpTest.RECEIVER, attestation).statusCode()).isEqualTo(200);
             Snapshot persisted = mapper.readValue(FILE.toFile(), Snapshot.class);
             assertThat(persisted.requests().getFirst().status()).isEqualTo(Status.MANUALLY_CONFIRMED);
             assertThat(persisted.observations()).hasSize(1);

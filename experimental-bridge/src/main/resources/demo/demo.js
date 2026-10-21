@@ -1,6 +1,6 @@
 'use strict';
 const byId = id => document.getElementById(id);
-const names = {AWAITING_PAYMENT: 'Awaiting payment', PAYMENT_DETECTED: 'Potential payment detected — unverified', AWAITING_VERIFICATION: 'Awaiting receiver verification', MANUALLY_CONFIRMED: 'Manually confirmed', AMBIGUOUS: 'Ambiguous — receiver review required', EXPIRED: 'Expired'};
+const names = {AWAITING_PAYMENT: 'Awaiting payment', PAYMENT_DETECTED: 'Potential payment detected — unverified', AWAITING_VERIFICATION: 'Awaiting receiver confirmation', MANUALLY_CONFIRMED: 'Manually confirmed', AMBIGUOUS: 'Ambiguous — receiver review required', EXPIRED: 'Payment window closed — unconfirmed', REVIEW_EXPIRED: 'Receiver review ended — unconfirmed'};
 const payerLinks = new Map();
 const pendingConfirmations = new Set();
 let polling, generation = 0, refreshSequence = 0, lastRendered = '', controller = new AbortController();
@@ -62,17 +62,23 @@ function addPrivateLink(row, request) {
 }
 function render(state) {
   const requestRows = [];
+  const evidenceCapacityReached = state.observations.length >= 1000;
   for (const request of [...state.requests].reverse()) {
     const row = element('article');
-    const evidence = state.observations.find(item => item.candidate.eventId === request.observationId);
+    const evidence = state.observations.find(item => item.candidate.eventId === (request.observationId || request.reviewGrant?.eventId));
     const synthetic = evidence && evidence.candidate.source !== 'TNG_NOTIFICATION_CANDIDATE';
-    const statusName = request.status === 'MANUALLY_CONFIRMED' ? (synthetic ? 'Demo manually confirmed — no funds received' : 'Payment confirmed (receiver verified)') : names[request.status];
+    const reviewAvailable = request.reviewGrant && !request.reviewGrant.revoked && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status);
+    const statusName = request.status === 'MANUALLY_CONFIRMED' ? (synthetic ? 'Demo manually confirmed — no funds received' : 'Payment confirmed (receiver verified)') : request.paymentClosed && reviewAvailable ? (request.status === 'PAYMENT_DETECTED' ? 'Payment window closed — receiver review pending (unverified)' : 'Payment window closed — awaiting receiver confirmation') : names[request.status];
     row.append(element('p', money(request.amountMinor), 'amount'), element('p', statusName || 'Unknown state — refresh required', 'status ' + (request.status === 'MANUALLY_CONFIRMED' ? 'confirmed' : '')),
-      element('p', 'Request / order reference', 'muted'), element('p', request.id, 'reference'), element('p', 'Expires ' + new Date(request.expiresAt).toLocaleString(), 'muted'));
+      element('p', 'Request / order reference', 'muted'), element('p', request.id, 'reference'), element('p', 'Payment deadline: ' + new Date(request.expiresAt).toLocaleString() + (request.paymentClosed ? ' · closed to new candidates' : ''), 'muted'));
+    if (request.reviewGrant) row.append(element('p', 'Receiver review deadline: ' + new Date(request.reviewGrant.reviewExpiresAt).toLocaleString() + (request.reviewGrant.revoked ? ' · grant revoked; cannot be restored' : reviewAvailable ? ' · grant active; server rechecks eligibility on submission' : request.status === 'MANUALLY_CONFIRMED' ? ' · receiver confirmation recorded' : ' · review unavailable'), 'muted'));
+    else row.append(element('p', 'No extended receiver-review period has been granted.', 'muted'));
     if (synthetic) row.append(element('p', 'SYNTHETIC DEMO — invented evidence; no actual funds received.', 'notice'));
     else if (evidence) row.append(element('p', 'Notification candidate — unverified evidence, not settlement proof.', 'notice'));
     if (request.status === 'AMBIGUOUS') row.append(element('p', 'Competing or changed evidence needs receiver review. Equal amount and time cannot identify the correct payer.'));
-    if (request.status === 'EXPIRED') row.append(element('p', 'This request can no longer be verified or confirmed. Create a new request if needed.'));
+    if (request.status === 'EXPIRED' || request.status === 'REVIEW_EXPIRED') row.append(element('p', 'This request is unconfirmed and can no longer be verified or confirmed. Contact the payer to resolve any actual transfer. Do not request another payment automatically.'));
+    if (request.paymentClosed && reviewAvailable) row.append(element('p', 'The payment window is closed. Review only the previously accepted candidate; it remains unverified until your independent check and explicit confirmation. Do not ask the payer to pay again.', 'notice'));
+    if (evidenceCapacityReached && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status)) row.append(element('p', 'Evidence capacity is reached. Verification and confirmation are unavailable until explicit offline recovery.', 'notice'));
     const linkButton = element('button', payerLinks.has(request.id) ? 'Show private payer link' : 'Get private payer link', 'secondary');
     linkButton.type = 'button';
     linkButton.onclick = () => run(async epoch => {
@@ -84,7 +90,7 @@ function render(state) {
     });
     row.append(linkButton);
     addPrivateLink(row, request);
-    if (['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status) && evidence?.disposition === 'MATCHED') {
+    if (!evidenceCapacityReached && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status) && evidence?.disposition === 'MATCHED' && request.observationId === evidence.candidate.eventId && (!request.paymentClosed || reviewAvailable)) {
       const form = element('form', undefined, 'confirmation-form');
       const label = element('label', undefined, 'attestation');
       const checkbox = element('input');
@@ -106,14 +112,19 @@ function render(state) {
         checkbox.disabled = true;
         run(async epoch => {
           try {
+            let alreadyConfirmed = false;
+            const confirmation = {historyChecked: true, expectedEventId: evidence.candidate.eventId};
             if (request.status === 'PAYMENT_DETECTED') {
-              const verified = await api('/api/requests/' + request.id + '/verify', {historyChecked: true});
+              const verified = await api('/api/requests/' + request.id + '/verify', confirmation);
               ensureCurrent(epoch);
-              if (verified.id !== request.id || verified.status !== 'AWAITING_VERIFICATION') throw Error('Verification was not acknowledged in the expected state.');
+              if (verified.id !== request.id || !['AWAITING_VERIFICATION', 'MANUALLY_CONFIRMED'].includes(verified.status)) throw Error('Verification was not acknowledged in the expected state.');
+              alreadyConfirmed = verified.status === 'MANUALLY_CONFIRMED';
             }
-            const confirmed = await api('/api/requests/' + request.id + '/confirm', {historyChecked: true});
-            ensureCurrent(epoch);
-            if (confirmed.id !== request.id || confirmed.status !== 'MANUALLY_CONFIRMED') throw Error('Confirmation was not acknowledged in the expected state.');
+            if (!alreadyConfirmed) {
+              const confirmed = await api('/api/requests/' + request.id + '/confirm', confirmation);
+              ensureCurrent(epoch);
+              if (confirmed.id !== request.id || confirmed.status !== 'MANUALLY_CONFIRMED') throw Error('Confirmation was not acknowledged in the expected state.');
+            }
           } catch (error) {
             if (epoch !== generation) throw error;
             try { await refresh(); } catch { /* Keep the failure explicit if the current state is unavailable. */ }
@@ -130,7 +141,7 @@ function render(state) {
       };
       form.append(label, button, element('p', request.status === 'AWAITING_VERIFICATION'
         ? 'Verification is recorded; confirmation is still outstanding. Check the attestation again to resume.'
-        : 'This submission records verification, then separately requests confirmation. The server validates each transition.', 'muted'));
+        : 'This submission records verification, then separately requests confirmation for this candidate. The server validates each transition and deadline.', 'muted'));
       row.append(form);
     }
     requestRows.push(row);
@@ -141,11 +152,11 @@ function render(state) {
     const row = element('article');
     const candidate = item.candidate;
     const synthetic = candidate.source !== 'TNG_NOTIFICATION_CANDIDATE';
-    row.append(element('p', synthetic ? 'SYNTHETIC · invented evidence · no funds received' : 'TNG notification candidate · UNVERIFIED', 'eyebrow'), element('p', money(candidate.amountMinor) + ' · ' + item.disposition, 'status'), element('p', 'Observed ' + new Date(candidate.observedAt).toLocaleString(), 'muted'), element('p', 'Event ' + candidate.eventId, 'reference'));
+    row.append(element('p', synthetic ? 'SYNTHETIC · invented evidence · no funds received' : 'TNG notification candidate · UNVERIFIED', 'eyebrow'), element('p', money(candidate.amountMinor) + ' · ' + item.disposition, 'status'), element('p', 'Device-reported observation: ' + new Date(candidate.observedAt).toLocaleString() + ' · not proof of payment time', 'muted'), element('p', item.acceptedAt ? 'Server admission: ' + new Date(item.acceptedAt).toLocaleString() : 'Historical evidence: server admission time unknown', 'muted'), element('p', 'Event ' + candidate.eventId, 'reference'));
     if (item.disposition === 'UNMATCHED') row.append(element('p', 'No eligible matching request. This evidence does not change any checkout to paid.'));
     if (['EXPIRED', 'DELAYED', 'INVALIDATED', 'UPDATE_IGNORED'].includes(item.disposition)) row.append(element('p', 'Review-only evidence. This observation cannot establish payment completion.'));
     if (candidate.source !== 'SIMULATED' && ['UNMATCHED', 'AMBIGUOUS'].includes(item.disposition)) {
-      const eligible = state.requests.filter(request => ['AWAITING_PAYMENT', 'AMBIGUOUS'].includes(request.status) && request.amountMinor === candidate.amountMinor
+      const eligible = state.requests.filter(request => !request.paymentClosed && !request.reviewGrant && ['AWAITING_PAYMENT', 'AMBIGUOUS'].includes(request.status) && request.amountMinor === candidate.amountMinor
         && new Date(candidate.observedAt) >= new Date(request.createdAt) && new Date(candidate.observedAt) < new Date(request.expiresAt));
       if (eligible.length) {
         const choices = element('select');
