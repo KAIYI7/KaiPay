@@ -15,6 +15,7 @@ import { DltExplorerPage } from './pages/DltExplorer/DltExplorerPage';
 import { LedgerPage } from './pages/Ledger/LedgerPage';
 import { LoginPage } from './pages/Login/LoginPage';
 import { WebhooksPage } from './pages/Webhooks/WebhooksPage';
+import { ReconciliationPage } from './pages/Reconciliation/ReconciliationPage';
 
 // A new QueryClient is allocated for every authenticated lifetime, even when
 // another account shares the same merchant. Unmounted mutation callbacks cannot
@@ -53,10 +54,12 @@ function SessionApp() {
             <Route path="/payments/:id" element={<MerchantView><PaymentDetailsPage /></MerchantView>} />
             <Route path="/sandbox" element={<MerchantView><PaymentSandboxPage /></MerchantView>} />
             <Route path="/webhooks" element={<MerchantView><WebhooksPage /></MerchantView>} />
+            <Route path="/reconciliation" element={<MerchantView><ReconciliationPage /></MerchantView>} />
           </Route>
           <Route element={<RoleRoutes role="ADMIN" />}>
             <Route path="/events/outbox" element={<OutboxStreamPage />} />
             <Route path="/events/dlt" element={<DltExplorerPage />} />
+            <Route path="/admin/reconciliation" element={<ReconciliationPage admin />} />
           </Route>
           <Route path="/ledger" element={<LedgerPage />} />
           <Route path="*" element={<Navigate to={home} replace />} />

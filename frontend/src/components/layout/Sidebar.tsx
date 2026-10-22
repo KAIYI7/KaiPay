@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, CreditCard, FlaskConical, Layers, AlertOctagon, BookOpen, Webhook } from 'lucide-react';
+import { LayoutDashboard, CreditCard, FlaskConical, Layers, AlertOctagon, BookOpen, Webhook, ListChecks } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
   const { user } = useAuth();
@@ -18,6 +18,7 @@ export const Sidebar: React.FC = () => {
 
   const financialCoreItems = [
     { label: 'Ledger & Accounts', path: '/ledger', icon: BookOpen },
+    { label: 'Reconciliation', path: isAdmin ? '/admin/reconciliation' : '/reconciliation', icon: ListChecks },
   ];
 
   return (

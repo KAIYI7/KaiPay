@@ -435,6 +435,8 @@ KaiPay/
 
 The [merchant webhook contract](docs/webhooks.md) covers signed lifecycle notifications, receiver deduplication, delivery visibility and retry limits. Delivery is currently exercised only through isolated local tests; the application runtime keeps nonlocal dispatch disabled pending separate operational verification.
 
+The [simulated authorization reconciliation contract](docs/reconciliation.md) describes bounded manual comparison of durable simulator outcomes with payment evidence, immutable reports and read-only merchant/admin visibility. Reconciliation never changes financial records; capture/refund accounting and real bank clearing are outside its assessed scope.
+
 For implementation reviews, event contracts, accounting models, and engineering tradeoffs, refer to the public documents in [`docs/`](docs/):
 
 | Document | Description |
