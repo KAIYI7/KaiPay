@@ -2,14 +2,12 @@ package dev.kaipay.notificationprobe
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.service.notification.NotificationListenerService
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -32,10 +30,10 @@ class ProbeActivity : Activity() {
     private val foregroundRefresh = object : Runnable {
         override fun run() { refresh(); handler.postDelayed(this, 1_000) }
     }
-    private val listener get() = ComponentName(this, TngNotificationListener::class.java)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ProbeRuntime.initialize(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         configureContentInsets()
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 24, 24, 24) }
@@ -51,10 +49,7 @@ class ProbeActivity : Activity() {
             catch (_: ActivityNotFoundException) { settingsUnavailable = true }
         }
         button(R.string.enable_detection) {
-            if (notificationAccessGranted()) {
-                ProbeRuntime.session.setEnabled(true)
-                if (!ProbeRuntime.session.snapshot().connected) NotificationListenerService.requestRebind(listener)
-            }
+            ProbeRuntime.enable(this)
         }
         button(R.string.disable_and_clear) { ProbeRuntime.disable() }
         button(R.string.clear_diagnostics) { ProbeRuntime.session.clear() }

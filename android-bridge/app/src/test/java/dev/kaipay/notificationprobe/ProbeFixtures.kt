@@ -16,6 +16,21 @@ import org.robolectric.Shadows.shadowOf
 // All contents and identifiers below are invented JVM fixtures, never real TNG captures.
 internal const val SYNTHETIC_PRIVATE = "SYNTHETIC_PRIVATE_DO_NOT_RETAIN"
 
+/** Robolectric replaces Application/dataDir per test but does not reset our process singletons. */
+internal fun resetBridgeProcess() {
+    val instanceField = LiveDelivery::class.java.getDeclaredField("instance").apply { isAccessible = true }
+    instanceField.get(null)?.let { instance ->
+        (LiveDelivery::class.java.getDeclaredField("dispatcher").apply { isAccessible = true }.get(instance) as DeliveryDispatcher).close()
+    }
+    instanceField.set(null, null)
+    OwnerControlRuntime::class.java.getDeclaredField("controls").apply { isAccessible = true }.set(null, null)
+    OwnerControlRuntime::class.java.getDeclaredField("directory").apply { isAccessible = true }.set(null, null)
+    ProbeRuntime::class.java.getDeclaredField("context").apply { isAccessible = true }.set(null, null)
+    ProbeRuntime::class.java.getDeclaredField("lastRebind").apply { isAccessible = true }.setLong(null, Long.MIN_VALUE)
+    ProbeRuntime::class.java.getDeclaredField("listenerKnown").apply { isAccessible = true }.setBoolean(null, false)
+    ProbeRuntime.session.setConnected(false)
+}
+
 internal fun grantAccess(context: Context = RuntimeEnvironment.getApplication(), granted: Boolean = true) {
     val component = ComponentName(context, TngNotificationListener::class.java)
     if (Build.VERSION.SDK_INT >= 27) {

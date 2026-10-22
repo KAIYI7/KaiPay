@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">KaiPay feasibility probe</string>
-    <string name="probe_explanation">EXPERIMENTAL — complete TNG compatibility UNVERIFIED; one English receipt structure observed\nLOCAL TEXT INSPECTION: permitted TNG text is displayed temporarily, never uploaded. Candidates do not verify payments.\nAndroid grants broad notification access; other packages are discarded immediately.\nUp to 32 observations, five-minute expiry. Disable, revoke, removal or process exit clears text. Potential credentials are suppressed.\nRefresh to inspect updates; foreground display also refreshes. Enable is temporary until process exit.</string>
+    <string name="probe_explanation">EXPERIMENTAL — complete TNG compatibility UNVERIFIED; one English receipt structure observed\nLOCAL TEXT INSPECTION: permitted TNG text is displayed temporarily, never uploaded. Candidates do not verify payments.\nAndroid grants broad notification access; other packages are discarded immediately.\nUp to 32 observations, five-minute expiry. Disable, revoke, removal or process exit clears text. Potential credentials are suppressed.\nRefresh to inspect updates; foreground display also refreshes. Explicit capture opt-in persists across ordinary restart. Temporary text clears at process exit.</string>
     <string name="open_notification_settings">Open notification access settings</string>
     <string name="enable_detection">Enable local detection</string>
     <string name="disable_and_clear">Disable and clear</string>
     <string name="clear_diagnostics">Clear diagnostics</string>
     <string name="refresh_status">Refresh status</string>
-    <string name="delivery_explanation">EXPERIMENTAL DELIVERY — default off. Sends only minimized candidate fields; never notification text. Unverified evidence requires independent TNG history review. Delays and failures are possible. Disable cancels pending transmissions; an in-flight request may already have arrived. Detection still resets off after process restart.</string>
+    <string name="delivery_explanation">EXPERIMENTAL DELIVERY — default off. Sends only minimized candidate fields; never notification text. Unverified evidence requires independent TNG history review. Delays and failures are possible. Disable cancels pending transmissions; an in-flight request may already have arrived. Explicit capture and delivery opt-ins persist; disabling stays off across restart. Android may defer background recovery.</string>
     <string name="delivery_status">%1$s\n%2$s</string>
     <string name="delivery_base_url">Server base URL (debug USB: http://127.0.0.1:28082)</string>
     <string name="delivery_device_id">Assigned device UUID</string>

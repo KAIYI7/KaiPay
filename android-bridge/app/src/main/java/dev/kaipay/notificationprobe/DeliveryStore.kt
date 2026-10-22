@@ -70,6 +70,7 @@ internal class DeliveryStore(directory: File, private val clock: () -> Long = Sy
     var generation = 0L; private set
     var warning = ""; private set
     var healthy = true; private set
+    @Volatile var lastAcknowledgedAt: Long? = null; private set
 
     init {
         directory.mkdirs()
@@ -81,6 +82,7 @@ internal class DeliveryStore(directory: File, private val clock: () -> Long = Sy
                 secret = android.util.Base64.decode(root.getString("secret"), android.util.Base64.NO_WRAP)
                 require(secret.size == 32)
                 enabled = root.getBoolean("enabled"); generation = root.getLong("generation")
+                lastAcknowledgedAt = root.optLong("lastAcknowledgedAt").takeIf { it > 0 }
                 val rows = root.getJSONArray("entries"); require(rows.length() <= DELIVERY_CAPACITY)
                 repeat(rows.length()) { i ->
                     val row = rows.getJSONObject(i)
@@ -123,7 +125,7 @@ internal class DeliveryStore(directory: File, private val clock: () -> Long = Sy
     }
     @Synchronized fun clear() {
         healthy = true; failureMarker.delete()
-        enabled = false; generation++; entries.clear(); lifecycles.clear(); warning = ""
+        enabled = false; generation++; entries.clear(); lifecycles.clear(); warning = ""; lastAcknowledgedAt = null
         secret = ByteArray(32).also { SecureRandom().nextBytes(it) }; persist()
     }
     @Synchronized fun rows(): List<QueueEntry> { expire(); return entries.values.map { it.copy() } }
@@ -135,6 +137,21 @@ internal class DeliveryStore(directory: File, private val clock: () -> Long = Sy
     @Synchronized fun find(id: String): QueueEntry? { expire(); return entries[id]?.copy() }
     @Synchronized fun mark(id: String, status: DeliveryStatus, note: String, incrementAttempt: Boolean = false) {
         entries[id]?.let { it.status = status; it.note = note; if (incrementAttempt) it.attempts++ }; persist()
+    }
+    @Synchronized fun acknowledged(id: String, disposition: String, invalidation: Boolean = false) {
+        lastAcknowledgedAt = clock()
+        if (invalidation) mark(id, DeliveryStatus.INVALIDATED, "Original notification evidence invalidated")
+        else {
+            uploaded(id)
+            entries[id]?.let { if (!it.invalidate) it.note = when (disposition) {
+                "DELAYED", "EXPIRED" -> "Receiver retained delayed evidence; not eligible for checkout matching"
+                "UNMATCHED" -> "Receiver retained unmatched evidence; no checkout association"
+                "INVALIDATED", "UPDATE_IGNORED" -> "Receiver retained ineligible or invalidated evidence"
+                "AMBIGUOUS" -> "Receiver retained ambiguous evidence; owner review required"
+                else -> "Receiver acknowledged tentative evidence; never settlement confirmation"
+            } }
+            persist()
+        }
     }
     @Synchronized fun uploaded(id: String) {
         entries[id]?.let { it.uploaded = true; it.status = if (it.invalidate) DeliveryStatus.INVALIDATION_PENDING else DeliveryStatus.DELIVERED
@@ -223,7 +240,7 @@ internal class DeliveryStore(directory: File, private val clock: () -> Long = Sy
     private fun persist() {
         check(healthy) { "Delivery storage unavailable" }
         val root = JSONObject().put("secret", android.util.Base64.encodeToString(secret, android.util.Base64.NO_WRAP))
-            .put("enabled", enabled).put("generation", generation)
+            .put("enabled", enabled).put("generation", generation).put("lastAcknowledgedAt", lastAcknowledgedAt)
             .put("entries", JSONArray(entries.values.map { JSONObject().put("candidate", it.candidate.json())
                 .put("status", it.status.name).put("attempts", it.attempts).put("note", it.note)
                 .put("invalidate", it.invalidate).put("uploaded", it.uploaded).put("manualRetries", it.manualRetries)

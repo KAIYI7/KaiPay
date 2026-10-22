@@ -5,6 +5,8 @@ import android.app.Application
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequest
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
@@ -28,7 +30,7 @@ internal class LiveDelivery private constructor(private val app: Application) {
     @Volatile private var generation = 0L
     @Volatile private var localError = ""
 
-    init { control {
+    init { ProbeRuntime.initialize(app); ProbeRuntime.requestRecovery(app); control {
         try {
             credentials = DeliveryCredentials(app)
             store = DeliveryStore(app.noBackupFilesDir, onFailure = {
@@ -39,10 +41,17 @@ internal class LiveDelivery private constructor(private val app: Application) {
             val loadedConfig = try { credentials.load() } catch (_: Exception) { null }
             synchronized(this) {
                 if (configurationGeneration == 0L) cachedConfig = loadedConfig
-                if (generation == 0L) { consent = store.enabled && cachedConfig != null && store.healthy; generation = store.generation }
+                if (generation == 0L) { val controls = OwnerControlRuntime.get(app)
+                    // Existing explicit delivery consent migrates; capture has no historical durable consent.
+                    if (!controls.exists && controls.healthy && store.enabled) controls.set(delivery = true)
+                    consent = controls.healthy && controls.delivery && store.enabled && cachedConfig != null && store.healthy
+                    // A completed stop may have killed the process before the asynchronous queue stop.
+                    // Cancel those rows now, so a later deliberate enable never revives cancelled evidence.
+                    if ((!controls.healthy || !controls.delivery) && store.healthy && store.enabled) store.setEnabled(false)
+                    generation = store.generation }
                 else if (store.healthy) store.setEnabled(false)
             }
-            ready = true; resume()
+            ready = true; resume(); ensureRecovery()
         } finally { initialized.countDown() }
     } }
     internal fun awaitReady(): Boolean = initialized.await(10, TimeUnit.SECONDS) && ready
@@ -56,33 +65,51 @@ internal class LiveDelivery private constructor(private val app: Application) {
             control {
                 try {
                     store.clear(); credentials.save(config)
-                    synchronized(this) { if (operation == configurationGeneration) cachedConfig = config }
-                    localError = "Device configuration saved; delivery remains off"
+                    synchronized(this) {
+                        if (operation == configurationGeneration) {
+                            cachedConfig = config
+                            localError = CONFIGURATION_SAVED
+                        }
+                    }
                 } catch (_: Exception) { localError = "Device configuration could not be saved; delivery remains off" }
             }
         }
     }
     fun enable(): Boolean {
-        val state = ProbeRuntime.session.snapshot()
         synchronized(this) {
+            val state = ProbeRuntime.session.snapshot()
             if (!ready || !store.healthy || !app.notificationAccessGranted() || !state.enabled || !state.connected || cachedConfig == null) return false
+            if (!consent && store.enabled) {
+                // A rapid stop/re-enable can overtake the queued stop. Persist its cancellation
+                // before replacing the owner barrier, so process death cannot revive old rows.
+                // Rare explicit owner action only; snapshot is bounded to 512 KiB.
+                try { store.setEnabled(false) }
+                catch (_: Exception) { consent = false; localError = "Delivery storage unavailable; enable rejected"; return false }
+                if (!store.healthy) return false
+            }
+            if (!OwnerControlRuntime.get(app).set(delivery = true)) {
+                consent = false; generation++; DeliveryWorker.cancelConnections()
+                localError = "Owner control storage unavailable; delivery disabled"; return false
+            }
             consent = true; generation++
-            control { store.setEnabled(true); resume() }
+            if (localError == CONFIGURATION_SAVED) localError = ""
+            control { store.setEnabled(true); resume(); ensureRecovery() }
         }
         return true
     }
-    fun disable() {
-        val cancelScheduled = synchronized(this) {
-            if (!consent && (ready && !store.enabled || !ready && generation != 0L)) return
-            val wasReady = ready
-            consent = false; generation++
-            wasReady
-        }
+    fun disable() = synchronized(this) {
+        // The durable barrier, runtime gate, generation and queue operation share the enable monitor.
+        // An overlapping enable cannot publish a newer durable opt-in midway through a completed stop.
+        val durableDisable = OwnerControlRuntime.get(app).set(delivery = false)
+        if (!durableDisable) localError = "Owner control persistence failed; delivery disabled; reprovision required"
+        if (!consent && (ready && !store.enabled || !ready && generation != 0L)) return@synchronized
+        val cancelScheduled = ready
+        consent = false; generation++
         try {
             DeliveryWorker.cancelConnections()
             if (cancelScheduled) WorkManager.getInstance(app).cancelAllWorkByTag(TAG)
         } catch (_: Exception) { localError = "Work cancellation unavailable; durable disable still queued" }
-        finally { control(dropStaleCallbacks = true) { store.setEnabled(false) } }
+        finally { control(dropStaleCallbacks = true) { store.setEnabled(false); ensureRecovery() } }
     }
     fun clear() {
         disable()
@@ -158,10 +185,24 @@ internal class LiveDelivery private constructor(private val app: Application) {
         return ready && store.healthy && consent && generation == captured
     }
     internal fun consentGeneration() = generation
+    internal fun reconcile() {
+        if (!app.notificationAccessGranted()) { ProbeRuntime.disable(); disable(); return }
+        ProbeRuntime.requestRecovery(app)
+        control { resume() }
+    }
+    internal fun ensureRecovery() {
+        val controls = OwnerControlRuntime.get(app)
+        if (!consent && !controls.capture) {
+            WorkManager.getInstance(app).cancelUniqueWork(RECOVERY_NAME)
+            return
+        }
+        val work = PeriodicWorkRequest.Builder(RecoveryWorker::class.java, 15, TimeUnit.MINUTES).build()
+        WorkManager.getInstance(app).enqueueUniquePeriodicWork(RECOVERY_NAME, ExistingPeriodicWorkPolicy.KEEP, work)
+    }
     private fun resume() {
         if (!consent) return
         if (!app.notificationAccessGranted()) { disable(); return }
-        // Queue transmission survives ordinary process death; new notification detection remains off.
+        // Reschedule the same durable event UUIDs; no notification rescan or synthetic replacement.
         store.rows().filter { it.status == DeliveryStatus.PENDING || it.status == DeliveryStatus.INVALIDATION_PENDING }
             .forEach { schedule(it.candidate.eventId) }
     }
@@ -180,6 +221,26 @@ internal class LiveDelivery private constructor(private val app: Application) {
     fun status(): String = try {
         if (!ready) "Experimental delivery initializing; disabled until ready" else buildString {
             append("Experimental delivery enabled: "); append(consent)
+            val capture = ProbeRuntime.session.snapshot()
+            val pending = store.displayRows().filter { it.status == DeliveryStatus.PENDING || it.status == DeliveryStatus.INVALIDATION_PENDING }
+            val health = when {
+                !store.healthy || !OwnerControlRuntime.get(app).healthy -> "DEGRADED: private storage unavailable"
+                !app.notificationAccessGranted() -> "DISCONNECTED: notification access unavailable"
+                !consent -> "DISABLED: delivery owner control is off"
+                !capture.connected && ProbeRuntime.listenerKnown -> "DISCONNECTED: listener unavailable; recovery requested"
+                !capture.connected -> "UNKNOWN: listener connection not observed in this process"
+                !capture.enabled -> "DEGRADED: capture disabled"
+                store.displayRows().any { it.status == DeliveryStatus.FAILED || it.status == DeliveryStatus.EXPIRED } -> "DEGRADED: failed or stale queue entries require review"
+                store.warning.isNotEmpty() || localError.isNotEmpty() && !localError.startsWith("Device configuration saved") -> "DEGRADED: inspect local diagnostic below"
+                pending.isNotEmpty() -> "DEGRADED: pending delivery; transport not yet acknowledged"
+                store.lastAcknowledgedAt == null -> "UNKNOWN: receiver communication not yet acknowledged"
+                System.currentTimeMillis() - requireNotNull(store.lastAcknowledgedAt) !in 0..300_000 -> "UNKNOWN: last acknowledgement is stale or device clock changed"
+                else -> "HEALTHY: listener connected; recent receiver acknowledgement only"
+            }
+            append("\nHealth: "); append(health)
+            append("\nQueue backlog: "); append(pending.size)
+            append("\nLast successful communication: "); append(store.lastAcknowledgedAt?.let { java.time.Instant.ofEpochMilli(it) } ?: "unknown")
+            append("\nTransport availability: unknown between attempts; Android may defer work")
             append("\nConfiguration present: "); append(config() != null)
             val rows = store.displayRows()
             DeliveryStatus.values().forEach { status -> append("\n"); append(status); append(": "); append(rows.count { it.status == status }) }
@@ -197,6 +258,8 @@ internal class LiveDelivery private constructor(private val app: Application) {
             localError = "Delivery callback capacity reached; candidate dropped"
     }
     companion object {
+        private const val CONFIGURATION_SAVED = "Device configuration saved; delivery remains off"
+        private const val RECOVERY_NAME = "kaipay-experimental-recovery"
         private const val TAG = "kaipay-experimental-delivery"
         @Volatile private var instance: LiveDelivery? = null
         fun get(context: Context): LiveDelivery = instance ?: synchronized(this) {

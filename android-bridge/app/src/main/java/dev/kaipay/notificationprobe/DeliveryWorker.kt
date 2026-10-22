@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import java.io.IOException
+import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
 import java.util.concurrent.CopyOnWriteArraySet
@@ -34,8 +35,8 @@ class DeliveryWorker(context: Context, parameters: WorkerParameters) : Worker(co
             if (!row.uploaded && !row.controlOnly) {
                 if (!delivery.mayTransmit(captured) || isStopped) return Result.success()
                 val response = post(endpoint(config.baseUrl, BuildConfig.DEBUG), config.token, row.candidate.json().toString())
-                if (response !in 200..299) return rejection(response, id, delivery)
-                store.uploaded(id)
+                if (response.code !in 200..299) return rejection(response.code, id, delivery)
+                store.acknowledged(id, acknowledged(response, row.candidate))
             }
             val latest = store.find(id) ?: return Result.success()
             if (latest.invalidate) {
@@ -46,12 +47,13 @@ class DeliveryWorker(context: Context, parameters: WorkerParameters) : Worker(co
                 store.invalidationAttempt(id)
                 val uri = URI(endpoint(config.baseUrl, BuildConfig.DEBUG).toString() + "/$id/invalidate")
                 val response = post(uri, config.token, "{\"reason\":\"NOTIFICATION_CHANGED\"}")
-                if (response == 404 && latest.controlOnly) {
+                if (response.code == 404 && latest.controlOnly) {
                     store.mark(id, DeliveryStatus.INVALIDATED, "No server observation to invalidate; cancelled original never replayed")
                     return Result.success()
                 }
-                if (response !in 200..299) return rejection(response, id, delivery)
-                store.mark(id, DeliveryStatus.INVALIDATED, "Original notification evidence invalidated")
+                if (response.code !in 200..299) return rejection(response.code, id, delivery)
+                if (acknowledged(response, row.candidate) != "INVALIDATED") throw IOException("Uncertain invalidation acknowledgement")
+                store.acknowledged(id, "INVALIDATED", invalidation = true)
             }
             return Result.success()
         } catch (_: javax.net.ssl.SSLException) {
@@ -75,7 +77,21 @@ class DeliveryWorker(context: Context, parameters: WorkerParameters) : Worker(co
             if (retryable) "Temporary server rejection; retry pending" else "Permanent server rejection (HTTP $code)")
         return if (retryable) Result.retry() else Result.failure()
     }
-    private fun post(uri: URI, token: String, body: String): Int {
+    private data class Response(val code: Int, val body: String)
+    private fun acknowledged(response: Response, expected: Candidate): String {
+        try {
+            val value = JSONObject(response.body)
+            val actual = value.getJSONObject("candidate")
+            val wanted = expected.json()
+            if (!wanted.keys().asSequence().all { actual.has(it) && actual.get(it).toString() == wanted.get(it).toString() })
+                throw IOException("Uncertain event acknowledgement")
+            val disposition = value.getString("disposition")
+            if (disposition !in setOf("MATCHED", "AMBIGUOUS", "UNMATCHED", "EXPIRED", "UPDATE_IGNORED", "DELAYED", "INVALIDATED"))
+                throw IOException("Uncertain acknowledgement disposition")
+            return disposition
+        } catch (_: Exception) { throw IOException("Uncertain receiver acknowledgement") }
+    }
+    private fun post(uri: URI, token: String, body: String): Response {
         val active = uri.toURL().openConnection() as HttpURLConnection
         connection = active; connections.add(active)
         return try {
@@ -86,7 +102,19 @@ class DeliveryWorker(context: Context, parameters: WorkerParameters) : Worker(co
             val bytes = body.toByteArray(Charsets.UTF_8)
             active.setFixedLengthStreamingMode(bytes.size)
             active.outputStream.use { it.write(bytes) }
-            active.responseCode
+            val code = active.responseCode
+            val responseBody = if (code in 200..299) active.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > 16_384) throw IOException("Acknowledgement size exceeded")
+                    output.write(buffer, 0, count)
+                }
+                String(output.toByteArray(), Charsets.UTF_8)
+            } else ""
+            Response(code, responseBody)
         } finally { connections.remove(active); active.disconnect(); connection = null }
     }
     override fun onStopped() { connection?.disconnect(); super.onStopped() }

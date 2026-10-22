@@ -42,6 +42,7 @@ class DebugSnapshotProviderTest {
     private val uri get() = DebugSnapshotProvider.SNAPSHOT_URI
 
     @Before fun setup() {
+        resetBridgeProcess()
         ProbeRuntime.disable()
         ProbeRuntime.session.setConnected(true)
         grantAccess(app)
@@ -112,6 +113,20 @@ class DebugSnapshotProviderTest {
         assertTrue(ProbeRuntime.session.snapshot().events.isEmpty())
         grantAccess(app)
         assertFalse(snapshot().getBoolean("enabled"))
+    }
+    @Test fun `cold diagnostic query persists observed revocation before any delivery initialization`() {
+        resetBridgeProcess()
+        assertTrue(OwnerControlRuntime.get(app).set(capture = true, delivery = true))
+        grantAccess(app, false)
+        val payload = snapshot()
+        assertFalse(payload.getBoolean("access"))
+        assertFalse(payload.getBoolean("enabled"))
+        assertEquals(0, payload.getJSONArray("events").length())
+        assertFalse(OwnerControls(app.noBackupFilesDir).capture)
+        assertFalse(OwnerControls(app.noBackupFilesDir).delivery)
+        grantAccess(app)
+        ProbeRuntime.initialize(app)
+        assertFalse(ProbeRuntime.session.snapshot().enabled)
     }
     @Test fun `credential blocked snapshot contains no content`() {
         post("Synthetic OTP 123456")

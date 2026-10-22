@@ -12,7 +12,7 @@ import android.os.Process
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Read-only, debug-only snapshot for an already authorized local ADB shell. No storage. */
+/** Read-only notification snapshot; detected permission revocation durably stops owner controls. */
 class DebugSnapshotProvider : ContentProvider() {
     override fun onCreate() = true
 
@@ -26,8 +26,9 @@ class DebugSnapshotProvider : ContentProvider() {
         authorize()
         require(uri == SNAPSHOT_URI && projection == null && selection == null &&
             selectionArgs == null && sortOrder == null) { "Only the snapshot route is supported" }
-        val granted = requireNotNull(context).notificationAccessGranted()
-        if (!granted) ProbeRuntime.disable()
+        val app = requireNotNull(context)
+        val granted = app.notificationAccessGranted()
+        if (!granted) ProbeRuntime.disable(app)
         val snapshot = ProbeRuntime.session.snapshot()
         val observations = JSONArray()
         var exportBytes = 0

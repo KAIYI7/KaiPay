@@ -34,6 +34,8 @@ class ProbeActivityTest {
     private lateinit var activity: ProbeActivity
 
     @Before fun setUp() {
+        resetBridgeProcess()
+        androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(RuntimeEnvironment.getApplication())
         ProbeRuntime.session.setConnected(false)
         grantAccess(granted = false)
         controller = Robolectric.buildActivity(ProbeActivity::class.java).setup()
@@ -158,7 +160,7 @@ class ProbeActivityTest {
         assertTrue(uiText().contains("Detection enabled: false"))
     }
 
-    @Test fun `activity recreation preserves process gate but does not grant access`() {
+    @Test fun `activity recreation restores explicit capture opt in but never connection or permission`() {
         grantAccess(activity)
         ProbeRuntime.session.setConnected(true)
         click("Enable local detection")
@@ -166,12 +168,16 @@ class ProbeActivityTest {
         activity = controller.get()
         assertTrue(ProbeRuntime.session.snapshot().enabled)
         assertTrue(uiText().contains("Detection enabled: true"))
-        // Simulate a fresh process session explicitly; activity restart alone is not process death.
+        // Reset the process observation; persisted opt-in restores capture, never listener availability.
         ProbeRuntime.session.setConnected(false)
         controller.recreate()
         activity = controller.get()
+        assertTrue(ProbeRuntime.session.snapshot().enabled)
+        assertFalse(ProbeRuntime.session.snapshot().connected)
+        grantAccess(activity, false)
+        controller.recreate(); activity = controller.get()
         assertFalse(ProbeRuntime.session.snapshot().enabled)
-        assertTrue(uiText().contains("Detection enabled: false"))
+        assertFalse(OwnerControls(activity.noBackupFilesDir).capture)
     }
 
     @Test fun `notification settings control opens the Android permission screen`() {

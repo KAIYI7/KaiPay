@@ -33,10 +33,12 @@ class DeliveryWorkerTest {
     private var server: ServerSocket? = null
     private val bodies = CopyOnWriteArrayList<String>()
     private val paths = CopyOnWriteArrayList<String>()
+    private var acknowledgement: ((JSONObject) -> String)? = null
     private val token = "invented_device_token_for_local_testing_only"
     private val deviceId = UUID.randomUUID().toString()
     private lateinit var originalCredentials: DeviceCredentialStorage
     @Before fun setup() {
+        resetBridgeProcess()
         WorkManagerTestInitHelper.initializeTestWorkManager(app, androidx.work.Configuration.Builder().setExecutor(workers).build())
         grantAccess(app)
         delivery = LiveDelivery.get(app); assertTrue(delivery.awaitReady())
@@ -85,8 +87,13 @@ class DeliveryWorkerTest {
                         while (offset < length) { val count = input.read(content, offset, length - offset); check(count > 0); offset += count }
                         paths.add(path); bodies.add(String(content))
                         val result = code(path)
-                        if (result > 0) request.getOutputStream().write(
-                            "HTTP/1.1 $result Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(Charsets.UTF_8))
+                        if (result > 0) {
+                            val original = if (path.endsWith("/invalidate")) delivery.store.find(path.substringAfter("/api/notification-candidates/").substringBefore("/"))!!.candidate.json() else JSONObject(String(content))
+                            val ack = JSONObject().put("candidate", original).put("disposition", if (path.endsWith("/invalidate")) "INVALIDATED" else "UNMATCHED").toString()
+                            val payload = if (result in 200..299) acknowledgement?.invoke(JSONObject(ack)) ?: ack else ""
+                            request.getOutputStream().write(
+                                "HTTP/1.1 $result Test\r\nContent-Length: ${payload.toByteArray(Charsets.UTF_8).size}\r\nConnection: close\r\n\r\n$payload".toByteArray(Charsets.UTF_8))
+                        }
                     }
                 } catch (_: java.io.IOException) { }
             }
@@ -121,6 +128,153 @@ class DeliveryWorkerTest {
         assertTrue(bodies.all { JSONObject(it).getString("eventId") == candidate.eventId })
         assertEquals(DeliveryStatus.DELIVERED, delivery.store.find(candidate.eventId)?.status)
     }
+    @Test fun `unavailable transport retains queue and restored receiver accepts same durable UUID`() {
+        val candidate = candidate()
+        assertEquals(Result.retry(), worker(candidate.eventId).doWork())
+        assertEquals(DeliveryStatus.PENDING, delivery.store.find(candidate.eventId)?.status)
+        assertEquals(candidate, DeliveryStore(app.noBackupFilesDir).find(candidate.eventId)?.candidate)
+        serve { 200 }
+        assertEquals(Result.success(), worker(candidate.eventId).doWork())
+        assertEquals(candidate.eventId, JSONObject(bodies.single()).getString("eventId"))
+        assertEquals(2, delivery.store.find(candidate.eventId)?.attempts)
+    }
+    @Test fun `exhausted upload budget stops traffic until bounded deliberate retry`() {
+        serve { 200 }; val candidate = candidate()
+        repeat(MAX_ATTEMPTS) { delivery.store.mark(candidate.eventId, DeliveryStatus.PENDING, "Prior ordinary failure", true) }
+        assertEquals(Result.failure(), worker(candidate.eventId).doWork())
+        assertEquals(DeliveryStatus.FAILED, delivery.store.find(candidate.eventId)?.status)
+        assertTrue(bodies.isEmpty())
+        assertEquals(listOf(candidate.eventId), delivery.store.retry())
+        assertEquals(Result.success(), worker(candidate.eventId).doWork())
+        assertEquals(1, bodies.size)
+    }
+    @Test fun `wrong event body empty success and oversized acknowledgement remain uncertain and retry bounded`() {
+        serve { 200 }
+        val candidate = candidate()
+        val bodies = listOf<(JSONObject) -> String>(
+            { "" },
+            { it.getJSONObject("candidate").put("eventId", UUID.randomUUID().toString()); it.toString() },
+            { it.getJSONObject("candidate").put("amountMinor", 124); it.toString() },
+            { it.put("disposition", "MANUALLY_CONFIRMED").toString() },
+            { "x".repeat(16_385) }
+        )
+        bodies.forEach { response ->
+            acknowledgement = response
+            assertEquals(Result.retry(), worker(candidate.eventId).doWork())
+            assertFalse(delivery.store.find(candidate.eventId)!!.uploaded)
+            assertNull(delivery.store.lastAcknowledgedAt)
+        }
+        acknowledgement = null
+        assertEquals(Result.success(), worker(candidate.eventId).doWork())
+        assertTrue(delivery.store.find(candidate.eventId)!!.uploaded)
+        assertNotNull("queue directory: ${app.noBackupFilesDir}; status: ${delivery.status()}", DeliveryStore(app.noBackupFilesDir).lastAcknowledgedAt)
+    }
+    @Test fun `delayed acknowledgement is delivered evidence with no checkout eligibility claim`() {
+        serve { 200 }; acknowledgement = { it.put("disposition", "DELAYED").toString() }
+        val candidate = candidate()
+        assertEquals(Result.success(), worker(candidate.eventId).doWork())
+        assertEquals(DeliveryStatus.DELIVERED, delivery.store.find(candidate.eventId)?.status)
+        assertTrue(delivery.store.find(candidate.eventId)!!.note.contains("not eligible"))
+        assertNotNull(delivery.store.lastAcknowledgedAt)
+    }
+    @Test fun `disable barrier persists before blocked event dispatcher drains`() {
+        val started = CountDownLatch(1); val release = CountDownLatch(1)
+        OwnerControlRuntime.get(app).set(capture = true, delivery = true)
+        dispatcher().control { started.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+        assertTrue(started.await(5, TimeUnit.SECONDS))
+        try {
+            delivery.disable()
+            assertFalse("queue directory: ${app.noBackupFilesDir}; status: ${delivery.status()}", OwnerControls(app.noBackupFilesDir).delivery)
+            assertTrue(OwnerControls(app.noBackupFilesDir).capture)
+            assertFalse(delivery.mayTransmit(delivery.consentGeneration()))
+        } finally { release.countDown() }
+        controlsComplete()
+        assertFalse(DeliveryStore(app.noBackupFilesDir).enabled)
+    }
+    @Test fun `concurrent disable cannot publish barrier inside another enable critical section`() {
+        ProbeRuntime.session.setConnected(true); ProbeRuntime.session.setEnabled(true)
+        OwnerControlRuntime.get(app).set(capture = true, delivery = true)
+        val dispatcherStarted = CountDownLatch(1); val releaseDispatcher = CountDownLatch(1)
+        dispatcher().control { dispatcherStarted.countDown(); check(releaseDispatcher.await(5, TimeUnit.SECONDS)) }
+        assertTrue(dispatcherStarted.await(5, TimeUnit.SECONDS))
+        val stopStarted = CountDownLatch(1)
+        val stopper = Thread { stopStarted.countDown(); delivery.disable() }
+        try {
+            synchronized(delivery) {
+                stopper.start(); assertTrue(stopStarted.await(5, TimeUnit.SECONDS))
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (stopper.state != Thread.State.BLOCKED && System.nanoTime() < deadline) Thread.yield()
+                assertEquals(Thread.State.BLOCKED, stopper.state)
+                // The old split barrier wrote false before waiting for this enable monitor.
+                assertTrue(OwnerControls(app.noBackupFilesDir).delivery)
+                assertTrue(delivery.enable())
+            }
+            stopper.join(5_000); assertFalse(stopper.isAlive)
+            assertFalse("queue directory: ${app.noBackupFilesDir}; status: ${delivery.status()}", OwnerControls(app.noBackupFilesDir).delivery)
+            assertFalse(delivery.mayTransmit(delivery.consentGeneration()))
+            // Persisted event queue is still enabled because its dispatcher has not run the stop yet.
+            assertTrue(DeliveryStore(app.noBackupFilesDir).enabled)
+        } finally { releaseDispatcher.countDown(); stopper.join(5_000) }
+        controlsComplete()
+        assertFalse(DeliveryStore(app.noBackupFilesDir).enabled)
+    }
+    @Test fun `rapid disable reenable cannot revive cancelled queue after process interruption`() {
+        ProbeRuntime.session.setConnected(true); ProbeRuntime.session.setEnabled(true)
+        OwnerControlRuntime.get(app).set(capture = true, delivery = true)
+        val old = candidate()
+        val started = CountDownLatch(1); val release = CountDownLatch(1)
+        dispatcher().control { started.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+        assertTrue(started.await(5, TimeUnit.SECONDS))
+        try {
+            delivery.disable()
+            assertEquals(DeliveryStatus.PENDING, DeliveryStore(app.noBackupFilesDir).find(old.eventId)?.status)
+            assertTrue(delivery.enable())
+            // Simulate abrupt process death before either asynchronous control has run.
+            val coldQueue = DeliveryStore(app.noBackupFilesDir)
+            assertFalse(coldQueue.enabled)
+            assertEquals(DeliveryStatus.FAILED, coldQueue.find(old.eventId)?.status)
+            assertTrue(coldQueue.find(old.eventId)!!.note.startsWith("Cancelled by disable"))
+            assertTrue(OwnerControls(app.noBackupFilesDir).delivery)
+        } finally { release.countDown() }
+        controlsComplete()
+        assertEquals(DeliveryStatus.FAILED, delivery.store.find(old.eventId)?.status)
+        assertTrue(androidx.work.WorkManager.getInstance(app).getWorkInfosForUniqueWork("candidate-${old.eventId}")
+            .get(5, TimeUnit.SECONDS).isEmpty())
+    }
+    @Test fun `periodic unique reconciliation repairs persist before enqueue gap without event identity change`() {
+        LiveDelivery::class.java.getDeclaredField("cachedConfig").apply { isAccessible = true }
+            .set(delivery, DeliveryConfig("https://example.invalid", deviceId, token))
+        val candidate = candidate()
+        assertEquals(candidate, DeliveryStore(app.noBackupFilesDir).find(candidate.eventId)?.candidate)
+        val manager = androidx.work.WorkManager.getInstance(app)
+        assertTrue(manager.getWorkInfosForUniqueWork("candidate-${candidate.eventId}").get(5, TimeUnit.SECONDS).isEmpty())
+        delivery.ensureRecovery(); delivery.ensureRecovery()
+        delivery.reconcile(); controlsComplete()
+        assertEquals(1, manager.getWorkInfosForUniqueWork("kaipay-experimental-recovery").get(5, TimeUnit.SECONDS).size)
+        val work = manager.getWorkInfosForUniqueWork("candidate-${candidate.eventId}").get(5, TimeUnit.SECONDS)
+        assertEquals(1, work.size)
+        assertEquals(candidate, delivery.store.find(candidate.eventId)?.candidate)
+        assertEquals(DeliveryStatus.PENDING, delivery.store.find(candidate.eventId)?.status)
+    }
+    @Test fun `health never claims current connectivity from old acknowledgement or disconnected listener`() {
+        serve { 200 }; val candidate = candidate()
+        ProbeRuntime.session.setConnected(true); ProbeRuntime.session.setEnabled(true)
+        assertTrue(delivery.status(), delivery.status().contains("DEGRADED: pending delivery"))
+        assertEquals(Result.success(), worker(candidate.eventId).doWork())
+        ProbeRuntime.session.setConnected(false)
+        assertFalse(delivery.status().contains("Health: HEALTHY"))
+        assertTrue(delivery.status().contains("Transport availability: unknown between attempts"))
+        ProbeRuntime.session.setConnected(true); ProbeRuntime.session.setEnabled(true)
+        val ackClock = DeliveryStore::class.java.getDeclaredField("lastAcknowledgedAt").apply { isAccessible = true }
+        ackClock.set(delivery.store, System.currentTimeMillis() + 86_400_000)
+        assertTrue(delivery.status().contains("UNKNOWN: last acknowledgement is stale or device clock changed"))
+        ackClock.set(delivery.store, System.currentTimeMillis() - 600_000)
+        assertTrue(delivery.status().contains("UNKNOWN: last acknowledgement is stale or device clock changed"))
+        delivery.store.mark(candidate.eventId, DeliveryStatus.FAILED, "Retry limit reached")
+        assertTrue(delivery.status().contains("DEGRADED: failed or stale queue entries"))
+        assertFalse(delivery.status().contains(token))
+        assertFalse(delivery.status().contains(deviceId))
+    }
     @Test fun `disabled delivery and revoked access do not transmit`() {
         serve { 200 }; val candidate = candidate()
         grantAccess(app, false)
@@ -130,6 +284,27 @@ class DeliveryWorkerTest {
         LiveDelivery::class.java.getDeclaredField("consent").apply { isAccessible = true }.setBoolean(delivery, false)
         assertEquals(Result.success(), worker(candidate.eventId).doWork())
         assertEquals(0, bodies.size)
+    }
+    @Test fun `configuration off notice clears after successful enable while genuine warning remains`() {
+        ProbeRuntime.session.setConnected(true); ProbeRuntime.session.setEnabled(true)
+        LiveDelivery::class.java.getDeclaredField("credentials").apply { isAccessible = true }.set(delivery,
+            object : DeviceCredentialStorage {
+                override fun load(): DeliveryConfig? = null
+                override fun save(config: DeliveryConfig) { }
+                override fun clear() { }
+            })
+        delivery.configure(DeliveryConfig("https://example.invalid", deviceId, token))
+        controlsComplete()
+        assertTrue(delivery.status().contains("Device configuration saved; delivery remains off"))
+        assertTrue(delivery.enable())
+        controlsComplete()
+        assertTrue(delivery.status().contains("Experimental delivery enabled: true"))
+        assertFalse(delivery.status().contains("delivery remains off"))
+        val warning = "Delivery callback capacity reached; candidate dropped"
+        LiveDelivery::class.java.getDeclaredField("localError").apply { isAccessible = true }.set(delivery, warning)
+        assertTrue(delivery.enable()); controlsComplete()
+        assertTrue(delivery.status().contains(warning))
+        assertTrue(delivery.status().contains("DEGRADED: inspect local diagnostic below"))
     }
     @Test fun `failed replacement cannot admit enable or reuse prior cached configuration`() {
         val started = CountDownLatch(1); val release = CountDownLatch(1)

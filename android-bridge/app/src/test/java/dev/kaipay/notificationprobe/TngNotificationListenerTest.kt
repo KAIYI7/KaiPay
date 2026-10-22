@@ -29,6 +29,8 @@ class TngNotificationListenerTest {
     private lateinit var listener: TngNotificationListener
 
     @Before fun setUp() {
+        resetBridgeProcess()
+        androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(org.robolectric.RuntimeEnvironment.getApplication())
         ProbeRuntime.session.setConnected(false)
         controller = Robolectric.buildService(TngNotificationListener::class.java).create()
         listener = controller.get()
@@ -177,6 +179,41 @@ class TngNotificationListenerTest {
         assertFalse(ProbeRuntime.session.snapshot().enabled)
         assertFalse(ProbeRuntime.session.snapshot().connected)
         assertTrue(events().isEmpty())
+    }
+
+    @Test fun `explicit capture consent survives disconnect but stop remains stopped on reconnect`() {
+        listener.onListenerConnected()
+        assertTrue(ProbeRuntime.enable(listener))
+        listener.onNotificationPosted(syntheticNotification())
+        listener.onListenerDisconnected()
+        assertFalse(ProbeRuntime.session.snapshot().connected)
+        assertTrue(events().isEmpty())
+        assertTrue(OwnerControls(listener.noBackupFilesDir).capture)
+        listener.onListenerConnected()
+        assertTrue(ProbeRuntime.session.snapshot().enabled)
+        listener.onNotificationPosted(syntheticNotification())
+        assertEquals(1, events().size)
+        ProbeRuntime.disable()
+        listener.onListenerDisconnected(); listener.onListenerConnected()
+        assertFalse(ProbeRuntime.session.snapshot().enabled)
+        assertFalse(OwnerControls(listener.noBackupFilesDir).capture)
+    }
+
+    @Test fun `disconnect recovery requests are bounded and permission revoke persists off`() {
+        listener.onListenerConnected(); assertTrue(ProbeRuntime.enable(listener))
+        val before = org.robolectric.shadows.ShadowNotificationListenerService.getRebindRequestCount()
+        listener.onListenerDisconnected(); listener.onListenerDisconnected()
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertEquals(before + 1, org.robolectric.shadows.ShadowNotificationListenerService.getRebindRequestCount())
+        OwnerControlRuntime.get(listener).set(delivery = true)
+        grantAccess(listener, false)
+        listener.onListenerDisconnected()
+        assertFalse(OwnerControls(listener.noBackupFilesDir).capture)
+        assertFalse(OwnerControls(listener.noBackupFilesDir).delivery)
+        grantAccess(listener)
+        listener.onListenerConnected()
+        assertFalse(ProbeRuntime.session.snapshot().enabled)
+        assertFalse(OwnerControls(listener.noBackupFilesDir).delivery)
     }
 
     @Test @Config(sdk = [26]) fun `API26 legacy access allows callback and revocation clears diagnostics`() {

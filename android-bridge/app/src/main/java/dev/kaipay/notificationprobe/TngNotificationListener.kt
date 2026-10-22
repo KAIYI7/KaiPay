@@ -1,5 +1,7 @@
 package dev.kaipay.notificationprobe
 
+import android.content.Context
+import android.content.ComponentName
 import android.app.Notification
 import android.os.Handler
 import android.os.Looper
@@ -23,16 +25,63 @@ internal object ProbeRuntime {
         // snapshot prunes using a monotonic clock. Display/export also prune before reads.
         if (session.snapshot().events.isNotEmpty()) handler.postDelayed(expiry, 30_000)
     }
-    fun disable() { session.setEnabled(false); handler.removeCallbacks(expiry); LiveDelivery.disableIfInitialized() }
+    @Volatile private var context: Context? = null
+    private var lastRebind = Long.MIN_VALUE
+    @Volatile var listenerKnown = false; private set
+    fun initialize(app: Context) {
+        context = app.applicationContext
+        val controls = OwnerControlRuntime.get(app)
+        if (!app.notificationAccessGranted()) { disable(); return }
+        if (controls.capture) session.setEnabled(true)
+    }
+    fun enable(app: Context): Boolean {
+        context = app.applicationContext
+        if (!app.notificationAccessGranted()) { disable(); return false }
+        if (!OwnerControlRuntime.get(app).set(capture = true)) { disable(); return false }
+        session.setEnabled(true)
+        requestRecovery(app)
+        LiveDelivery.get(app).ensureRecovery()
+        return true
+    }
+    fun connected(app: Context) {
+        initialize(app); listenerKnown = true; session.setConnected(true)
+        if (OwnerControlRuntime.get(app).capture && app.notificationAccessGranted()) session.setEnabled(true)
+    }
+    fun disconnected(app: Context) {
+        context = app.applicationContext
+        listenerKnown = true; session.setConnected(false); scheduleExpiry()
+        if (!app.notificationAccessGranted()) disable() else requestRecovery(app)
+    }
+    fun requestRecovery(app: Context) {
+        val controls = OwnerControlRuntime.get(app)
+        if (!controls.capture || !app.notificationAccessGranted() || session.snapshot().connected) return
+        val attempt = Runnable {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (OwnerControlRuntime.get(app).capture && app.notificationAccessGranted() && !session.snapshot().connected &&
+                (lastRebind == Long.MIN_VALUE || now - lastRebind >= 30_000)) {
+                lastRebind = now
+                try { NotificationListenerService.requestRebind(ComponentName(app, TngNotificationListener::class.java)) }
+                catch (_: RuntimeException) { /* Health remains disconnected; periodic recovery can try again. */ }
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) attempt.run() else handler.post(attempt)
+    }
+    fun disable(app: Context? = context) {
+        app?.applicationContext?.let {
+            context = it
+            OwnerControlRuntime.get(it).set(capture = false, delivery = false)
+        }
+        session.setEnabled(false); handler.removeCallbacks(expiry); LiveDelivery.disableIfInitialized()
+    }
 }
 
 class TngNotificationListener : NotificationListenerService() {
-    override fun onListenerConnected() { ProbeRuntime.session.setConnected(true); LiveDelivery.get(this) }
+    override fun onListenerConnected() { ProbeRuntime.connected(this); LiveDelivery.get(this).reconcile() }
     override fun onListenerDisconnected() {
-        ProbeRuntime.session.setConnected(false); LiveDelivery.get(this).disable(); ProbeRuntime.scheduleExpiry()
+        ProbeRuntime.disconnected(this)
     }
     override fun onDestroy() {
-        ProbeRuntime.session.setConnected(false); LiveDelivery.get(this).disable(); ProbeRuntime.scheduleExpiry()
+        ProbeRuntime.disconnected(this)
         super.onDestroy()
     }
 
