@@ -19,6 +19,40 @@ import java.util.concurrent.TimeUnit
 class LiveDeliveryRecoveryTest {
     private val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
     @org.junit.After fun cleanup() { executor.shutdownNow() }
+    @Test fun `capture only stop cancels periodic recovery even when delivery was already disabled`() {
+        resetBridgeProcess()
+        val app = RuntimeEnvironment.getApplication()
+        WorkManagerTestInitHelper.initializeTestWorkManager(app, androidx.work.Configuration.Builder().setExecutor(executor).build())
+        grantAccess(app)
+        OwnerControlRuntime.get(app).set(capture = true, delivery = false)
+        val delivery = LiveDelivery.get(app)
+        assertTrue(delivery.awaitReady())
+        val manager = WorkManager.getInstance(app)
+        fun recovery() = manager.getWorkInfosForUniqueWork("kaipay-experimental-recovery").get(5, TimeUnit.SECONDS).single()
+        fun drainControls() {
+            val drained = CountDownLatch(1)
+            (LiveDelivery::class.java.getDeclaredField("dispatcher").apply { isAccessible = true }.get(delivery) as DeliveryDispatcher)
+                .control { drained.countDown() }
+            assertTrue(drained.await(5, TimeUnit.SECONDS))
+        }
+        val scheduledId = recovery().id
+        assertFalse(recovery().state.isFinished)
+        // Disabling delivery alone must retain the capture owner's existing recovery work.
+        delivery.disable()
+        drainControls()
+        assertEquals(scheduledId, recovery().id)
+        assertFalse(recovery().state.isFinished)
+        val rebinds = org.robolectric.shadows.ShadowNotificationListenerService.getRebindRequestCount()
+        ProbeRuntime.disable(app)
+        drainControls()
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertFalse(OwnerControls(app.noBackupFilesDir).capture)
+        assertFalse(OwnerControls(app.noBackupFilesDir).delivery)
+        assertFalse(ProbeRuntime.session.snapshot().enabled)
+        assertEquals(scheduledId, recovery().id)
+        assertEquals(androidx.work.WorkInfo.State.CANCELLED, recovery().state)
+        assertEquals(rebinds, org.robolectric.shadows.ShadowNotificationListenerService.getRebindRequestCount())
+    }
     @Test fun `cold bootstrap requests bounded recovery only for saved capture with current access`() {
         resetBridgeProcess()
         val app = RuntimeEnvironment.getApplication()

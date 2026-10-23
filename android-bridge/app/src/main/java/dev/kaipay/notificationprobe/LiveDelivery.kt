@@ -102,7 +102,11 @@ internal class LiveDelivery private constructor(private val app: Application) {
         // An overlapping enable cannot publish a newer durable opt-in midway through a completed stop.
         val durableDisable = OwnerControlRuntime.get(app).set(delivery = false)
         if (!durableDisable) localError = "Owner control persistence failed; delivery disabled; reprovision required"
-        if (!consent && (ready && !store.enabled || !ready && generation != 0L)) return@synchronized
+        if (!consent && (ready && !store.enabled || !ready && generation != 0L)) {
+            // Capture-only recovery can remain scheduled even though delivery was already off.
+            if (ready) control { ensureRecovery() }
+            return@synchronized
+        }
         val cancelScheduled = ready
         consent = false; generation++
         try {
