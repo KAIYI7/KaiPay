@@ -437,6 +437,8 @@ The [merchant webhook contract](docs/webhooks.md) covers signed lifecycle notifi
 
 The [simulated authorization reconciliation contract](docs/reconciliation.md) describes bounded manual comparison of durable simulator outcomes with payment evidence, immutable reports and read-only merchant/admin visibility. Reconciliation never changes financial records; capture/refund accounting and real bank clearing are outside its assessed scope.
 
+The [internal accounting consistency audit](docs/internal-accounting-audit.md) provides a bounded, standalone read-only operator report of capture/refund source relationships, journal balance, ownership and currency. It creates no persistent reports or HTTP surface and does not assess fee policy, provider outcomes or bank settlement.
+
 For implementation reviews, event contracts, accounting models, and engineering tradeoffs, refer to the public documents in [`docs/`](docs/):
 
 | Document | Description |
