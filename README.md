@@ -263,35 +263,47 @@ FINAL LIFECYCLE RECONCILIATION
 
 ## 7. Visual Portfolio Assets
 
-These committed screenshots show an **earlier local simulation**, before current authentication, role separation, MYR labels, diagnostic privacy and webhook/reconciliation pages. USD values, phase labels, combined navigation, payload/exception displays and topic captions are historical, not the current contract. Current new activity uses MYR. No private demonstration screenshots or credentials are included; use the [current local walkthrough](docs/local-demo.md) for role-specific behavior.
+Fresh browser captures of the real local application at source revision [446fd76](https://github.com/KAIYI7/KaiPay/commit/446fd763cc0fb6c0cca2a6fdf0da81b2c01c2b3f), using a consistent 1440 × 1100 viewport. All identities, identifiers and financial data are disposable synthetic examples. Merchant transactions below were executed through authenticated application APIs; the reconciliation mismatch is a separate, deliberately constructed fixture. No interface content or financial results were altered for the images. Hosting remains postponed and external webhook dispatch remains disabled. See the [local walkthrough](docs/local-demo.md).
 
-### 7.1. Financial Analytics & Operational Telemetry Dashboard
+### 7.1. Merchant MYR Dashboard
 ![KaiPay Financial Overview Dashboard](docs/screenshots/dashboard.png)
-*Historical dashboard: synthetic balance, volume, fees and recent payments. Current merchants see their assigned context; operator diagnostics use a separate role. The balance is a ledger projection, with no payout facility.*
+*Five application-created synthetic payments in the assigned merchant workspace. Two captures and a partial refund produce RM164.37 merchant balance, RM209.90 captured volume, RM5.53 net fees and RM40.00 refunds. These are simulated ledger projections, with no payout facility.*
 
 ---
 
 ### 7.2. Payment State Machine & Lifecycle Management
 ![KaiPay Payment Lifecycle & Idempotency Stepper](docs/screenshots/payment-details.png)
-*Historical lifecycle view: creation, authorization, capture and partial refund, plus stored request identity and refund history. Authorization is simulated and capture records local accounting; neither is bank settlement.*
+*An actual local application flow: RM120.00 simulated authorization and capture, followed by a completed RM40.00 partial refund with RM80.00 remaining. The displayed customer UUID, request key and simulator reference are synthetic. Capture/refund records local accounting, not bank settlement.*
 
 ---
 
 ### 7.3. Double-Entry Financial Ledger & Balanced Journals
 ![KaiPay Double-Entry Ledger Explorer](docs/screenshots/double-entry-ledger.png)
-*Historical ledger explorer: capture/refund journals and balance projections. Journal balance is one invariant, separate from the operator accounting consistency audit.*
+*The RM40.00 refund journal from that flow: RM38.84 merchant-liability debit plus RM1.16 fee-revenue debit equals RM40.00 customer-receivable credit. The journal balances; this view is separate from the operator-only accounting consistency audit.*
 
 ---
 
 ### 7.4. Transactional Outbox Stream Monitor
 ![KaiPay Transactional Outbox Buffer Monitor](docs/screenshots/outbox-stream.png)
-*Historical outbox monitor. Current ADMIN views expose pending, published and quarantined status with retry timing; raw payloads and error details are omitted. Row locks are coordinated by the backend, not visualized here.*
+*Separate ADMIN diagnostics show eight published initiation, capture and refund events from the synthetic application operations. Raw payloads and error details are omitted. Publication is asynchronous and may duplicate; the screenshot does not establish exactly-once delivery or throughput.*
 
 ---
 
 ### 7.5. Dead Letter Topic (DLT) & Poison Pill Graveyard
 ![KaiPay Dead Letter Topic Explorer](docs/screenshots/dlt-explorer.png)
-*Historical DLT inspector. Current ADMIN views retain transport metadata and validated correlation IDs while omitting payloads and exception details. DLT evidence does not itself change payment state or offer replay.*
+*One real local diagnostic from the RM6,666.00 definitive-no-acceptance simulator scenario. The application finalized `FAILED` before diagnostic DLT routing; the DLT itself did not change payment state. Browser payload/exception omissions remain visible. No replay action is offered.*
+
+---
+
+### 7.6. Authorization Reconciliation — Constructed Mismatch
+![Stored authorization report showing a constructed synthetic request mismatch](docs/screenshots/reconciliation.png)
+*A separate merchant named “Synthetic Mismatch Fixture” contains a deliberately inserted RM50.01 payment versus RM50.00 simulator request, with no initiation event. The actual operator CLI produced this stored `REQUEST_MISMATCH` report; the UI displays its evidence without repair. This fixture illustrates detection, not a failure observed in the application-created payments or a capture/refund accounting assessment.*
+
+---
+
+### 7.7. Webhooks — Unenrolled Delivery History
+![Merchant webhook page with no enrolled endpoint and empty delivery history](docs/screenshots/webhooks.png)
+*The real merchant view shows no enrolled endpoint, no historical backfill and an empty delivery history. Runtime dispatch was separately verified disabled, with zero endpoints, deliveries or attempts. This image demonstrates the unenrolled view, not successful webhook delivery.*
 
 ---
 
@@ -432,7 +444,7 @@ KaiPay/
 │   ├── double-entry-ledger.md           # Accounting proofs and balance projections
 │   ├── engineering-benchmark.md         # Architectural tradeoffs and improvement proposals
 │   ├── engineering-journal-...md        # Engineering post-mortem & distributed systems lessons
-│   └── screenshots/                     # Historical local simulation UI screenshots
+│   └── screenshots/                     # Current synthetic merchant/admin browser captures
 ├── .env.example                         # Environment variable configuration template
 ├── .gitignore                           # Git hygiene configuration
 └── LICENSE                              # MIT License
