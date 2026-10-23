@@ -46,7 +46,7 @@ final class BridgeFilter implements Filter {
             boolean canonical = path.equals("/api/state") || path.equals("/api/requests") || path.equals("/api/observations") || path.equals("/api/notification-candidates")
                     || path.matches("/api/notification-candidates/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/invalidate")
                     || path.matches("/api/observations/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resolve")
-                    || path.matches("/api/requests/" + UUID_PATH + "/(?:verify|confirm|payer-access)");
+                    || path.matches("/api/requests/" + UUID_PATH + "/(?:verify|confirm|payer-access|payer-revoke)");
             // Reject encoded/matrix paths before MVC normalizes them: roles use the same canonical route.
             if (!canonical) { error(response, 404, "NOT_FOUND"); return; }
             if (path.startsWith("/api/notification-candidates") && access.deviceId == null) { error(response, 404, "LIVE_DELIVERY_DISABLED"); return; }

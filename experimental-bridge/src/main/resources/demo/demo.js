@@ -35,7 +35,7 @@ async function api(path, body, role = 'receiver') {
     const result = await fetch(path, {method: body === undefined ? 'GET' : 'POST', credentials: 'omit', cache: 'no-store', redirect: 'error', signal: attempt.signal,
       headers: {Authorization: 'Bearer ' + token, ...(body === undefined ? {} : {'Content-Type': 'application/json'})},
       body: body === undefined ? undefined : JSON.stringify(body)});
-    const payload = await result.json();
+    const payload = result.status === 204 ? null : await result.json();
     ensureCurrent(epoch);
     if (!result.ok) throw Error(payload.error || 'Request failed. Check credentials and retry.');
     return payload;
@@ -57,7 +57,14 @@ function addPrivateLink(row, request) {
   input.readOnly = true;
   input.setAttribute('aria-label', 'Private payer checkout link for ' + request.id);
   input.addEventListener('focus', () => input.select());
-  box.append(link, input, element('p', 'Sensitive read-only link: anyone holding it can view this request. Share only with the intended private payer. Server restart invalidates it; generate another link if needed.', 'muted'));
+  const revoke = element('button', 'Revoke payer link', 'secondary');
+  revoke.onclick = () => run(async epoch => {
+    await api('/api/requests/' + request.id + '/payer-revoke', {});
+    ensureCurrent(epoch);
+    payerLinks.delete(request.id);
+    await refresh();
+  });
+  box.append(link, input, revoke, element('p', 'Sensitive read-only link: anyone holding it can view this request for up to 15 minutes. Reissuing, revoking or restarting the backend invalidates it. Share only with the intended payer.', 'muted'));
   row.append(box);
 }
 function render(state) {
@@ -79,13 +86,21 @@ function render(state) {
     if (request.status === 'EXPIRED' || request.status === 'REVIEW_EXPIRED') row.append(element('p', 'This request is unconfirmed and can no longer be verified or confirmed. Contact the payer to resolve any actual transfer. Do not request another payment automatically.'));
     if (request.paymentClosed && reviewAvailable) row.append(element('p', 'The payment window is closed. Review only the previously accepted candidate; it remains unverified until your independent check and explicit confirmation. Do not ask the payer to pay again.', 'notice'));
     if (evidenceCapacityReached && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status)) row.append(element('p', 'Evidence capacity is reached. Verification and confirmation are unavailable until explicit offline recovery.', 'notice'));
-    const linkButton = element('button', payerLinks.has(request.id) ? 'Show private payer link' : 'Get private payer link', 'secondary');
+    const linkButton = element('button', payerLinks.has(request.id) ? 'Replace payer link' : 'Get private payer link', 'secondary');
     linkButton.type = 'button';
     linkButton.onclick = () => run(async epoch => {
+      const configured = byId('payer-origin').value.trim();
+      let origin = location.origin;
+      if (configured) {
+        const remote = new URL(configured);
+        if (remote.protocol !== 'https:' || remote.username || remote.password || remote.pathname !== '/' || remote.search || remote.hash)
+          throw Error('Enter only the approved HTTPS payer gateway origin.');
+        origin = remote.origin;
+      }
       const access = await api('/api/requests/' + request.id + '/payer-access', {});
       ensureCurrent(epoch);
       if (access.requestId !== request.id || !/^[A-Za-z0-9_-]{43}$/.test(access.token)) throw Error('Invalid payer access response.');
-      payerLinks.set(request.id, location.origin + '/checkout#id=' + encodeURIComponent(request.id) + '&key=' + encodeURIComponent(access.token));
+      payerLinks.set(request.id, origin + '/checkout#id=' + encodeURIComponent(request.id) + '&key=' + encodeURIComponent(access.token));
       await refresh();
     });
     row.append(linkButton);
@@ -197,6 +212,7 @@ function clearSession() {
   controller.abort();
   controller = new AbortController();
   payerLinks.clear();
+  byId('payer-origin').value = '';
   pendingConfirmations.clear();
   lastRendered = '';
   byId('receiver').value = '';

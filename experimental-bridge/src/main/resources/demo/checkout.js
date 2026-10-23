@@ -124,7 +124,7 @@
   byId('retry').onclick = refresh;
   byId('forget').onclick = clear;
   window.addEventListener('pagehide', clear);
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId || '') || !/^[A-Za-z0-9_-]{43}$/.test(key || '')) {
+  if ((location.protocol !== 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId || '') || !/^[A-Za-z0-9_-]{43}$/.test(key || '')) {
     key = null; requestId = null; cleared = true;
     byId('checkout-reference').textContent = 'Private link required';
     unavailable('Open your private checkout link', 'Use the complete payer link supplied by the receiver. Reloading clears this tab\'s private access.');

@@ -46,11 +46,14 @@ class BridgeConfiguration {
 
 final class BridgeAccess {
     final boolean enabled;
-    final PayerTokens payers = new PayerTokens();
+    final PayerTokens payers;
     private final byte[] device, receiver, liveDevice;
     final java.util.UUID deviceId;
 
-    BridgeAccess(Environment env) {
+    BridgeAccess(Environment env) { this(env, new PayerTokens()); }
+
+    BridgeAccess(Environment env, PayerTokens payers) {
+        this.payers = java.util.Objects.requireNonNull(payers);
         enabled = env.getProperty("bridge.enabled", Boolean.class, false);
         if (!enabled) { device = new byte[0]; receiver = new byte[0]; liveDevice = new byte[0]; deviceId = null; return; }
         String deviceToken = env.getProperty("bridge.device-token", "");
@@ -58,9 +61,8 @@ final class BridgeAccess {
         if (!deviceToken.matches("[A-Za-z0-9_-]{32,256}") || !receiverToken.matches("[A-Za-z0-9_-]{32,256}") || deviceToken.equals(receiverToken))
             throw new IllegalStateException("Distinct experimental credentials of 32 to 256 URL-safe characters required");
         try {
-            if (!InetAddress.getByName(env.getRequiredProperty("server.address")).isLoopbackAddress()
-                    && !env.getProperty("server.ssl.enabled", Boolean.class, false))
-                throw new IllegalStateException("TLS required outside loopback");
+            if (!InetAddress.getByName(env.getRequiredProperty("server.address")).isLoopbackAddress())
+                throw new IllegalStateException("Experimental backend must bind to loopback");
         } catch (java.net.UnknownHostException ignored) { throw new IllegalStateException("Explicit experimental bind address required"); }
         if (!"NONE".equalsIgnoreCase(env.getProperty("server.forward-headers-strategy", "")))
             throw new IllegalStateException("Forwarded headers must remain disabled");

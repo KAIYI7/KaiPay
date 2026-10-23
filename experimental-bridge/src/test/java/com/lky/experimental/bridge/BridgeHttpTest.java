@@ -135,7 +135,7 @@ class BridgeHttpTest {
             assertThatThrownBy(() -> new BridgeAccess(environment().withProperty("bridge.device-token", token))).isInstanceOf(IllegalStateException.class);
         }
         assertThatThrownBy(() -> new BridgeAccess(environment().withProperty("bridge.receiver-token", DEVICE))).isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> new BridgeAccess(environment().withProperty("server.address", "0.0.0.0"))).hasMessage("TLS required outside loopback");
+        assertThatThrownBy(() -> new BridgeAccess(environment().withProperty("server.address", "0.0.0.0"))).hasMessage("Experimental backend must bind to loopback");
         assertThatThrownBy(() -> new BridgeAccess(environment().withProperty("server.forward-headers-strategy", "NATIVE"))).hasMessage("Forwarded headers must remain disabled");
     }
 }

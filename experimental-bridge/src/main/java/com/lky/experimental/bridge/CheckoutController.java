@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.http.HttpStatus;
 
 @RestController @ConditionalOnProperty(name = "bridge.enabled", havingValue = "true")
 class CheckoutController {
@@ -24,6 +26,12 @@ class CheckoutController {
     @PostMapping("/api/requests/{id}/payer-access") PayerLink issue(@PathVariable UUID id) {
         service.checkout(id); // Never issue access to nonexistent requests; receiver authentication is enforced by the filter.
         return new PayerLink(id, access.payers.issue(id));
+    }
+
+    @PostMapping("/api/requests/{id}/payer-revoke") @ResponseStatus(HttpStatus.NO_CONTENT)
+    void revoke(@PathVariable UUID id) {
+        service.checkout(id);
+        access.payers.revoke(id);
     }
 
     @GetMapping("/api/checkout/{id}") Checkout checkout(@PathVariable UUID id) { return service.checkout(id); }
