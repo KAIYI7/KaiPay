@@ -75,11 +75,11 @@ export const DashboardPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-bold text-slate-100 tracking-tight">Merchant Financial Dashboard</h1>
             <span className="text-[10px] font-mono uppercase bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 px-2 py-0.5 rounded-full font-semibold">
-              Live Hub
+              Merchant view
             </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Real-time double-entry ledger projections, transaction stream, and event-driven architecture telemetry for{' '}
+            Simulated MYR ledger projections and recent payment records for{' '}
             <span className="text-emerald-400 font-semibold">{activeMerchant.name}</span>
           </p>
         </div>
@@ -136,7 +136,7 @@ export const DashboardPage: React.FC = () => {
           <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-950/80 border border-slate-800 p-3 rounded-lg self-start lg:self-auto">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>
-              All transactions & balances strictly isolated via <code className="text-emerald-300 font-mono">X-Merchant-Id</code>.
+              Server-checked membership scopes <code className="text-emerald-300 font-mono">X-Merchant-Id</code>.
             </span>
           </div>
         </div>
@@ -147,7 +147,7 @@ export const DashboardPage: React.FC = () => {
         {/* 1. Available Payout Balance */}
         <Card className="relative overflow-hidden border-emerald-500/30 bg-gradient-to-b from-emerald-950/25 via-slate-800/90 to-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Available Payout Balance (MYR only)</span>
+            <span>Merchant Balance (MYR only)</span>
             <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
               <Wallet className="w-4 h-4" />
             </div>
@@ -166,7 +166,7 @@ export const DashboardPage: React.FC = () => {
                 {formatCentsToCurrency(balance?.availableBalanceCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                Net merchant settlement funds available for payout
+                Simulated ledger balance; no payout facility
               </p>
             </div>
           )}

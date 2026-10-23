@@ -27,7 +27,7 @@ export const Sidebar: React.FC = () => {
         {/* Payment Core Navigation */}
         <div>
           <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
-            Payment Core (Phase 3)
+            {isMerchant ? 'Merchant workspace' : 'Operator diagnostics'}
           </div>
           <nav className="space-y-1">
             {paymentCoreItems.map((item) => {
@@ -52,10 +52,10 @@ export const Sidebar: React.FC = () => {
           </nav>
         </div>
 
-        {/* Financial Core (Phase 4) Navigation */}
+        {/* Accounting and report navigation */}
         <div>
           <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
-            Financial Core (Phase 4)
+            Accounting & reports
           </div>
           <nav className="space-y-1">
             {financialCoreItems.map((item) => {
@@ -82,8 +82,8 @@ export const Sidebar: React.FC = () => {
       </div>
 
       <div className="p-3 bg-slate-800/40 border border-slate-800 rounded-xl">
-        <div className="text-xs font-semibold text-slate-300">Backend Port: 28080</div>
-        <div className="text-[11px] text-slate-500 mt-0.5">PostgreSQL: 25432 (Isolated)</div>
+        <div className="text-xs font-semibold text-slate-300">Simulated payments</div>
+        <div className="text-[11px] text-slate-500 mt-0.5">No real money movement</div>
       </div>
     </aside>
   );

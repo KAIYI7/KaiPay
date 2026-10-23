@@ -19,8 +19,8 @@ function journal(currencies = ['USD', 'USD']): Journal {
       accountType: 'ASSET', entryType: index === 0 ? 'DEBIT' : 'CREDIT', amountCents: 1050, currency })),
   };
 }
-function mount(value: Journal) {
-  vi.spyOn(ledgerApi, 'listJournals').mockResolvedValue({ content: [value], totalElements: 1, totalPages: 1, size: 10, number: 0, first: true, last: true, empty: false });
+function mount(value?: Journal) {
+  vi.spyOn(ledgerApi, 'listJournals').mockResolvedValue({ content: value ? [value] : [], totalElements: value ? 1 : 0, totalPages: value ? 1 : 0, size: 10, number: 0, first: true, last: true, empty: !value });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
   render(<QueryClientProvider client={client}><MerchantProvider memberships={DEV_MERCHANTS}>
@@ -29,6 +29,12 @@ function mount(value: Journal) {
 }
 
 describe('ledger currency displays', () => {
+  it('keeps the operator empty state out of merchant payment routes', async () => {
+    mount();
+    await screen.findByText('No financial journals found');
+    expect(screen.queryByRole('link', { name: 'Go to Payments Explorer' })).toBeNull();
+  });
+
   it('keeps historical USD totals and the balancing difference in USD', async () => {
     mount(journal());
     await screen.findByText('J-HISTORICAL');

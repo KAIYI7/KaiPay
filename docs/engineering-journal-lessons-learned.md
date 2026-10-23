@@ -1,122 +1,43 @@
-# KaiPay Engineering Journal & Distributed Systems Lessons Learned
+# KaiPay engineering journal: distributed systems lessons
 
-This document captures deep technical reflections, architectural trade-offs, concurrency race conditions, and distributed systems lessons learned during the design and implementation of KaiPay.
+These lessons explain implemented choices and their limits. KaiPay processes simulated MYR payments; references to provider outcomes below mean the local durable simulator, not a bank integration.
 
----
+## 1. Anchor publication intent in the business transaction
 
-## 1. The Distributed Dual-Write Problem
+Writing a payment and publishing Kafka directly are separate commits. Publishing before the database commits can produce a message for rolled-back state; publishing only after commit leaves a crash window with no recorded dispatch intent.
 
-### The Trap
-A common architectural anti-pattern in distributed payment microservices is writing to the database and publishing to the message broker in immediate succession:
+[PaymentService](../backend/src/main/java/com/lky/kaipay/payment/service/PaymentService.java) writes the payment, idempotency response and outbox envelope in one transaction. Capture/refund likewise commit their state, journal and notification together. A later [poller](../backend/src/main/java/com/lky/kaipay/outbox/service/OutboxEventPublisher.java) publishes the outbox record. This preserves publication intent; it does not ensure eventual delivery under every failure.
 
-```java
-// ANTI-PATTERN: Prone to silent data loss or phantom events!
-@Transactional
-public void processPayment(PaymentRequest req) {
-    Payment payment = paymentRepository.save(new Payment(...)); // (1) DB Write
-    kafkaTemplate.send("payment.requests", payment.getId(), payment); // (2) Broker Write
-} // (3) DB Commit
-```
+## 2. Row claiming helps concurrency but does not promise FIFO
 
-### Failure Modes:
-1. **Case A (Broker Failure)**: If the Kafka cluster times out or is unreachable in step (2), the method throws an exception and rolls back step (1). The payment was not created, but the client received an error.
-2. **Case B (Crash Before DB Commit)**: If step (2) succeeds, but the application server crashes or loses database connectivity before step (3) commits, Kafka emits an event for a payment that **never existed in the database** (Ghost Event).
-3. **Case C (Publish After Commit)**: If message publishing is placed in a Spring `@TransactionalEventListener(phase = AFTER_COMMIT)` and the JVM crashes immediately after DB commit, the payment exists in the database but **no Kafka event is ever published**, causing a stuck payment.
+The [outbox query](../backend/src/main/java/com/lky/kaipay/outbox/repository/PaymentEventOutboxRepository.java) selects due PENDING rows with `FOR UPDATE SKIP LOCKED`, ordered by `COALESCE(next_attempt_at, created_at), created_at, id`. Competing workers skip claimed rows instead of waiting for those row locks. Other lock, database and broker contention can still occur.
 
-### The KaiPay Solution: Transactional Outbox Pattern
-KaiPay writes the `Payment` aggregate and an outbox event envelope into `payment_events_outbox` in the **exact same ACID database transaction**. An asynchronous poller with `SELECT ... FOR UPDATE SKIP LOCKED` claims and publishes events to Kafka with retry tracking.
+Retry due times and skipped locks allow later records to overtake earlier ones. There is no global FIFO guarantee. The [V6 partial index](../backend/src/main/resources/db/migration/V6__add_outbox_retry_scheduling.sql) supports this query without retaining published rows in that index; query plans and performance still depend on actual data and workload. No million-row throughput measurement is claimed.
 
----
+The publisher waits sequentially for broker results inside its transaction. If Kafka accepts an event but the transaction fails before publication status commits, a later poll can publish it again. Consumer correctness must tolerate that duplicate.
 
-## 2. Multi-Worker Outbox Polling with `FOR UPDATE SKIP LOCKED`
+## 3. A consumption marker cannot close every authorization crash window
 
-### The Problem
-When scaling out the backend service across multiple instances, multiple outbox poller threads run concurrently. Standard `SELECT ... WHERE status = 'PENDING' FOR UPDATE` causes severe lock contention: all workers attempt to lock the first row, resulting in thread blocking, serialization bottlenecks, and deadlocks.
+A marker written after authorization prevents repeat processing after finalization. It cannot, by itself, reveal what happened if the process stopped after a provider accepted but before local finalization.
 
-### The Solution
-PostgreSQL's `SKIP LOCKED` clause allows worker threads to bypass rows locked by another transaction:
+[AuthorizationRecoveryService](../backend/src/main/java/com/lky/kaipay/payment/service/AuthorizationRecoveryService.java) first commits PROCESSING together with a durable intent. The [simulator](../backend/src/main/java/com/lky/kaipay/payment/service/acquirer/SimulatedAuthorizationTransactionService.java) commits its evaluation separately. Finalization then validates that retained result and commits payment state, marker and any enrolled webhook intent. A later valid delivery can reuse an existing result. Ambiguous historical PROCESSING records without intent are quarantined.
 
-```sql
-SELECT * FROM payment_events_outbox 
-WHERE status = 'PENDING' 
-ORDER BY created_at ASC 
-LIMIT :limit 
-FOR UPDATE SKIP LOCKED;
-```
+The simulator uses the same PostgreSQL database. This demonstrates restart recovery across distinct local transaction boundaries, not external-bank exactly-once effects. Recovery is delivery-driven; there is no background sweep or DLT replay API.
 
-#### Key Lessons Learned:
-- **Zero Lock Contention**: Each worker thread claims an exclusive, non-overlapping batch of pending events.
-- **Ordered Drain**: `ORDER BY created_at ASC` guarantees chronological FIFO event processing per batch.
-- **Partial Index Optimization**: `CREATE INDEX idx_outbox_pending ON payment_events_outbox (created_at ASC) WHERE status = 'PENDING';` prevents full table scans as published records grow into millions.
+## 4. Retry isolation trades ordering for progress
 
----
+The [consumer](../backend/src/main/java/com/lky/kaipay/payment/consumer/PaymentProcessingConsumer.java) moves retryable failures to retry topics with backoff. Later main-topic records can progress without waiting for that backoff, as exercised by the [partition integration test](../backend/src/test/java/com/lky/kaipay/payment/consumer/PaymentHeadOfLinePartitionIntegrationTest.java). Processing and infrastructure still take time; this is not a zero-latency guarantee.
 
-## 3. Kafka At-Least-Once Delivery & Consumer Crash Windows
+DLT routing records a diagnostic failure. It does not decide that authorization was declined or rejected. The RM7,777.00 timeout scenario remains PROCESSING after exhaustion; only a retained definitive rejection can finalize FAILED. See [failure handling](failure-handling-and-retries.md).
 
-### The Problem
-In distributed streaming with Kafka, **exactly-once delivery does not exist across external network boundaries**. Even with Kafka transactional producers (`read_committed`), external side-effects (like calling a third-party bank acquirer REST API) cannot be enrolled in a Kafka or database transaction.
+## 5. Integer storage and balanced journals need precise qualifications
 
-```
-Timeline of a Crash Window:
-[Step 1: Receive Kafka Message]
-          |
-[Step 2: Transition DB state to PROCESSING]
-          |
-[Step 3: Call Bank Acquirer API (Charge $100.00)]  <-- Money moves at the bank!
-          |
-     💥 JVM / POD CRASHES HERE 💥
-          |
-[Step 4: Commit DB state to AUTHORIZED] (NEVER REACHED)
-[Step 5: Commit Kafka Offset]            (NEVER REACHED)
-```
+New financial activity uses MYR integer minor units: 100 sen = RM1.00. [LedgerService](../backend/src/main/java/com/lky/kaipay/ledger/service/LedgerService.java) validates positive lines, compatible currency and balanced debit/credit totals before saving. Capture uses a rounded 2.9% plus 30-sen fee capped at gross; refund reverses the rounded percentage component. Fee calculation still has explicit rounding, so integer storage alone is not proof against every numeric error.
 
-Upon restart, Kafka consumer group rebalances and **redelivers the exact same message**. If the consumer naively executes the method again, the customer will be charged twice ($200.00).
+Refunds lock the parent payment before checking the remaining refundable amount. Journals and entries preserve application history rather than updating a balance scalar. This does not make records tamper-proof against privileged database modification or imply bank settlement. See the [ledger guide](double-entry-ledger.md).
 
-### The KaiPay Solution: Two-Phase Consumer State Machine & Atomic Deduplication
-1. **Observable Intermediate State**: Step 2 transitions payment status to `PROCESSING` and commits immediately in its own transaction (Tx 1).
-2. **External Gateway Call**: Step 3 executes outside of any database transaction, preventing idle database connection pool exhaustion during gateway latency spikes.
-3. **Atomic Final State & Deduplication**: Step 4 records the final status (`AUTHORIZED` / `DECLINED`) and inserts a row into `consumed_events` keyed by `(event_id, consumer_group)` in a single database transaction (Tx 2).
-4. **Idempotent Pre-Check**: Upon redelivery after a crash, the pre-check query detects that `consumed_events` contains `eventId` or that the payment is already in `AUTHORIZED` status, skipping the external acquirer call and acknowledging the offset immediately.
+## 6. Separate transport, authorization and accounting evidence
 
----
+Kafka acknowledgment, DLT and webhook delivery are transport evidence. [Authorization reconciliation](reconciliation.md) compares retained simulator outcomes with payment authorization evidence and stores bounded observations. [Internal accounting audit](internal-accounting-audit.md) checks retained capture/refund/journal relationships through a transient read-only operator CLI. Neither executes financial repair or certifies closed-period completeness.
 
-## 4. Head-of-Line (HoL) Blocking Elimination
-
-### The Problem
-In sequential partition processing, if message offset $N$ encounters a temporary network timeout when contacting the bank acquirer, retrying in-place (e.g. `Thread.sleep(5000)`) blocks all subsequent messages on that partition (offsets $N+1$, $N+2$, ...), even if they belong to unrelated merchants whose acquirers are fully operational.
-
-### The Solution: Non-Blocking Retries (`@RetryableTopic`)
-KaiPay routes retryable exceptions (`GatewayTimeoutException`, `GatewayUnavailableException`) to a dedicated retry topic (`kaipay.payment.requests-retry`) using Spring Kafka's `@RetryableTopic`.
-- The main partition offset is acknowledged immediately.
-- Unrelated messages on the main partition continue processing at full wire speed.
-- The retry topic consumes with an exponential backoff schedule (1s, 2s) without impacting main traffic.
-
----
-
-## 5. Financial Ledger Invariants & Real-Time Projections
-
-### The Trap of Mutable Balance Columns
-Many naive payment schemas store a mutable column like `merchants.balance_cents = 50000` and execute `UPDATE merchants SET balance_cents = balance_cents + :amount`.
-
-#### Why This Fails in Production:
-1. **Race Conditions**: Concurrent transactions overwrite each other's balance updates (lost update anomaly).
-2. **Zero Audit Trail**: It is impossible to prove to financial auditors *how* or *why* a balance changed from $500.00 to $450.00 without a complete, immutable journal log.
-3. **Floating Point Rounding**: Storing fractional currency in floating point types (`FLOAT`, `DOUBLE`) introduces catastrophic binary rounding errors ($0.1 + 0.2 \neq 0.3$).
-
-### The KaiPay Solution: Double-Entry Ledger & Integer Cents
-1. **Integer Cents Only**: All monetary values are strictly represented as `BIGINT` integer cents (e.g. $100.00 USD is stored as `10000L`).
-2. **Mathematical Invariant**: Every `Journal` requires $\sum \text{Debits} = \sum \text{Credits}$. The database constraint `amount_cents > 0` prevents negative entry corruptions.
-3. **Real-Time Projection**: Balances are calculated by aggregating immutable debit and credit entries using optimized SQL projections.
-
----
-
-## 6. Summary of Architectural Guarantees
-
-| Invariant / Quality Attribute | Architecture Mechanism | Guarantee Provided |
-| :--- | :--- | :--- |
-| **No Lost Events** | Transactional Outbox Pattern | Outbox entries commit atomically with payment entities; poller ensures delivery. |
-| **Zero Duplicate Charges** | Two-Phase State Guard + `consumed_events` | Redelivered Kafka messages skip bank acquirer calls. |
-| **No Partition Stalls** | `@RetryableTopic` Non-Blocking Retries | Transient failures are isolated to retry topics; main topic retains low latency. |
-| **Mathematical Ledger Balance** | Double-Entry Journals + Invariant Check | $\sum \text{Debits} - \sum \text{Credits} = 0$ strictly enforced on every financial entry. |
-| **Safe Concurrent Refunds** | Pessimistic Locking (`SELECT ... FOR UPDATE`) | Concurrent partial refund requests cannot over-refund a payment. |
-| **Multi-Tenant Isolation** | Scoped Unique Indexes & API Key Hashes | Tenants cannot access or corrupt other merchants' customers, payments, or ledgers. |
+Individual server sessions, CSRF, merchant memberships and resource ownership enforce browser access; old merchant API-key schema fields do not authenticate browser operations. See [security](security.md). Webhook infrastructure is implemented, but [external delivery remains disabled](webhooks.md). Local demonstrations and tests establish the scenarios observed, without a production availability or compliance claim.

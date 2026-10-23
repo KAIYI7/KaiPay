@@ -21,9 +21,9 @@ export const StateMachineStepper: React.FC<StateMachineStepperProps> = ({
 
   const steps: { key: PaymentStatus; label: string; description: string }[] = [
     { key: 'CREATED', label: '1. Created', description: 'Idempotency verified & stored' },
-    { key: 'PROCESSING', label: '2. Processing', description: 'Dispatched to Kafka worker' },
-    { key: 'AUTHORIZED', label: '3. Authorized', description: 'Acquirer hold granted' },
-    { key: 'CAPTURED', label: '4. Captured', description: 'Settled to ledger' },
+    { key: 'PROCESSING', label: '2. Processing', description: 'Simulated authorization pending' },
+    { key: 'AUTHORIZED', label: '3. Authorized', description: 'Simulator approval recorded' },
+    { key: 'CAPTURED', label: '4. Captured', description: 'Capture journal posted' },
   ];
 
   const getStepState = (_stepKey: PaymentStatus, index: number) => {
@@ -56,7 +56,7 @@ export const StateMachineStepper: React.FC<StateMachineStepperProps> = ({
             Payment State Machine Trajectory
           </h4>
           <p className="text-xs text-slate-500 mt-0.5">
-            Deterministic domain state machine enforced by Spring Data JPA entity
+            Simulated lifecycle; capture records local accounting, with no bank settlement
           </p>
         </div>
         <span className="text-xs font-mono bg-slate-800 text-emerald-400 px-2.5 py-1 rounded-md border border-slate-700">

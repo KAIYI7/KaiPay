@@ -1,209 +1,65 @@
-# KaiPay Failure Handling, Non-Blocking Retries & DLT Architecture
+# Failure handling, retries and authorization recovery
 
-In a distributed financial system, transient network glitches, bank partner outages, poison pills, and concurrent race conditions are inevitable. KaiPay is architected to guarantee that failures never result in silent message loss, duplicate customer charges, or head-of-line blocking on Kafka partitions.
+KaiPay uses durable local simulator evidence, retry topics and dead-letter diagnostics to handle bounded failure scenarios. It does not connect to a real acquirer or promise lossless delivery, zero latency or exactly-once external effects.
 
----
+## Durable authorization boundary
 
-## 1. Failure Classification Taxonomy
+The [consumer](../backend/src/main/java/com/lky/kaipay/payment/consumer/PaymentProcessingConsumer.java) handles initiation in three committed steps:
 
-KaiPay classifies all potential execution failures into five distinct categories:
+1. [Preparation](../backend/src/main/java/com/lky/kaipay/payment/service/AuthorizationRecoveryService.java) locks and validates the payment, creates its durable authorization intent and transitions CREATED to PROCESSING in one transaction.
+2. The [simulator transaction](../backend/src/main/java/com/lky/kaipay/payment/service/acquirer/SimulatedAuthorizationTransactionService.java) locks the retained operation, evaluates or reuses its definitive result and commits independently of payment finalization. The caller has no surrounding payment transaction; the simulator itself does use a short database transaction.
+3. Finalization validates the retained result and commits AUTHORIZED, DECLINED or definitive FAILED, the consumption marker and any enrolled webhook intent together. Only then does normal processing acknowledge Kafka.
 
-| Category | Typical Scenarios & Exceptions | Retry Policy | Terminal Action | Invariant / Target State |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Transient Network / Gateway Latency** | `GatewayTimeoutException`, `GatewayUnavailableException`, HTTP 503, Socket Timeout | **Retryable** (Exponential Backoff: 1s, 2s) | Retry up to 3 attempts via dedicated retry topic | Payment remains in `PROCESSING` during retry attempts |
-| **2. Non-Retryable Gateway / Fatal System Errors** | `NonRetryableGatewayException`, Invalid API credentials, 4xx Bad Request from Acquirer | **Non-Retryable** (Immediate Escalate) | Direct routing to DLT | Payment transitioned to `FAILED`, DLT row created |
-| **3. Business Gateway Declines** | Insufficient funds, expired card, fraud rule triggers, do not honor | **Non-Retryable** (Normal Domain Outcome) | Commit final state, acknowledge message | Payment transitioned to `DECLINED`, event logged in `consumed_events` |
-| **4. Unresolvable Poison Pills** | Malformed JSON, corrupted envelope, missing required fields (`paymentId`) | **Non-Retryable** (Immediate Quarantine) | Route directly to DLT, acknowledge offset | Raw payload saved in `dead_letter_events` |
-| **5. Transient Database Locking / Optimistic Lock** | `OptimisticLockingFailureException`, DB Connection Glitch | **Retryable** | Kafka retry mechanism redelivers | Re-evaluates state and succeeds on next attempt |
+The simulator and KaiPay share PostgreSQL. This is a durable simulation with a shared database failure boundary, not an independent provider or bank guarantee. The operation is keyed by payment ID and bound to merchant, amount, currency, namespace and contract version. Repeated deliveries may reevaluate an unresolved operation, but an existing definitive simulator result is reused.
 
-### 1.1. Deterministic Failure Simulation Triggers (`MockBankAcquirerClient`)
+## Deterministic synthetic scenarios
 
-To guarantee deterministic, automated end-to-end integration testing and interactive UI demonstration, `MockBankAcquirerClient` implements specific amount triggers:
+The [simulator model](../backend/src/main/java/com/lky/kaipay/payment/service/acquirer/SimulatedAuthorizationOperation.java) defines these MYR inputs. `amountCents` is the API's integer-sen field.
 
-| Trigger Amount | Amount in Cents | Simulated Behavior | Kafka / Consumer Lifecycle | Terminal Payment Status |
-| :--- | :--- | :--- | :--- | :--- |
-| **`$8,888.00`** | `888800L` | **Transient Gateway Timeout**: Throws `GatewayTimeoutException` on attempts 1 & 2; recovers and returns `APPROVED` on attempt 3. | Routed to `kaipay.payment.requests-retry` with exponential backoff (1s, 2s). Succeeds on retry attempt 3. | `AUTHORIZED` |
-| **`$7,777.00`** | `777700L` | **Persistent Gateway Timeout / Retry Exhaustion**: Throws `GatewayTimeoutException` continuously across all attempts. | Fails on main topic, fails on retry attempt 1, fails on retry attempt 2 $\to$ routed to `kaipay.payment.requests-dlt`. | `FAILED` (`DLT_ROUTED`) |
-| **`$6,666.00`** | `666600L` | **Fatal Non-Retryable Error**: Throws `NonRetryableGatewayException`. | Not included in `@RetryableTopic` include list $\to$ bypassed directly to `kaipay.payment.requests-dlt` without retries. | `FAILED` (`DLT_ROUTED`) |
-| **`$9,999.00`** | `999900L` | **Deterministic Business Decline**: Returns declined `AcquirerAuthorizationResult` with code `INSUFFICIENT_FUNDS`. | Evaluated as a valid domain business outcome. No Kafka exception thrown; offset acknowledged immediately. | `DECLINED` |
+| Input | Simulator behavior | Payment result |
+| --- | --- | --- |
+| RM8,888.00 (`888800`) | First two durable evaluations remain unresolved; third approves. | AUTHORIZED after successful retry/finalization. |
+| RM7,777.00 (`777700`) | Every evaluation remains unresolved and the caller reports timeout. | PROCESSING after retry exhaustion; DLT is diagnostic. |
+| RM6,666.00 (`666600`) | Commits REJECTED_NO_ACCEPTANCE. | FAILED with `SIMULATED_NO_ACCEPTANCE`, then diagnostic DLT routing. |
+| RM9,999.00 or more (`>=999900`) | Commits a business decline. | DECLINED; normal acknowledgment. |
+| Other positive supported amounts | Commits approval. | AUTHORIZED after finalization. |
 
----
+These triggers describe simulator evaluation, not transport timing guarantees. Use synthetic customers assigned to the authenticated merchant; no real funds move.
 
-## 2. Non-Blocking Retries vs. Head-of-Line Blocking
+## Retry topology and ordering
 
-### The Problem with Blocking Retries in Message Queues
-In traditional Kafka consumer configurations, retrying a transient failure using in-memory `Thread.sleep` or synchronous blocking loops causes **Head-of-Line (HoL) Blocking**:
-- Kafka guarantees partition offset ordering. If message at offset `100` fails and retries for 30 seconds, offsets `101` through `1000` on that same partition cannot be processed.
-- If 10 merchants share a partition and 1 merchant encounters an acquirer timeout, all 9 other merchants experience high latency.
+`@RetryableTopic` allows three total attempts with 1-second initial backoff and multiplier 2. It includes `GatewayTimeoutException`, `GatewayUnavailableException` and `AuthorizationPersistenceException`. Selected database/connection failures are wrapped as authorization persistence failures; not every database or programming error is retryable. Unsupported events and malformed initiation data take the fatal/DLT path.
 
-### The KaiPay Solution: Non-Blocking Multi-Topic Retries
-KaiPay uses Spring Kafka's non-blocking `@RetryableTopic` pattern:
-
-```
-[ Topic: kaipay.payment.requests ] (Main Topic)
-  |
-  +-- Message 1 (Success) -----> Authorized (Ack offset 0)
-  +-- Message 2 (Timeout) ------> Forward to [ kaipay.payment.requests-retry ] (Ack offset 1)
-  +-- Message 3 (Success) -----> Authorized (Ack offset 2)  <-- ZERO DELAY! No HoL blocking!
-  |
-[ Topic: kaipay.payment.requests-retry ] (Retry Topic)
-  |
-  +-- Retry 1 (Waits 1000ms backoff) --> Failed again
-  +-- Retry 2 (Waits 2000ms backoff) --> Failed again (Exhausted)
-  |
-  v
-[ Topic: kaipay.payment.requests-dlt ] (Dead Letter Topic)
-  |
-  v
-[@DltHandler in PaymentProcessingConsumer]
-  ├── Mark Payment status = 'FAILED' (failure_code='DLT_ROUTED')
-  ├── Persist audit record in dead_letter_events table
-  └── Acknowledge DLT offset
+```text
+Initiation topic -> preparation -> simulator -> finalization -> acknowledge
+       |
+       +-> retry topic(s), with backoff -> retry processing
+                                      |
+                                      +-> exhausted/fatal -> DLT diagnostics
 ```
 
----
+Retry topics let later main-topic records progress without waiting through the failed record's retry backoff. The initial handler and infrastructure can still take time, and retrying records can be overtaken. There is no zero-delay or cross-topic ordering guarantee. Exact generated retry topic names are managed by Spring Kafka; the source configures `-retry` and `-dlt` suffixes, rather than a manually provisioned production topology. See the [event catalog](event-catalog.md).
 
-## 3. Implementation Specification
+Capture/refund notifications are acknowledged and skipped by this authorization consumer; their state and journals already committed in synchronous service transactions.
 
-### 3.1. Spring Kafka Consumer Configuration
-[`com.lky.kaipay.payment.consumer.PaymentProcessingConsumer`](../backend/src/main/java/com/lky/kaipay/payment/consumer/PaymentProcessingConsumer.java)
+## Crash windows and limits
 
-```java
-@RetryableTopic(
-        attempts = "3",
-        backoff = @Backoff(delay = 1000, multiplier = 2.0),
-        dltTopicSuffix = "-dlt",
-        retryTopicSuffix = "-retry",
-        sameIntervalTopicReuseStrategy = SameIntervalTopicReuseStrategy.SINGLE_TOPIC,
-        autoCreateTopics = "true",
-        include = {GatewayTimeoutException.class, GatewayUnavailableException.class}
-)
-@KafkaListener(
-        topics = "${kaipay.kafka.topics.payment-requests:kaipay.payment.requests}",
-        groupId = "${spring.kafka.consumer.group-id:kaipay-payment-processor-group}"
-)
-public void processPaymentRequest(ConsumerRecord<String, String> record, Acknowledgment ack) {
-    // 1. Fast pre-check deduplication
-    if (consumerDeduplicationService.isEventConsumed(eventId, consumerGroup)) {
-        if (ack != null) ack.acknowledge();
-        return;
-    }
+| Interruption | Recovery behavior on a later valid delivery |
+| --- | --- |
+| Before preparation commits | The CREATED payment has no committed new intent; preparation can begin again. |
+| After preparation, before definitive simulator outcome | PROCESSING and its durable intent remain; evaluation can resume. |
+| After simulator outcome commits, before finalization | The retained result is reused; finalization can complete. |
+| After finalization, before acknowledgment | Final-state/result/consumption evidence is validated; no new simulator authorization is created. |
+| Historical PROCESSING with no durable operation | Ambiguous legacy activity is quarantined; no provider outcome is invented. |
 
-    // 2. Tx 1: Transition status CREATED -> PROCESSING
-    paymentService.transitionToProcessing(paymentId);
+No background recovery sweep or DLT replay API is installed. Recovery requires an eligible later delivery; broker retention loss, unavailable evidence or database corruption can prevent it. [Authorization reconciliation](reconciliation.md) can report outstanding finalization but never performs it.
 
-    // 3. Non-Transactional Gateway Call (Zero DB locks held)
-    AcquirerAuthorizationResult authResult = mockBankAcquirerClient.authorize(paymentId, amountCents, currency);
+## Dead-letter diagnostics and outbox failures
 
-    // 4. Tx 2: Atomic state update (AUTHORIZED / DECLINED) + ConsumedEvent insertion
-    paymentService.completeAuthorizationWithDeduplication(paymentId, authResult, eventId, consumerGroup, eventType);
+`handleDltMessage` persists diagnostic payload/header/exception evidence and acknowledges only after persistence succeeds. It does **not** mark a payment FAILED. Timeout, DLT routing and consumption evidence are transport observations, not financial truth. Definitive FAILED comes from the persisted simulator rejection and normal finalization. Malformed or conflicting messages cannot safely establish a payment outcome.
 
-    if (ack != null) ack.acknowledge();
-}
-```
+ADMIN can read `/v1/events/dlt` and filter by payment ID. Browser responses redact payload/exception text and expose only an allowlisted correlation header; see [DltAdminController](../backend/src/main/java/com/lky/kaipay/dlt/api/DltAdminController.java). There is no replay/repair mutation endpoint.
 
----
+The separate [outbox publisher](../backend/src/main/java/com/lky/kaipay/outbox/service/OutboxEventPublisher.java) retains retryable publication failures with due times and capped exponential backoff. Record-too-large failures are quarantined. A crash after Kafka accepts but before the outbox database commit can publish a duplicate. `SKIP LOCKED` avoids waiting on already-claimed rows; it does not eliminate all contention or guarantee FIFO. See [architecture reality check](architecture-reality-check.md) for scheduling details.
 
-## 4. Consumer Deduplication & Effectively-Once Processing
-
-Kafka guarantees **at-least-once** delivery. Under network disconnections, rebalances, or process crashes between step 3 (acquirer execution) and Kafka offset commit, Kafka will redeliver the message.
-
-To prevent duplicate bank charges upon redelivery, KaiPay implements a **two-phase state guard with atomic deduplication recording**:
-
-```
-+-----------------------------------------------------------------------------------------------+
-| PaymentProcessingConsumer.processPaymentRequest(record)                                       |
-+-----------------------------------------------------------------------------------------------+
-                                                |
-                                                v
-                    +-------------------------------------------------------+
-                    |  Pre-Check: consumed_events.exists(eventId, group)    |
-                    +---------------------------+---------------------------+
-                                                |
-                        +-----------------------+-----------------------+
-                        | Yes                                           | No
-                        v                                               v
-        +-------------------------------+               +-------------------------------+
-        | Fast Return: Acknowledge & Skip |             | Tx 1: status = PROCESSING     |
-        +-------------------------------+               +---------------+---------------+
-                                                                        |
-                                                                        v
-                                                        +-------------------------------+
-                                                        | Non-Tx External Gateway Call  |
-                                                        | (Acquirer authorize API)      |
-                                                        +---------------+---------------+
-                                                                        |
-                                                                        v
-                                                        +-------------------------------+
-                                                        | Tx 2 (Atomic Local DB Tx):    |
-                                                        |  - status = AUTHORIZED/DECLINED|
-                                                        |  - INSERT consumed_events     |
-                                                        +---------------+---------------+
-                                                                        |
-                                                                        v
-                                                        +-------------------------------+
-                                                        | Kafka Acknowledgment (Ack)    |
-                                                        +-------------------------------+
-```
-
-### Relational Schema of `consumed_events`
-```sql
-CREATE TABLE consumed_events (
-    event_id UUID NOT NULL,
-    consumer_group VARCHAR(100) NOT NULL,
-    payment_id UUID NOT NULL,
-    event_type VARCHAR(50) NOT NULL,
-    status VARCHAR(30) NOT NULL,
-    processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT pk_consumed_events PRIMARY KEY (event_id, consumer_group)
-);
-```
-
-### Crash Recovery Invariants:
-1. **Crash before Tx 1**: Redelivered message sees payment in `CREATED`. Tx 1 starts cleanly. No bank call was made.
-2. **Crash during Gateway Call**: Redelivered message sees payment in `PROCESSING`. Gateway call is retried or resolved with acquirer reference.
-3. **Crash after Tx 2 before Kafka Ack**: Redelivered message hits **Fast Pre-Check** (`consumed_events` entry exists). Consumer logs dedup hit, acknowledges offset immediately, and exits without re-calling the bank.
-
----
-
-## 5. Dead Letter Topic (DLT) & Quarantine Auditing
-
-When retries are exhausted (after 3 attempts with exponential backoff) or a non-retryable exception / poison pill occurs, Spring Kafka invokes the `@DltHandler`:
-
-```java
-@DltHandler
-public void handleDltMessage(
-        ConsumerRecord<String, String> record,
-        @Header(value = KafkaHeaders.EXCEPTION_FQCN, required = false) String exceptionFqcn,
-        @Header(value = KafkaHeaders.EXCEPTION_CAUSE_FQCN, required = false) String exceptionCauseFqcn,
-        @Header(value = KafkaHeaders.EXCEPTION_MESSAGE, required = false) String exceptionMessage,
-        Acknowledgment ack
-) {
-    // 1. Mark Payment aggregate as FAILED
-    if (paymentId != null) {
-        paymentService.markPaymentFailed(paymentId, "DLT_ROUTED", exceptionMessage);
-    }
-
-    // 2. Persist full forensic audit record in dead_letter_events
-    DeadLetterEvent dltEvent = DeadLetterEvent.builder()
-            .originalTopic(record.topic())
-            .originalPartition(record.partition())
-            .originalOffset(record.offset())
-            .eventId(eventId)
-            .paymentId(paymentId)
-            .exceptionClass(resolvedExceptionClass)
-            .failureMessage(exceptionMessage)
-            .payload(jsonPayload)
-            .headers(headersMap)
-            .build();
-    deadLetterEventRepository.save(dltEvent);
-
-    if (ack != null) ack.acknowledge();
-}
-```
-
-### DLT Administrative API
-KaiPay provides REST APIs for operational platform engineering and support:
-- `GET /v1/events/dlt` — Pageable list of quarantined messages with exception traces and payment search filter (`DltAdminController`).
-- `GET /v1/events/dlt?paymentId={id}` — Quarantined event lookup by payment aggregate ID.
-- *(Roadmap / Planned)*: `POST /v1/events/dlt/{id}/replay` — Reprocess or replay quarantined events after upstream fix.
+Source-backed regressions cover [recovery](../backend/src/test/java/com/lky/kaipay/payment/AuthorizationRecoveryIntegrationTest.java), [redelivery](../backend/src/test/java/com/lky/kaipay/payment/consumer/PaymentGatewayRedeliveryIntegrationTest.java), [main-partition progress](../backend/src/test/java/com/lky/kaipay/payment/consumer/PaymentHeadOfLinePartitionIntegrationTest.java) and [DLT persistence failure](../backend/src/test/java/com/lky/kaipay/payment/consumer/DltPersistenceRecoveryIntegrationTest.java). These establish the tested scenarios, not production availability.

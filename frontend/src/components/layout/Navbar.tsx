@@ -18,7 +18,7 @@ export const Navbar: React.FC = () => {
           <div>
             <span className="font-bold text-slate-100 text-lg tracking-tight">KaiPay</span>
             <span className="text-[10px] text-emerald-400 ml-2 font-mono uppercase bg-emerald-950/60 border border-emerald-800/50 px-1.5 py-0.5 rounded">
-              Phase 1 Core
+              Simulation
             </span>
           </div>
         </div>

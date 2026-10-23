@@ -8,7 +8,7 @@ Use JDK 21 and Maven. Docker must be available for the PostgreSQL/Kafka integrat
 mvn verify
 ```
 
-Run commands in `backend/`. Maven verification packages `target/KaiPay-0.0.1-SNAPSHOT.jar`. The database must have the additive Flyway V7 identity migration before account provisioning; starting the configured application applies migrations. Existing V1–V6 migrations and financial data are preserved. Migrations and application startup create no user accounts.
+Run commands in `backend/`. Maven verification packages `target/KaiPay-0.0.1-SNAPSHOT.jar`. The current migration inventory is V1–V11; V7 introduces identities required for account provisioning, V8 durable simulator operations, V9 MYR defaults, V10 webhooks and V11 authorization reports. Starting the configured application applies pending migrations, so use a fresh disposable database for a demonstration and review compatibility before upgrading retained data. Migrations and application startup create no user accounts.
 
 ## Configuration
 

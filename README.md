@@ -1,4 +1,4 @@
-# KaiPay: High-Throughput Distributed Payment & Double-Entry Ledger Engine
+# KaiPay: Simulated Payments & Double-Entry Ledger
 
 [![Java 21](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1.1-green.svg)](https://spring.io/projects/spring-boot)
@@ -6,10 +6,10 @@
 [![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-blue.svg)](https://www.postgresql.org/)
 [![Testcontainers](https://img.shields.io/badge/Testcontainers-2.0.5-red.svg)](https://testcontainers.com/)
 [![React 18](https://img.shields.io/badge/React-18.3.1-61dafb.svg)](https://react.dev/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4.17-38bdf8.svg)](https://tailwindcss.com/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4.19-38bdf8.svg)](https://tailwindcss.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-KaiPay is a distributed payment processing and financial accounting engine built with **Java 21**, **Spring Boot 4.1.1**, **Apache Kafka 3.8.0 (KRaft mode)**, and **PostgreSQL 16**. It is engineered to solve core distributed systems consistency and reliability challenges: the distributed dual-write problem, at-least-once message delivery, head-of-line blocking during downstream bank latency, idempotency under uncoordinated retries, and strict double-entry ledger accounting invariants.
+KaiPay is a portfolio payment simulation built with **Java 21**, **Spring Boot 4.1.1**, **PostgreSQL 16** and **Kafka**, with a React merchant dashboard and separate administrator diagnostics. One backend application demonstrates asynchronous authorization, idempotent requests, durable simulator recovery and double-entry capture/refund accounting. New activity uses **MYR, in integer sen** (100 sen = RM1.00).
 
 ---
 
@@ -17,16 +17,27 @@ KaiPay is a distributed payment processing and financial accounting engine built
 
 KaiPay is a **simulated-payment demo**: no real provider or money movement is supported. Browser and API access requires individually provisioned accounts, server-side sessions and CSRF protection. Merchants are limited to assigned merchants; separate administrators can read operational diagnostics without impersonating merchants. See [demo authentication and access](docs/security.md) for the session handshake, roles and hosting prerequisites.
 
-In payment processing architectures, services must prevent data loss, prevent duplicate customer charges, provide observable lifecycle state, and maintain strict mathematical balance across all accounts—even during network partitions, bank partner outages, pod crash rebalances, and concurrent retries.
+**Current availability:** a supervised local demonstration has exercised merchant payment/capture/refund flows, role boundaries and stored authorization reports. There is no hosted public demo; Oracle hosting is postponed. External webhook delivery remains disabled. This project does not move real money, integrate with a bank, or establish throughput, availability or security-certification guarantees.
+
+| Capability | Current boundary | Evidence / guide |
+| :--- | :--- | :--- |
+| Merchant workflows | Implemented; individually provisioned accounts, assigned merchants, session/CSRF protection | [Access model](docs/security.md), [frontend routes](frontend/src/App.tsx) |
+| Authorization and recovery | Durable local simulator; retries depend on retained Kafka deliveries | [Recovery service](backend/src/main/java/com/lky/kaipay/payment/service/AuthorizationRecoveryService.java), [failure handling](docs/failure-handling-and-retries.md) |
+| Capture, refunds and MYR ledger | Implemented synchronous local accounting; no settlement or payout service | [Accounting model](docs/double-entry-ledger.md) |
+| Signed webhooks | Durable signed notifications and read-only merchant history; external dispatch disabled, local test evidence only | [Webhook contract](docs/webhooks.md) |
+| Authorization reconciliation | Manual operator-created, stored reports; merchant/admin read-only views | [Reconciliation contract](docs/reconciliation.md) |
+| Internal accounting audit | Standalone read-only operator CLI; transient JSON, no API/UI or repair | [Accounting audit contract](docs/internal-accounting-audit.md) |
+
+For a first visit, follow the [local demonstration walkthrough](docs/local-demo.md). For transaction boundaries and limits, start with the [source-linked architecture review](docs/architecture-reality-check.md).
 
 KaiPay demonstrates production-style solutions to these engineering challenges:
 
-- **Distributed Dual-Write Elimination**: Combines local database transaction commits with an asynchronous Transactional Outbox poller using PostgreSQL row-level locks (`SELECT ... FOR UPDATE SKIP LOCKED`).
+- **Transactional Outbox**: Commits payment changes and event intent together, then relays to Kafka using PostgreSQL row locks (`SELECT ... FOR UPDATE SKIP LOCKED`). Broker acceptance and the published marker are separate commits; duplicates remain possible.
 - **Durable Simulated Authorization**: One retained operation per payment validates request equivalence and preserves the simulator outcome across competing calls and restarts. Payment completion and its consumer marker commit atomically. Calls may repeat; this is a simulated-provider guarantee, not a guarantee about real bank charges.
-- **Non-Blocking Multi-Topic Retries**: Eliminates consumer partition Head-of-Line blocking via Spring Kafka `@RetryableTopic` with exponential backoff and Dead Letter Topic (`kaipay.payment.requests-dlt`) quarantine.
-- **Strict Double-Entry Financial Ledger**: Records all monetary movements via immutable Journal entries and balanced Ledger Entries enforcing $\sum \text{Debits} = \sum \text{Credits}$ with integer minor-unit precision (MYR sen; `BIGINT amount_cents`).
+- **Non-Blocking Multi-Topic Retries**: Moves retryable failures to delayed retry topics (1s, 2s; three delivery attempts), allowing the primary partition to continue after a failed call. The synchronous call itself still occupies its listener thread; retry topics can reorder messages. Exhausted deliveries reach `kaipay.payment.requests-dlt`.
+- **Double-Entry Financial Ledger**: Capture/refund workflows append journals and validate balanced entries ($\sum \text{Debits} = \sum \text{Credits}$) using integer minor units (MYR sen; `BIGINT amount_cents`). Privileged database writes remain outside that application invariant.
 - **Pessimistic Locking on Financial Aggregates**: Guards against concurrent partial and full refund race conditions (`SELECT ... FOR UPDATE`) to prevent over-refunding.
-- **Operational Full-Stack Visibility**: Provides an operational administrative interface built with React 18, TypeScript, and Tailwind CSS to observe live outbox buffers, dead-letter events, and ledger journals in real time.
+- **Role-Scoped Visibility**: Merchants see their payments, ledger, webhook history and stored authorization reports. Administrators read outbox/DLT diagnostics, global journals and explicitly scoped authorization reports. Browser diagnostics omit raw payloads and exception details.
 
 ---
 
@@ -34,16 +45,17 @@ KaiPay demonstrates production-style solutions to these engineering challenges:
 
 ```mermaid
 flowchart TD
-    Client["Client Tier<br/>(React 18 Dashboard / External Merchant API)"]
+    Client["Authenticated merchant<br/>(React dashboard / session API)"]
     
     subgraph SpringBoot["KaiPay Core Service (Port 28080)"]
         API["Inbound REST Layer<br/>(PaymentController, RefundController, LedgerController)"]
-        IdempFilter["SHA-256 Idempotency Filter<br/>(idempotency_records table)"]
+        IdempCheck["PaymentService idempotency check<br/>(SHA-256 request fields; merchant/key scope)"]
         TxBoundary["Local Database Transaction (ACID)"]
         OutboxPoller["Transactional Outbox Poller<br/>(SELECT ... FOR UPDATE SKIP LOCKED)"]
-        Consumer["Kafka Processing Consumer<br/>(Two-Phase State Pipeline)"]
+        Consumer["Authorization Consumer<br/>(Tx1 / simulator commit / Tx2)"]
         DltHandler["DLT Poison Pill Handler<br/>(dead_letter_events audit table)"]
         LedgerCore["Double-Entry Ledger Engine<br/>(journals & ledger_entries)"]
+        BankGateway["In-process Bank Simulator<br/>(PostgreSQL-backed outcomes)"]
     end
 
     subgraph Postgres["PostgreSQL 16 Storage (Port 25432)"]
@@ -55,19 +67,17 @@ flowchart TD
         SimulatorDB[("simulated_authorization_operations")]
     end
 
-    subgraph KafkaBroker["Apache Kafka 3.8 Cluster (Port 29092, KRaft)"]
-        MainTopic["kaipay.payment.requests<br/>(3 Partitions, Key=paymentId)"]
-        RetryTopic["kaipay.payment.requests-retry<br/>(Backoff: 1s, 2s)"]
+    subgraph KafkaBroker["Single local Kafka 3.8 broker (Port 29092, KRaft)"]
+        MainTopic["kaipay.payment.requests<br/>(3 partitions; key=aggregateId)"]
+        RetryTopic["kaipay.payment.requests-retry-*<br/>(Backoff: 1s, 2s)"]
         DltTopic["kaipay.payment.requests-dlt<br/>(Dead Letter Topic)"]
     end
 
-    BankGateway["Mock Bank Acquirer<br/>(Deterministic Failure Triggers)"]
-
     %% Flow connections
-    Client -->|"POST /v1/payments (Idempotency-Key)"| IdempFilter
-    IdempFilter --> API
+    Client -->|"POST /v1/payments (Idempotency-Key)"| API
     API --> TxBoundary
-    TxBoundary -->|"Insert Payment (CREATED)"| PaymentsDB
+    TxBoundary --> IdempCheck
+    IdempCheck -->|"New request: Insert Payment (CREATED)"| PaymentsDB
     TxBoundary -->|"Insert Envelope (PENDING)"| OutboxDB
     
     OutboxPoller -->|"Poll Batches (SKIP LOCKED)"| OutboxDB
@@ -79,7 +89,7 @@ flowchart TD
     Consumer -->|"After Tx1 commit: authorize outside payment Tx"| BankGateway
     BankGateway -->|"S: Independently committed outcome"| SimulatorDB
     
-    BankGateway -.->|"Unresolved timeout: retry"| RetryTopic
+    Consumer -.->|"Retryable failure"| RetryTopic
     RetryTopic -->|"Retry Attempt"| Consumer
     Consumer -.->|"Retry exhausted / diagnostic rejection"| DltTopic
     DltTopic --> DltHandler
@@ -97,16 +107,18 @@ flowchart TD
     API -->|"Pessimistic Lock & Reversing Journal"| LedgerCore
 ```
 
+The diagram focuses on payment execution. Capture/refund state, ledger rows and lifecycle outbox events commit synchronously; their Kafka notifications are acknowledged without another authorization call. Payment events use payment ID, refund events use refund ID: there is no shared payment/refund partition-order guarantee. The separate [webhook pipeline](docs/webhooks.md) stores notification intent atomically with eligible lifecycle transitions; it is not dispatched by this Kafka authorization consumer. Both read-only assessment tools are described in the capability table above.
+
 ---
 
 ## 3. Key Technical Decisions
 
-| # | Technical Challenge | Proposed Solution | Tradeoff Considered |
+| # | Technical Challenge | Implemented Approach | Tradeoff Considered |
 | :- | :--- | :--- | :--- |
-| **1** | **Distributed Dual-Write Problem** | **Transactional Outbox Pattern** with PostgreSQL row-level polling using `SELECT ... FOR UPDATE SKIP LOCKED`. Payment aggregate mutations and event envelopes commit atomically within the local ACID boundary. | Introduces asynchronous event publishing polling latency (~500ms) compared to direct synchronous broker publishing, but eliminates ghost events and uncommitted message leaks without requiring 2PC/XA. |
+| **1** | **Distributed Dual-Write Problem** | **Transactional Outbox Pattern** with PostgreSQL row-level polling using `SELECT ... FOR UPDATE SKIP LOCKED`. Payment aggregate mutations and event envelopes commit atomically within the local ACID boundary. | Default 500ms fixed delay is configuration, not a latency guarantee. Sends wait synchronously while DB locks are held; retries can reorder delivery and a crash after broker acceptance can duplicate events. |
 | **2** | **Consumer Crash Window & Redeliveries** | Short preparation transaction, independently committed durable simulator operation, then atomic payment completion and `consumed_events` marker. Replays validate identity, payload and terminal eligibility. | Repeated calls share one immutable simulated outcome. Automatic recovery depends on retained Kafka deliveries; exhausted or lost deliveries need separately reviewed operator recovery. |
-| **3** | **Consumer Head-of-Line (HoL) Blocking** | **Non-Blocking Multi-Topic Retries** using Spring Kafka `@RetryableTopic` with exponential backoff (1s, 2s, max 3 attempts) and automated Dead Letter Topic (`kaipay.payment.requests-dlt`) routing. | Redelivered messages on retry topics consume additional partition bandwidth, but avoid blocking healthy transactions on the primary partition during third-party gateway latency spikes. |
-| **4** | **Financial Balance Integrity** | **Immutable Double-Entry Ledger Engine** with standardized chart of accounts and strict zero-sum balancing invariant ($\sum \text{Debits} = \sum \text{Credits}$). Balances are projected from ledger entries. | Balance calculations require SQL aggregate queries over immutable ledger rows rather than reading a single scalar column, but guarantees mathematical consistency and full auditability. |
+| **3** | **Consumer Head-of-Line (HoL) Blocking** | **Non-Blocking Multi-Topic Retries** using Spring Kafka `@RetryableTopic` with exponential backoff (1s, 2s, max 3 attempts) and automated Dead Letter Topic (`kaipay.payment.requests-dlt`) routing. | Delayed retries free the primary listener after failure; a slow synchronous call still blocks it until the call returns. Retry topics require more resources and relax original ordering. |
+| **4** | **Financial Balance Integrity** | **Double-Entry Ledger** validates generated capture/refund journals before posting; balances are projected from retained entries. | Aggregate queries cost reads. Balanced entries alone do not prove correct ownership, source relationships or fees; the separate operator audit checks structural relationships without certifying fee policy. |
 | **5** | **Concurrent Over-Refund Race Conditions** | **Pessimistic Write Locking (`PESSIMISTIC_WRITE`)** on parent payment records (`SELECT ... FOR UPDATE`) during refund calculation and persistence. | Serializes concurrent refunds for the exact same payment, but prevents concurrent refund requests from exceeding the original captured transaction amount. |
 
 ---
@@ -119,32 +131,32 @@ flowchart TD
 | **Framework** | Spring Boot | 4.1.1 | Portfolio-grade DI container, Spring Data JPA, Spring Kafka, declarative transactions |
 | **Message Broker** | Apache Kafka | Client 4.2.1; dev broker 3.8.0 (KRaft) | High-throughput distributed log, partition ordering, KRaft consensus (ZooKeeper-less) |
 | **Database** | PostgreSQL | 16-alpine | ACID relational integrity, `SKIP LOCKED` row queuing, partial indexes, atomic constraints |
-| **Schema Migration**| Flyway | 12.4.0 | Version-controlled relational database migrations (V1 through V9) |
+| **Schema Migration**| Flyway | 12.4.0 | Version-controlled relational database migrations (V1 through V11) |
 | **Integration Testing**| Testcontainers | 2.0.5 | Ephemeral Docker containers for PostgreSQL 16 and Kafka 4.1.2 |
 | **Frontend Framework**| React | 18.3.1 | Declarative component UI for operational payments, double-entry ledger, outbox & DLT views |
-| **Build Tool** | Vite | 6.1.0 | Fast ESM development server and optimized TypeScript bundling |
-| **Type System** | TypeScript | 5.7.3 | Strict type safety for API contracts, event payloads, and ledger journal models |
-| **Styling** | Tailwind CSS | 3.4.17 | Modern utility-first CSS design system |
+| **Build Tool** | Vite | 6.4.3 (lockfile) | Development server and production bundling |
+| **Type System** | TypeScript | 5.9.3 (lockfile) | Type checking for API contracts, event payloads, and ledger journal models |
+| **Styling** | Tailwind CSS | 3.4.19 (lockfile) | Utility-first CSS design system |
 | **Icons** | Lucide React | 0.475.0 | Clean financial and operational telemetry icon set |
 
-The backend uses Spring Boot 4.1.1 dependency management (Spring Framework 7.0.9, Security 7.1.1, Spring Kafka 4.1.1 and Hibernate 7.4.5.Final). Kafka clients 4.2.1 retain the producer corruption security fix. Java 21 and migrations V1–V9 are unchanged. Boot's supported Jackson 2 compatibility module preserves existing API and persisted JSON contracts; this deprecated integration will require migration before its future removal. The development Compose broker remains 3.8.0; it is not a supported hosting recommendation.
+Versions come from [backend dependency management](backend/pom.xml), the [frontend lockfile](frontend/package-lock.json) and [local Compose](docker-compose.yml). Spring Boot 4.1.1 manages Spring Framework 7.0.9, Security 7.1.1, Spring Kafka 4.1.1 and Hibernate 7.4.5.Final; Kafka clients are 4.2.1. The [migration inventory](backend/src/main/resources/db/migration) is **V1–V11**: V6 outbox retry scheduling, V7 identities, V8 durable simulator, V9 MYR defaults, V10 webhooks and V11 authorization reports. The standalone accounting audit adds no migration. Boot's Jackson 2 compatibility module preserves existing JSON contracts and will require future migration. The development Compose broker remains 3.8.0; it is not a hosting recommendation.
 
 ---
 
 ## 5. Core Features
 
 - **Payment Lifecycle**: Finite state machine supporting `CREATED`, `PROCESSING`, `AUTHORIZED`, `CAPTURED`, `REFUND_PENDING`, `PARTIALLY_REFUNDED`, `REFUNDED`, `DECLINED`, and `FAILED`. DLT routing alone does not fail a payment or establish a business decline.
-- **Cryptographic Request Idempotency**: SHA-256 hashing across HTTP request payload, headers, and paths to prevent duplicate submissions while safely returning cached responses on retries.
-- **Transactional Outbox Worker**: Background poller (`fixedDelay = 500ms`, batch size = 20) with `SKIP LOCKED` row claiming, publishing events to Kafka with manual synchronous acknowledgments.
-- **Resilient Kafka Processing**: Partition-key routing on `paymentId`, manual immediate consumer offset acknowledgment, and non-blocking retry topics.
+- **Request Idempotency**: Payment creation uses merchant/key-scoped records and SHA-256 over amount, currency, customer, payment method and metadata representation; matching retries return the stored creation response. Refund replay compares payment, amount and reason semantically. SHA-256 fingerprints are not authentication credentials.
+- **Transactional Outbox Worker**: Default 500ms fixed delay, batch size 20, due-time retries with bounded exponential backoff and oversized-record quarantine. Broker sends wait up to 4s each while the transaction holds row locks; ordinary failures retain retry eligibility.
+- **Resilient Kafka Processing**: Routing by aggregate ID, manual immediate consumer offset acknowledgment, and delayed retry topics. Authorization handles initiation events only; capture/refund notifications do not repeat financial work.
 - **Poison Pill & Failure Simulation**: Deterministic amount-based triggers in `MockBankAcquirerClient`:
   - **`RM8,888.00`**: Transient gateway timeout on attempts 1 & 2, succeeds on attempt 3 via retry topic.
   - **`RM7,777.00`**: Persistent gateway timeout exhausting the delivery's 3 attempts and routing to DLT; payment remains `PROCESSING` with unresolved durable evidence.
   - **`RM6,666.00`**: Durable definitive no-acceptance result; atomically finalizes `FAILED` and a consumer marker before non-retryable diagnostic routing to DLT.
   - **`RM9,999.00`**: Business decline (`INSUFFICIENT_FUNDS`), transitioning payment to `DECLINED`.
-- **Double-Entry Financial Ledger**: Multi-tenant chart of accounts, 3-way capture journal posting, reversing refund journals, simulated pro-rata fee retention (30 sen fixed fee retained on full refunds).
+- **Double-Entry Financial Ledger**: Multi-tenant chart of accounts, capture and reversing refund journals, percentage fee reversal and a fixed capture component that is not explicitly reversed. Small-payment caps and per-refund rounding affect the net result.
 - **Merchant Access**: Persisted user memberships authorize requested merchant context; resource ownership checks scope payments, refunds, balances and journals. Administrators have separate diagnostic access.
-- **Interactive Operations UI**: Real-time management dashboards, visual state machine steppers, outbox queue inspectors, DLT payload viewers, and double-entry ledger explorers.
+- **Interactive UI**: Merchant dashboards and lifecycle controls, plus separate administrator outbox/DLT inspectors. Outbox/DLT views poll periodically and omit raw payloads and exception details.
 
 Simulator outcomes and evaluation counts live in PostgreSQL; a retry, event ID or consumer group cannot create a second authorization identity for a payment. New simulated financial activity supports only MYR using integer sen (100 sen = RM1.00). The existing `amountCents` / `amount_cents` names mean sen for MYR. Currency must exactly match the stored payment. Authorization recovery never captures, refunds or posts ledger entries. DLT is evidence-only; there is no recovery scheduler, automatic DLT replay, terminal-state reopening or real-provider integration.
 
@@ -160,8 +172,9 @@ Historical financial rows retain their original currency and amount; they are ne
 
 ```
 1. Client submits POST /v1/payments (with Idempotency-Key & X-Merchant-Id).
-2. IdempotencyFilter checks idempotency_records (SHA-256 hash validation).
+2. Authenticated merchant context and resource access are checked.
 3. PaymentService starts Local DB Tx:
+   - Checks merchant/key-scoped idempotency_records using a hash of request fields; matching replay returns the original creation response.
    - Persists Payment aggregate (status = CREATED).
    - Persists EventEnvelope<PaymentInitiatedEvent> in payment_events_outbox (status = PENDING).
    - Commits Local DB Tx.
@@ -197,8 +210,7 @@ $$\sum \text{Debits} = \sum \text{Credits}$$
 #### Refund Fee Policy
 - Variable processing fee (2.9%) is refunded proportionally: $\text{FeeRefundCents} = \text{round}(\text{RefundAmount} \times 2.9\%)$.
 - The fixed simulated fee (30 sen / RM0.30) is retained on refunds. This is a demonstration formula, not actual Malaysian provider, interchange or network pricing.
-- On a 100% full refund of a single transaction, the merchant's net position is -RM0.30.
-- Across two consecutive fully refunded transactions, the merchant's net position is -RM0.60.
+- In the example below, full refund leaves the merchant at -RM0.30 and platform at +RM0.30. Small captures cap the original fee at gross; separately rounded partial refunds can differ from one full refund. Fixed-fee retention is not a universal net-balance formula.
 
 #### Exact Capture & Refund Journal Entries (RM120.00 Capture, RM40.00 Partial Refund, RM80.00 Remaining Refund)
 
@@ -251,35 +263,35 @@ FINAL LIFECYCLE RECONCILIATION
 
 ## 7. Visual Portfolio Assets
 
-Screenshots capture earlier local simulation sessions and may show historical USD labels; current new activity uses MYR:
+These committed screenshots show an **earlier local simulation**, before current authentication, role separation, MYR labels, diagnostic privacy and webhook/reconciliation pages. USD values, phase labels, combined navigation, payload/exception displays and topic captions are historical, not the current contract. Current new activity uses MYR. No private demonstration screenshots or credentials are included; use the [current local walkthrough](docs/local-demo.md) for role-specific behavior.
 
 ### 7.1. Financial Analytics & Operational Telemetry Dashboard
 ![KaiPay Financial Overview Dashboard](docs/screenshots/dashboard.png)
-*Real-time financial KPI cards showing available simulated balance (historical screenshot: USD77.38 after fee retention), gross volume, platform fees, operational buffers, and recent transactions with live status badges.*
+*Historical dashboard: synthetic balance, volume, fees and recent payments. Current merchants see their assigned context; operator diagnostics use a separate role. The balance is a ledger projection, with no payout facility.*
 
 ---
 
 ### 7.2. Payment State Machine & Lifecycle Management
 ![KaiPay Payment Lifecycle & Idempotency Stepper](docs/screenshots/payment-details.png)
-*Interactive state machine visualization tracking progression through `CREATED` $\to$ `PROCESSING` $\to$ `AUTHORIZED` $\to$ `CAPTURED` $\to$ `PARTIALLY_REFUNDED`, displaying cryptographic idempotency headers and refund history.*
+*Historical lifecycle view: creation, authorization, capture and partial refund, plus stored request identity and refund history. Authorization is simulated and capture records local accounting; neither is bank settlement.*
 
 ---
 
 ### 7.3. Double-Entry Financial Ledger & Balanced Journals
 ![KaiPay Double-Entry Ledger Explorer](docs/screenshots/double-entry-ledger.png)
-*Multi-account ledger explorer showing immutable journal entries, real-time balance projections, and strict $\sum \text{Debits} = \sum \text{Credits}$ balance verification.*
+*Historical ledger explorer: capture/refund journals and balance projections. Journal balance is one invariant, separate from the operator accounting consistency audit.*
 
 ---
 
 ### 7.4. Transactional Outbox Stream Monitor
 ![KaiPay Transactional Outbox Buffer Monitor](docs/screenshots/outbox-stream.png)
-*Live outbox monitor displaying pending vs. published event states, payload envelopes, and row claim coordination.*
+*Historical outbox monitor. Current ADMIN views expose pending, published and quarantined status with retry timing; raw payloads and error details are omitted. Row locks are coordinated by the backend, not visualized here.*
 
 ---
 
 ### 7.5. Dead Letter Topic (DLT) & Poison Pill Graveyard
 ![KaiPay Dead Letter Topic Explorer](docs/screenshots/dlt-explorer.png)
-*Operational quarantine inspector displaying dead-lettered events, original partition/offset positions, retry attempt counts, and Java exception stack traces.*
+*Historical DLT inspector. Current ADMIN views retain transport metadata and validated correlation IDs while omitting payloads and exception details. DLT evidence does not itself change payment state or offer replay.*
 
 ---
 
@@ -287,7 +299,7 @@ Screenshots capture earlier local simulation sessions and may show historical US
 
 ### Dedicated Port Map
 
-KaiPay uses strictly dedicated host ports to ensure total isolation from other host services:
+The development configuration uses these conventional ports. Compose data/management ports and the local backend bind to loopback; distinct port numbers alone do not establish isolation.
 
 | Service | Container / Process | Host Port | Internal Port | Environment / Connection String |
 | :--- | :--- | :--- | :--- | :--- |
@@ -296,13 +308,12 @@ KaiPay uses strictly dedicated host ports to ensure total isolation from other h
 | **KaiPay PostgreSQL** | Docker (`postgres:16-alpine`) | **`25432`** | `5432` | `jdbc:postgresql://localhost:25432/kaipay` |
 | **KaiPay Apache Kafka** | Docker (`apache/kafka:3.8.0`) | **`29092`** | `9092` | `localhost:29092` |
 | **KaiPay Kafka-UI** | Docker (`provectuslabs/kafka-ui`) | **`28048`** | `8080` | `http://localhost:28048` |
-| **KaiPay Redis (Reserved)**| Docker (`redis:7-alpine`) | **`26379`** | `6379` | `localhost:26379` |
 
 ---
 
 ### Prerequisites
 - **JDK 21** installed.
-- **Node.js 18+** and **npm** installed.
+- **Node.js 22+** and **npm** recommended for the locked frontend toolchain; use `npm ci`.
 - **Docker** and **Docker Compose** running.
 
 ---
@@ -324,14 +335,14 @@ docker compose ps
 cd backend
 ./mvnw clean spring-boot:run -Dspring-boot.run.profiles=local
 ```
-*The explicit local profile binds the API to loopback on port `28080` for HTTP development, while keeping authentication and CSRF enabled. Flyway runs V1–V7. No login accounts are seeded: provision individual accounts using [operator commands](backend/README.md) before signing in. Ordinary deployment configuration requires explicit database/broker settings and Secure cookies.*
+*The explicit local profile binds the API to loopback on port `28080` for HTTP development, while keeping authentication and CSRF enabled. Flyway applies pending migrations from V1–V11 to the configured database. Use a fresh disposable database for a demonstration; review compatibility before upgrading retained data. No login accounts are seeded: provision individual accounts using [operator commands](backend/README.md) before signing in. Ordinary deployment configuration requires explicit database/broker settings and Secure cookies.*
 
 ---
 
 ### Step 3: Start Frontend Dashboard
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 *The management dashboard will be available at `http://localhost:28081`.*
@@ -349,40 +360,35 @@ npm run dev
 
 ## 9. Automated Testing Strategy
 
-KaiPay is verified by an automated test suite comprising **180 automated tests** across 40 test classes:
+The repository contains unit, component and real PostgreSQL/Kafka integration tests. Counts and run times vary by revision and environment; this overview does not present an old test transcript as a current result.
 
-```text
--------------------------------------------------------
- T E S T S   S U M M A R Y
--------------------------------------------------------
-Tests run: 180, Failures: 0, Errors: 0, Skipped: 0
-Build Result: SUCCESS
-Total Time: 49.350 s
--------------------------------------------------------
-```
+| Behavior | Source evidence |
+| :--- | :--- |
+| Atomic authorization completion, redelivery and durable simulator outcomes | [Transaction tests](backend/src/test/java/com/lky/kaipay/payment/consumer/PaymentAuthorizationTransactionIntegrationTest.java), [recovery tests](backend/src/test/java/com/lky/kaipay/payment/AuthorizationRecoveryIntegrationTest.java), [simulator tests](backend/src/test/java/com/lky/kaipay/payment/service/acquirer/SimulatedAuthorizationOperationIntegrationTest.java) |
+| Refund concurrency and ledger invariants | [Refund integration tests](backend/src/test/java/com/lky/kaipay/refund/RefundIntegrationTest.java), [ledger tests](backend/src/test/java/com/lky/kaipay/ledger) |
+| Outbox broker outage and retries | [Outage integration tests](backend/src/test/java/com/lky/kaipay/outbox/service/OutboxKafkaOutageIntegrationTest.java) |
+| Signed delivery, guarded transport, sender crash and receiver restart | [Webhook delivery tests](backend/src/test/java/com/lky/kaipay/webhook/delivery) — isolated fixtures, not evidence of deployed egress safety |
+| Authorization report classification, replay and visibility | [Reconciliation tests](backend/src/test/java/com/lky/kaipay/reconciliation) |
+| Read-only structural accounting checks and HTTP nonexposure | [Accounting audit tests](backend/src/test/java/com/lky/kaipay/ledger/audit) |
+| Browser role/session isolation, historical currency and report views | [Frontend tests](frontend/src) — mocked HTTP component evidence, distinct from a live browser/backend demonstration |
 
-### Test Classification
+Run backend verification with **JDK 21**, Maven and working Docker/Testcontainers:
 
-1. **Unit & Invariant Tests (POJOs & Core Domain Logic)**:
-   - FSM state transition validation (`PaymentStateMachineUnitTest`)
-   - Double-entry debit/credit zero-sum mathematical validation (`LedgerServiceUnitTest`, `MerchantBalanceServiceUnitTest`)
-   - Structured JSON envelope serialization and deserialization (`EventEnvelopeUnitTest`)
-2. **PostgreSQL Integration Tests (Testcontainers PostgreSQL 16)**:
-   - Flyway migration execution and relational constraints (V1–V5)
-   - SHA-256 API idempotency conflicts and duplicate suppression (`PaymentIntegrationTest`)
-   - Pessimistic write locking concurrency across 10 concurrent threads (`RefundIntegrationTest`, `LedgerFinancialInvariantsIntegrationTest`)
-   - Journal creation, balance projection queries, and over-refund prevention
-3. **Kafka Event-Driven Integration Tests (Testcontainers Kafka 3.8 KRaft)**:
-   - Transactional outbox polling and publishing during broker network outages (`OutboxKafkaOutageIntegrationTest`)
-   - Consumer deduplication under forced message redeliveries (`PaymentDeduplicationIntegrationTest`, `PaymentGatewayRedeliveryIntegrationTest`)
-   - Head-of-line blocking avoidance across multi-partition workloads (`PaymentHeadOfLinePartitionIntegrationTest`)
-   - Non-blocking retries with exponential backoff and DLT routing (`PaymentTransientRetryIntegrationTest`, `PaymentPoisonPillAndDltIntegrationTest`)
-
-To execute the automated test suite locally:
 ```bash
 cd backend
-./mvnw test
+./mvnw verify
 ```
+
+Run frontend checks separately:
+
+```bash
+cd frontend
+npm ci
+npm test
+npm run build
+```
+
+The frontend build includes TypeScript checking. Testcontainers uses PostgreSQL 16 and Kafka 4.1.2 fixtures; the development Compose broker is 3.8.0. Passing these tests does not establish real-bank behavior, a load benchmark or hosting readiness.
 
 ---
 
@@ -390,21 +396,24 @@ cd backend
 
 ```
 KaiPay/
-├── backend/                             # Spring Boot 4.1.1 Core Service (Java 21)
+├── backend/                             # Spring Boot 4.1.1 application (Java 21)
 │   ├── src/main/java/com/lky/kaipay/
 │   │   ├── common/                      # EventEnvelope, Base DTOs, Kafka & DB Config
 │   │   ├── consumer/                    # Deduplication service & consumed_events tracking
 │   │   ├── customer/                    # Customer entity & repository
 │   │   ├── dlt/                         # DLT admin controller, entity & repository
 │   │   ├── ledger/                      # Double-entry ledger service, journals, accounts
-│   │   ├── merchant/                    # Merchant tenant entity, controller & API key auth
+│   │   ├── merchant/                    # Merchant tenant entity and controller
 │   │   ├── outbox/                      # Transactional outbox publisher & admin controller
 │   │   ├── payment/                     # Payment aggregate, FSM, consumer & acquirer client
-│   │   └── refund/                      # Refund service, controller, and pessimistic locking
+│   │   ├── refund/                      # Refund service, controller, and pessimistic locking
+│   │   ├── security/                    # Provisioned identities, sessions, CSRF, memberships
+│   │   ├── webhook/                     # Durable signed notification infrastructure
+│   │   └── reconciliation/              # Manual authorization reports and read-only APIs
 │   ├── src/main/resources/
 │   │   ├── application.yaml             # Dedicated ports & Kafka/Postgres config
-│   │   └── db/migration/                # Flyway migrations V1 through V5
-│   └── src/test/java/                   # 180 Automated Unit & Testcontainers tests
+│   │   └── db/migration/                # Flyway migrations V1 through V11
+│   └── src/test/java/                   # Unit and real PostgreSQL/Kafka integration tests
 ├── frontend/                            # React 18 / TypeScript Operational Dashboard
 │   ├── src/
 │   │   ├── api/                         # Typed REST API clients (payment, ledger, outbox, dlt)
@@ -413,7 +422,7 @@ KaiPay/
 │   │   ├── pages/                       # Dashboard, Payment Details, Ledger, Outbox, DLT
 │   │   ├── App.tsx                      # Route declarations
 │   │   └── main.tsx                     # React root & TanStack Query client setup
-│   ├── package.json                     # React 18.3, Vite 6.1, Tailwind CSS 3.4
+│   ├── package.json                     # React 18.3, Vite 6.4 (locked), Tailwind CSS 3.4
 │   └── vite.config.ts                   # Port 28081 configuration & proxy rules
 ├── docker-compose.yml                   # Postgres 16 (25432), Kafka 3.8 (29092), Kafka-UI (28048)
 ├── docs/                                # Technical documentation suite
@@ -423,7 +432,7 @@ KaiPay/
 │   ├── double-entry-ledger.md           # Accounting proofs and balance projections
 │   ├── engineering-benchmark.md         # Architectural tradeoffs and improvement proposals
 │   ├── engineering-journal-...md        # Engineering post-mortem & distributed systems lessons
-│   └── screenshots/                     # 5 real high-resolution screenshots from live UI
+│   └── screenshots/                     # Historical local simulation UI screenshots
 ├── .env.example                         # Environment variable configuration template
 ├── .gitignore                           # Git hygiene configuration
 └── LICENSE                              # MIT License

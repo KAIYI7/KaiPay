@@ -176,11 +176,11 @@ const LedgerExplorer: React.FC = () => {
               Double-Entry Ledger & Accounts Explorer
             </h1>
             <span className="text-[10px] font-mono uppercase bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 px-2 py-0.5 rounded-full font-semibold">
-              Phase 4 Financial Core
+              Simulated accounting
             </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Real-time balance projections and immutable double-entry journal records for{' '}
+            Balance projections and stored double-entry journals for{' '}
             <span className="text-emerald-400 font-semibold">{isAdmin ? 'All merchants (operator diagnostics)' : activeMerchant.name}</span>
           </p>
         </div>
@@ -214,7 +214,7 @@ const LedgerExplorer: React.FC = () => {
                 </Badge>
               </div>
               <p className="text-slate-400 text-[11px] mt-0.5">
-                Every transaction generates balanced journal entries across Asset (1000 Cash Clearing), Liability (2000 Merchant Settlement Payable), and Revenue (4000 Processing Fee) accounts.
+                Capture and refund operations post balanced journals across Asset (1000 Customer Receivable), Liability (2000 Merchant Liability), and Revenue (4000 Platform Fee) accounts. Authorization alone posts no journal.
               </p>
             </div>
           </div>
@@ -223,7 +223,7 @@ const LedgerExplorer: React.FC = () => {
             <Building className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-slate-400">Tenant:</span>
             <span className="text-slate-200">{isAdmin ? 'All merchants (operator diagnostics)' : activeMerchant.name}</span>
-            <span className="text-slate-500">({truncateId(activeMerchant.id, 8)})</span>
+            {!isAdmin && <span className="text-slate-500">({truncateId(activeMerchant.id, 8)})</span>}
           </div>
         </div>
       </div>
@@ -233,7 +233,7 @@ const LedgerExplorer: React.FC = () => {
         {/* Available Payout Balance */}
         <Card className="relative overflow-hidden border-emerald-500/30 bg-gradient-to-b from-emerald-950/20 to-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Available Payout Balance (MYR only)</span>
+            <span>Merchant Balance (MYR only)</span>
             <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-400">
               <Coins className="w-4 h-4" />
             </div>
@@ -250,7 +250,7 @@ const LedgerExplorer: React.FC = () => {
                 {formatCentsToCurrency(balance?.availableBalanceCents ?? 0, balance?.currency || 'MYR')}
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                Net merchant settlement funds available for payout
+                Simulated ledger balance; no payout facility
               </p>
             </div>
           )}
@@ -311,7 +311,7 @@ const LedgerExplorer: React.FC = () => {
         {/* Total Refunds */}
         <Card className="relative overflow-hidden border-slate-700/80">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-            <span>Total Refunds Settled (MYR only)</span>
+            <span>Total Refunds (MYR only)</span>
             <div className="p-2 rounded-lg bg-purple-500/20 text-purple-400">
               <RotateCcw className="w-4 h-4" />
             </div>
@@ -368,13 +368,13 @@ const LedgerExplorer: React.FC = () => {
             <p className="text-xs text-slate-500 mt-1">
               Journals are automatically created when authorized payments are captured or refunds are executed.
             </p>
-            <div className="mt-4">
+            {!isAdmin && <div className="mt-4">
               <Link to="/payments">
                 <Button size="sm" variant="primary">
                   Go to Payments Explorer
                 </Button>
               </Link>
-            </div>
+            </div>}
           </div>
         )}
 

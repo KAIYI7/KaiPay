@@ -100,9 +100,9 @@ export const DltExplorerPage: React.FC = () => {
             </h1>
 
             <p className="text-xs text-slate-400 max-w-4xl leading-relaxed">
-              Non-blocking retry exhaustion buffer and poison pill isolation monitoring. Messages that exceed maximum retry attempts
-              on <code className="text-amber-400 font-mono">kaipay.payment.processing-retry</code> or trigger deserialization failures are routed to
-              the <code className="text-rose-400 font-mono">kaipay.payment.processing.DLT</code> topic and persisted in the Dead Letter Graveyard.
+              Diagnostic evidence for rejected or exhausted deliveries from <code className="text-amber-400 font-mono">kaipay.payment.requests</code> and its retry topics.
+              The default DLT is <code className="text-rose-400 font-mono">kaipay.payment.requests-dlt</code>.
+              DLT routing does not itself change payment state. This view provides no replay action.
             </p>
             <p className="text-xs text-slate-400">
               Browser diagnostics omit payloads, exception details and transport headers other than a validated correlation ID.
@@ -199,7 +199,7 @@ export const DltExplorerPage: React.FC = () => {
             <p className="text-xs text-slate-500 max-w-md mx-auto">
               {paymentIdFilter
                 ? `No dead letter events recorded for payment ID "${paymentIdFilter}".`
-                : 'The DLT graveyard is clean. No poison pills or exhausted retry messages have been intercepted.'}
+                : 'No DLT records are available. This does not establish that every payment completed; check payment status and stored authorization reports.'}
             </p>
             {paymentIdFilter && (
               <Button variant="outline" size="sm" onClick={handleClearFilter} className="text-xs">
