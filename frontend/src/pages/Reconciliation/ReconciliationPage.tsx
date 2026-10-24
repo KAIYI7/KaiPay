@@ -49,7 +49,7 @@ function ScopedReports({ merchantId, admin }: { merchantId: string; admin: boole
       {runs.isError ? <p role="alert" className="text-rose-300">Reports could not be loaded.</p> : runs.isPending ?
         <p role="status">Loading reports…</p> : <>
           {!runs.data.content.length && <p className="text-slate-400">No operator-created reports.</p>}
-          <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-slate-400"><tr>
+          <div className="data-scroll" tabIndex={0} role="region" aria-label="Stored reports table"><table className="w-full text-left text-sm"><thead className="text-slate-400"><tr>
             <th className="py-2 pr-4">Run / observed time</th><th className="pr-4">Creation cohort</th><th className="pr-4">Coverage</th><th>Report</th></tr></thead>
             <tbody>{runs.data.content.map((run) => <tr key={run.runId} className="border-t border-slate-700 text-slate-300 align-top">
               <td className="py-3 pr-4"><div className="font-mono break-all">{run.runId}</div><div>{date(run.snapshotObservedAt)}</div></td>
@@ -57,7 +57,7 @@ function ScopedReports({ merchantId, admin }: { merchantId: string; admin: boole
               <td className="py-3 pr-4">{run.cohortCount} examined<br />{run.counts.MATCHED || 0} authorization matches<br />{run.counts.EVIDENCE_UNAVAILABLE || 0} unavailable</td>
               <td className="py-3"><Button size="sm" variant="outline" onClick={() => setSelected(run.runId)} aria-label={`Inspect run ${run.runId}`}>Inspect</Button></td>
             </tr>)}</tbody></table></div>
-          <div className="flex items-center justify-between gap-3 mt-4 text-sm text-slate-400"><span>{runs.data.totalElements} reports · Page {page + 1}</span>
+          <div className="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm text-slate-400"><span>{runs.data.totalElements} reports · Page {page + 1}</span>
             <div className="flex gap-2"><Button size="sm" variant="outline" disabled={!page} onClick={() => { setPage(page - 1); setSelected(null); }}>Previous reports</Button>
               <Button size="sm" variant="outline" disabled={runs.data.last || page >= 100} onClick={() => { setPage(page + 1); setSelected(null); }}>Next reports</Button></div></div>
         </>}
@@ -82,10 +82,17 @@ function ReportDetail({ merchantId, admin, runId, close }: { merchantId: string;
       <p className="text-sm text-slate-400 mt-2">Observed: {date(detail.data.snapshotObservedAt)} · Completed: {date(detail.data.completedAt)}</p>
       <p className="text-sm text-slate-400 mt-2">Limits: {detail.data.paymentLimit} payments, seven-day creation window, {detail.data.graceSeconds} second diagnostic grace, {detail.data.executionLimitSeconds} second execution deadline.</p>
       {!detail.data.cohortCount && <p className="text-amber-300 mt-2">No eligible records. This report makes no financial-health claim.</p>}
-      <dl className="flex flex-wrap gap-x-5 gap-y-2 my-4 text-xs text-slate-400">{reconciliationClasses.map((type) => <div key={type}><dt>{label(type)}</dt><dd>{detail.data.counts[type] || 0}</dd></div>)}</dl>
+      <dl aria-label="Classifications with observations" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 my-5">
+        {reconciliationClasses.filter((type) => detail.data.counts[type] > 0).map((type) => <div key={type} className="rounded-lg border border-slate-600 bg-slate-900 p-3">
+          <dt className="text-sm text-slate-300">{label(type)}</dt><dd className="mt-1 text-2xl font-semibold tabular-nums text-slate-100">{detail.data.counts[type]}</dd>
+        </div>)}
+      </dl>
+      <details className="mb-5 text-sm text-slate-400"><summary>All classifications ({reconciliationClasses.length})</summary>
+        <dl className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-x-5 gap-y-3 mt-3">{reconciliationClasses.map((type) => <div key={type} className="flex justify-between gap-3"><dt>{label(type)}</dt><dd className="font-semibold tabular-nums text-slate-200">{detail.data.counts[type] || 0}</dd></div>)}</dl>
+      </details>
     </>}
-    <label className="text-sm text-slate-300">Observation class<select value={filter} onChange={(event) => { setFilter(event.target.value as ReconciliationFilter); setPage(0); setSelected(null); }}
-      className="ml-3 bg-slate-900 border border-slate-700 rounded p-2"><option value="NON_MATCHED">Nonmatched observations</option><option value="">All observations</option>
+    <label className="block text-sm text-slate-300">Observation class<select value={filter} onChange={(event) => { setFilter(event.target.value as ReconciliationFilter); setPage(0); setSelected(null); }}
+      className="block mt-2 w-full sm:w-auto max-w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5"><option value="NON_MATCHED">Nonmatched observations</option><option value="">All observations</option>
       {reconciliationClasses.map((type) => <option key={type} value={type}>{label(type)}</option>)}</select></label>
     {observations.isError ? <p role="alert" className="text-rose-300 mt-4">Observations could not be loaded.</p> : observations.isPending ? <p role="status" className="mt-4">Loading observations…</p> : <>
       {!observations.data.content.length && <p className="text-slate-400 mt-4">No observations match this view. Other classes may contain pending or unavailable evidence.</p>}
@@ -94,7 +101,7 @@ function ReportDetail({ merchantId, admin, runId, close }: { merchantId: string;
           <div>{label(observation.primaryClass)} · {observation.severity}</div></div><Button variant="outline" size="sm" onClick={() => setSelected(observation)} aria-label={`Evidence ${observation.paymentId}`}>Evidence</Button></div>
         <p className="mt-2">{observation.explanation}</p>
       </li>)}</ul>
-      <div className="flex items-center justify-between gap-3 mt-4 text-sm text-slate-400"><span>{observations.data.totalElements} observations · Page {page + 1}</span><div className="flex gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm text-slate-400"><span>{observations.data.totalElements} observations · Page {page + 1}</span><div className="flex gap-2">
         <Button size="sm" variant="outline" disabled={!page} onClick={() => { setPage(page - 1); setSelected(null); }}>Previous observations</Button>
         <Button size="sm" variant="outline" disabled={observations.data.last || page >= 100} onClick={() => { setPage(page + 1); setSelected(null); }}>Next observations</Button></div></div>
     </>}
@@ -105,12 +112,12 @@ function ReportDetail({ merchantId, admin, runId, close }: { merchantId: string;
 }
 function Evidence({ evidence: e }: { evidence: ReconciliationEvidence }) {
   const bool = (value?: boolean) => value === undefined ? 'Not assessed' : value ? 'Yes' : 'No';
-  return <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 text-sm text-slate-300">
-    <div><dt className="text-slate-500">Payment amount / state</dt><dd>{amount(e.paymentAmountCents, e.paymentCurrency)}</dd><dd>{e.paymentStatus || 'Unavailable'} · version {e.paymentVersion ?? '—'}</dd></div>
-    <div><dt className="text-slate-500">Stored operation / merchant binding</dt><dd>{bool(e.operationPresent)} / {bool(e.merchantMatches)}</dd></div>
-    {e.merchantMatches && e.operationPresent && <><div><dt className="text-slate-500">Simulator request / outcome</dt><dd>{amount(e.operationAmountCents, e.operationCurrency)}</dd><dd>{e.disposition || 'Unavailable'} · {e.evaluationCount ?? 0} evaluations</dd></div>
-      <div><dt className="text-slate-500">Result observed / fields agree</dt><dd>{date(e.resultAt)}</dd><dd>Reference: {bool(e.referenceMatches)} · Code: {bool(e.codeMatches)} · Message: {bool(e.messageMatches)}</dd></div></>}
-    <div><dt className="text-slate-500">Initiation event identities</dt><dd className="break-all">{e.eventIds?.join(', ') || 'Unavailable'}</dd></div>
-    <div><dt className="text-slate-500">Diagnostic context</dt><dd>{e.contextIncomplete ? 'Incomplete; omitted or unavailable transport context does not prove financial failure.' : 'Bounded context only; transport is not financial truth.'}</dd></div>
+  return <dl className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3 text-sm text-slate-300">
+    <div className="bg-slate-900 border border-slate-700 rounded-lg p-4"><dt className="text-slate-400">Payment amount / state</dt><dd className="text-lg font-semibold tabular-nums text-slate-100 mt-2">{amount(e.paymentAmountCents, e.paymentCurrency)}</dd><dd className="mt-1">{e.paymentStatus || 'Unavailable'} · version {e.paymentVersion ?? '—'}</dd></div>
+    {e.merchantMatches && e.operationPresent && <div className="bg-slate-900 border border-slate-700 rounded-lg p-4"><dt className="text-slate-400">Simulator request / outcome</dt><dd className="text-lg font-semibold tabular-nums text-slate-100 mt-2">{amount(e.operationAmountCents, e.operationCurrency)}</dd><dd className="mt-1">{e.disposition || 'Unavailable'} · {e.evaluationCount ?? 0} evaluations</dd></div>}
+    <div><dt className="text-slate-400">Stored operation / merchant binding</dt><dd>{bool(e.operationPresent)} / {bool(e.merchantMatches)}</dd></div>
+    {e.merchantMatches && e.operationPresent && <div><dt className="text-slate-400">Result observed / fields agree</dt><dd>{date(e.resultAt)}</dd><dd>Reference: {bool(e.referenceMatches)} · Code: {bool(e.codeMatches)} · Message: {bool(e.messageMatches)}</dd></div>}
+    <div><dt className="text-slate-400">Initiation event identities</dt><dd className="break-all">{e.eventIds?.join(', ') || 'Unavailable'}</dd></div>
+    <div><dt className="text-slate-400">Diagnostic context</dt><dd>{e.contextIncomplete ? 'Incomplete; omitted or unavailable transport context does not prove financial failure.' : 'Bounded context only; transport is not financial truth.'}</dd></div>
   </dl>;
 }

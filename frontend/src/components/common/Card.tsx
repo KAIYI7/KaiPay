@@ -19,14 +19,14 @@ export const Card: React.FC<CardProps> = ({
   return (
     <div
       className={twMerge(
-        clsx('bg-slate-800/80 border border-slate-700/80 rounded-xl p-5 shadow-sm backdrop-blur-sm', className)
+        clsx('bg-slate-800/80 border border-slate-700/80 rounded-xl p-5 min-w-0', className)
       )}
       {...props}
     >
       {(title || action) && (
-        <div className="flex items-center justify-between mb-4 border-b border-slate-700/50 pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 border-b border-slate-700/50 pb-3">
           <div>
-            {title && <h3 className="text-base font-semibold text-slate-100">{title}</h3>}
+            {title && <h2 className="text-base font-semibold text-slate-100">{title}</h2>}
             {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
           </div>
           {action && <div>{action}</div>}

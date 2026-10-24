@@ -3,7 +3,21 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  }
+  html { color-scheme: dark; }
+  body { font-feature-settings: "cv02", "cv03", "cv04", "cv11"; }
+  :focus-visible { outline: 2px solid theme('colors.emerald.400'); outline-offset: 3px; }
+  h1, h2, h3 { text-wrap: balance; }
+  main { overflow-wrap: anywhere; }
+  table { font-variant-numeric: tabular-nums; overflow-wrap: normal; }
+  summary { cursor: pointer; }
+  ::selection { background: theme('colors.emerald.800'); color: white; }
+}
+@layer components {
+  .skip-link { @apply sr-only; }
+  .skip-link:focus { @apply not-sr-only fixed top-3 left-3 z-50 bg-slate-900 text-emerald-300 p-3 rounded-lg; }
+  .data-scroll { @apply overflow-x-auto; }
+  .data-scroll table { min-width: 48rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin, .animate-ping, .animate-pulse { animation: none; }
 }

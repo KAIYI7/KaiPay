@@ -66,6 +66,13 @@ describe('immutable reconciliation reports', () => {
     fireEvent.click(await screen.findByRole('button', { name: `Evidence ${paymentA}` }));
     expect(await screen.findAllByText(/RM.*1.01.*101 sen \(MYR\)/)).toHaveLength(2);
     expect(screen.getByText(/FINALIZATION OUTSTANDING · WARNING/)).toBeTruthy();
+    const activeCounts = screen.getByLabelText('Classifications with observations');
+    expect(activeCounts.textContent).toContain('MATCHED');
+    expect(activeCounts.textContent).not.toContain('OWNERSHIP CONFLICT');
+    const allCounts = screen.getByText('All classifications (13)').closest('details')!;
+    expect(allCounts.open).toBe(false);
+    expect(allCounts.textContent).toContain('OWNERSHIP CONFLICT');
+    expect(allCounts.textContent).toContain('EVIDENCE UNAVAILABLE');
     expect(screen.getByText(/local finalization was not observed/)).toBeTruthy();
     expect(screen.getByText(/300 second diagnostic grace, 15 second execution deadline/)).toBeTruthy();
     expect(screen.getByRole('link', { name: paymentA }).getAttribute('href')).toBe(`/payments/${paymentA}`);

@@ -58,6 +58,19 @@ function mount() {
 afterEach(() => { cleanup(); clients.splice(0).forEach((client) => client.clear()); resetSessionTransport(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('merchant webhook visibility', () => {
+  it('explains empty enrollment without suggesting dispatch is active or showing empty table headings', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => Promise.resolve(String(input).endsWith('/endpoint') ?
+      response({ enabled: false, endpointId: null, keyId: null }) : response({ content: [], totalElements: 0, totalPages: 0, number: 0, last: true }))));
+    mount();
+    expect(await screen.findByText(/No endpoint is enrolled/)).toBeTruthy();
+    expect(await screen.findByText('No deliveries match this view.')).toBeTruthy();
+    expect(screen.getByText(/Enrollment does not indicate whether runtime dispatch is enabled/)).toBeTruthy();
+    expect(screen.queryByRole('table')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Delivery state'), { target: { value: 'EXHAUSTED' } });
+    expect(await screen.findByText('Try All states to include other delivery outcomes.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /activate|enroll|send|retry now/i })).toBeNull();
+  });
+
   it('shows safe delivery and retry history without exposing unexpected private response fields', async () => {
     httpFixture(); const { container } = mount();
     fireEvent.click(await screen.findByRole('button', { name: `Inspect ${eventA}` }));

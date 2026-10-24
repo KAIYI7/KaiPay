@@ -273,6 +273,25 @@ describe('merchant-scoped payment details', () => {
   });
 
   describe.each(['capture', 'refund'] as const)('%s mutation', (action) => {
+    it('announces its confirmation dialog, permits Escape before submission and retains pending confirmation', async () => {
+      const http = new HttpFixture();
+      http.status = action === 'capture' ? 'AUTHORIZED' : 'CAPTURED';
+      http.hold = (request) => request.method === 'POST';
+      mount(); await screen.findByText(/private-metadata-A/);
+      openAction(action);
+      const name = action === 'capture' ? 'Capture Payment Funds' : 'Issue Payment Refund';
+      const dialog = screen.getByRole('dialog', { name });
+      expect(document.activeElement).toBe(dialog);
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(http.matching(actionPath(action), 'POST')).toHaveLength(0);
+      openAction(action); enterAction(action, 'keyboard-confirmation'); submitAction(action);
+      await waitFor(() => expect(http.matching(actionPath(action), 'POST')).toHaveLength(1));
+      fireEvent.keyDown(screen.getByRole('dialog', { name }), { key: 'Escape' });
+      expect(screen.getByRole('dialog', { name })).toBeTruthy();
+      expect(http.matching(actionPath(action), 'POST')).toHaveLength(1);
+    });
+
     it.each([
       { outcome: 'success', returnToA: false }, { outcome: 'error', returnToA: false },
       { outcome: 'success', returnToA: true }, { outcome: 'error', returnToA: true },

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { MerchantProvider } from '../../context/MerchantContext';
@@ -8,9 +8,10 @@ import { ledgerApi } from '../../api/ledgerApi';
 import { Journal } from '../../models/ledger';
 import { LedgerPage } from './LedgerPage';
 
-vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: { roles: ['ADMIN'] } }) }));
+const auth = vi.hoisted(() => ({ roles: ['ADMIN'] }));
+vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ user: { roles: auth.roles } }) }));
 const clients: QueryClient[] = [];
-afterEach(() => { cleanup(); clients.splice(0).forEach((client) => client.clear()); vi.restoreAllMocks(); });
+afterEach(() => { auth.roles = ['ADMIN']; cleanup(); clients.splice(0).forEach((client) => client.clear()); vi.restoreAllMocks(); });
 function journal(currencies = ['USD', 'USD']): Journal {
   return {
     id: 'historical-journal', journalNumber: 'J-HISTORICAL', sourceType: 'PAYMENT_CAPTURE', sourceId: 'payment',
@@ -29,6 +30,25 @@ function mount(value?: Journal) {
 }
 
 describe('ledger currency displays', () => {
+  it.each([
+    { role: 'ADMIN', source: 'PAYMENT_CAPTURE', linked: false },
+    { role: 'MERCHANT', source: 'PAYMENT_CAPTURE', linked: true },
+    { role: 'MERCHANT', source: 'PAYMENT_REFUND', linked: false },
+  ] as const)('offers payment navigation only for merchant capture sources ($role/$source)', async ({ role, source, linked }) => {
+    auth.roles = [role];
+    vi.spyOn(ledgerApi, 'getMerchantBalance').mockResolvedValue({ merchantId: DEV_MERCHANTS[0].id, currency: 'MYR',
+      availableBalanceCents: 0, pendingSettlementCents: 0, totalVolumeCents: 0, totalFeesCents: 0, totalRefundsCents: 0 });
+    mount({ ...journal(), sourceType: source });
+    await screen.findByText('J-HISTORICAL');
+    const links = () => Array.from(document.querySelectorAll('a[href="/payments/payment"]'));
+    expect(links().length > 0).toBe(linked);
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect' }));
+    expect(links().length > 0).toBe(linked);
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('link', { name: 'payment' }) !== null).toBe(linked);
+    expect(screen.getAllByText(/payment/).length).toBeGreaterThan(0);
+  });
+
   it('keeps the operator empty state out of merchant payment routes', async () => {
     mount();
     await screen.findByText('No financial journals found');

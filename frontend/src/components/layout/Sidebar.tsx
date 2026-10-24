@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, CreditCard, FlaskConical, Layers, AlertOctagon, BookOpen, Webhook, ListChecks } from 'lucide-react';
 
-export const Sidebar: React.FC = () => {
+export const Sidebar: React.FC<{ open: boolean; onNavigate: () => void }> = ({ open, onNavigate }) => {
   const { user } = useAuth();
   const isAdmin = user?.roles.includes('ADMIN');
   const isMerchant = user?.roles.includes('MERCHANT');
@@ -22,20 +22,21 @@ export const Sidebar: React.FC = () => {
   ];
 
   return (
-    <aside className="w-64 bg-slate-900/95 border-r border-slate-800 flex flex-col justify-between p-4 shrink-0 min-h-[calc(100vh-4rem)]">
+    <aside id="workspace-navigation" className={`${open ? 'flex' : 'hidden'} lg:flex w-full lg:w-60 bg-slate-900/95 border-b lg:border-b-0 lg:border-r border-slate-800 flex-col justify-between gap-6 p-4 shrink-0`}>
       <div className="space-y-6">
         {/* Payment Core Navigation */}
         <div>
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-3 mb-2">
             {isMerchant ? 'Merchant workspace' : 'Operator diagnostics'}
           </div>
-          <nav className="space-y-1">
+          <nav aria-label="Payment workspace" className="space-y-1">
             {paymentCoreItems.map((item) => {
               const Icon = item.icon;
               return (
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  onClick={onNavigate}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       isActive
@@ -54,16 +55,17 @@ export const Sidebar: React.FC = () => {
 
         {/* Accounting and report navigation */}
         <div>
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider px-3 mb-2">
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-3 mb-2">
             Accounting & reports
           </div>
-          <nav className="space-y-1">
+          <nav aria-label="Accounting and reports" className="space-y-1">
             {financialCoreItems.map((item) => {
               const Icon = item.icon;
               return (
                 <NavLink
                   key={item.path}
                   to={item.path}
+                  onClick={onNavigate}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                       isActive
@@ -83,7 +85,7 @@ export const Sidebar: React.FC = () => {
 
       <div className="p-3 bg-slate-800/40 border border-slate-800 rounded-xl">
         <div className="text-xs font-semibold text-slate-300">Simulated payments</div>
-        <div className="text-[11px] text-slate-500 mt-0.5">No real money movement</div>
+        <div className="text-xs text-slate-400 mt-0.5">No real money movement</div>
       </div>
     </aside>
   );

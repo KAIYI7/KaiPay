@@ -50,12 +50,12 @@ export const StateMachineStepper: React.FC<StateMachineStepperProps> = ({
 
   return (
     <div className="w-full bg-slate-900/60 border border-slate-700/60 rounded-xl p-5">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
             Payment State Machine Trajectory
-          </h4>
-          <p className="text-xs text-slate-500 mt-0.5">
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">
             Simulated lifecycle; capture records local accounting, with no bank settlement
           </p>
         </div>
@@ -77,7 +77,7 @@ export const StateMachineStepper: React.FC<StateMachineStepperProps> = ({
                   : state === 'active'
                   ? 'bg-amber-950/30 border-amber-500/50 text-amber-300 ring-1 ring-amber-500/30'
                   : state === 'failed'
-                  ? 'bg-rose-950/20 border-rose-500/30 text-rose-400 opacity-60'
+                  ? 'bg-rose-950/20 border-rose-500/30 text-rose-400'
                   : 'bg-slate-800/40 border-slate-700/40 text-slate-400'
               }`}
             >
@@ -86,7 +86,7 @@ export const StateMachineStepper: React.FC<StateMachineStepperProps> = ({
                 {state === 'completed' && <Check className="w-4 h-4 text-emerald-400" />}
                 {state === 'failed' && <X className="w-4 h-4 text-rose-400" />}
               </div>
-              <p className="text-[11px] text-slate-400 leading-tight">{step.description}</p>
+              <p className="text-xs text-slate-400 leading-tight">{step.description}</p>
             </div>
           );
         })}

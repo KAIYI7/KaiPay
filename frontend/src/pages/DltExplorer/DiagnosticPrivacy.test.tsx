@@ -35,7 +35,7 @@ function mount(element: React.ReactNode) {
 describe('browser diagnostic privacy presentation', () => {
   it('describes omitted DLT evidence while retaining record and correlation metadata', async () => {
     vi.spyOn(dltApi, 'listDeadLetterEvents').mockResolvedValue(page({
-      id, originalTopic: 'kaipay.payment.requests-dlt', originalPartition: 2, originalOffset: 42,
+      id, paymentId: id, originalTopic: 'kaipay.payment.requests-dlt', originalPartition: 2, originalOffset: 42,
       exceptionClass: privateMarker, failureMessage: privateMarker, retryCount: 3,
       payload: JSON.stringify({ unexpected: privateMarker }),
       headers: { 'X-Correlation-Id': 'safe-correlation' }, createdAt,
@@ -50,6 +50,8 @@ describe('browser diagnostic privacy presentation', () => {
     expect(container.textContent).toContain('safe-correlation');
     expect(container.textContent).not.toContain(privateMarker);
     expect(container.innerHTML).not.toContain(privateMarker);
+    expect(container.querySelector('a[href^="/payments/"]')).toBeNull();
+    expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true');
     expect(screen.queryByText(/Serialized Payload/)).toBeNull();
   });
 
@@ -71,6 +73,8 @@ describe('browser diagnostic privacy presentation', () => {
     expect(container.textContent).toContain('safe-correlation');
     expect(container.textContent).not.toContain(privateMarker);
     expect(container.innerHTML).not.toContain(privateMarker);
+    expect(container.querySelector('a[href^="/payments/"]')).toBeNull();
+    expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true');
     expect(screen.queryByText(/Serialized Event Payload/)).toBeNull();
   });
 });

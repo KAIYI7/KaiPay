@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import { outboxApi } from '../../api/outboxApi';
 import { OutboxEvent, OutboxEventStatus } from '../../models/outbox';
 import { Card } from '../../components/common/Card';
+import { Modal } from '../../components/common/Modal';
 import { Button } from '../../components/common/Button';
 import { Select } from '../../components/common/Select';
 import { CopyButton } from '../../components/common/CopyButton';
@@ -15,14 +15,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  ArrowRight,
   Radio,
   CheckCircle2,
   Clock,
   AlertTriangle,
   Code2,
   X,
-  ExternalLink,
   Info,
 } from 'lucide-react';
 
@@ -79,30 +77,34 @@ export const OutboxStreamPage: React.FC = () => {
     <div className="space-y-6">
       {/* Top Banner: Internal Platform Operational Tool */}
       <div className="bg-slate-900/90 border border-emerald-500/30 rounded-xl p-5 shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 relative z-10">
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold font-mono uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-bold font-mono uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
                 <Database className="w-3 h-3" />
                 PostgreSQL ➔ Apache Kafka
               </span>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/50">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
                 Live Stream (2s)
               </span>
             </div>
 
             <h1 className="text-xl font-bold text-slate-100 tracking-tight">
-              Internal Platform Operational Tool: Transactional Outbox Buffer Monitor (PostgreSQL ➔ Apache Kafka)
+              Outbox Stream
             </h1>
 
-            <p className="text-xs text-slate-400 max-w-4xl leading-relaxed">
+            <p className="text-sm text-slate-300 leading-relaxed">Durable event publication with retries and operator recovery for quarantined records.</p>
+            <details className="text-sm text-slate-400">
+              <summary className="cursor-pointer text-slate-300">Diagnostic context</summary>
+              <p className="mt-2">Internal Platform Operational Tool: Transactional Outbox Buffer Monitor (PostgreSQL ➔ Apache Kafka)</p>
+            <p className="mt-2 max-w-4xl leading-relaxed">
               Durable event publication with retries and operator recovery for quarantined records. Payment state transitions
               and outbox records are committed atomically within PostgreSQL ACID transactions before being relayed to
-              Kafka by the asynchronous <code className="text-emerald-400 font-mono">OutboxEventPublisher</code> scheduler.
+              Kafka by the asynchronous <code className="text-emerald-400 font-mono break-all">OutboxEventPublisher</code> scheduler.
             </p>
+            </details>
             <p className="text-xs text-slate-400">
               Browser diagnostics omit payloads, error details and transport headers other than a validated correlation ID.
               Raw evidence remains in restricted storage.
@@ -138,11 +140,11 @@ export const OutboxStreamPage: React.FC = () => {
 
           <div className="flex items-center gap-4 text-xs text-slate-400 self-end sm:self-center">
             <div className="flex items-center gap-2 font-mono">
-              <span className="text-slate-500">Buffer Size:</span>
+              <span className="text-slate-400">Buffer Size:</span>
               <span className="font-bold text-slate-200">{totalElements}</span>
               <span>events</span>
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 bg-slate-900/60 px-2.5 py-1 rounded-md border border-slate-700/50">
+            <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/60 px-2.5 py-1 rounded-md border border-slate-700/50">
               <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
               <span>Auto-refreshing</span>
             </div>
@@ -180,7 +182,7 @@ export const OutboxStreamPage: React.FC = () => {
               <Layers className="w-6 h-6" />
             </div>
             <p className="text-sm font-semibold text-slate-200">No Outbox Events Found</p>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
+            <p className="text-xs text-slate-400 max-w-md mx-auto">
               {statusFilter
                 ? `No outbox events currently in ${statusFilter} state.`
                 : 'Create a transaction in the Testing Sandbox to generate transactional outbox events.'}
@@ -189,9 +191,9 @@ export const OutboxStreamPage: React.FC = () => {
         )}
 
         {!isLoading && !isError && events.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-[11px] text-slate-400 uppercase bg-slate-900/80 border-b border-slate-700/60">
+          <div className="overflow-x-auto" role="region" aria-label="Outbox events" tabIndex={0}>
+            <table className="w-full min-w-[58rem] text-left text-sm">
+              <thead className="text-xs text-slate-400 uppercase bg-slate-900/80 border-b border-slate-700/60">
                 <tr>
                   <th className="px-4 py-3.5 font-semibold">Event ID</th>
                   <th className="px-4 py-3.5 font-semibold">Event Type</th>
@@ -219,7 +221,7 @@ export const OutboxStreamPage: React.FC = () => {
                       {/* Event Type */}
                       <td className="px-4 py-3 font-sans">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono font-medium border ${getEventTypeBadgeClass(
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium border ${getEventTypeBadgeClass(
                             event.eventType
                           )}`}
                         >
@@ -230,19 +232,8 @@ export const OutboxStreamPage: React.FC = () => {
                       {/* Aggregate */}
                       <td className="px-4 py-3 text-slate-300">
                         <div className="flex items-center gap-1">
-                          <span className="text-slate-500 font-sans text-[11px]">{event.aggregateType}:</span>
-                          {event.aggregateType.toLowerCase() === 'payment' ? (
-                            <Link
-                              to={`/payments/${event.aggregateId}`}
-                              className="text-emerald-400 hover:underline flex items-center gap-1"
-                              title="Inspect Payment Details"
-                            >
-                              <span>{truncateId(event.aggregateId, 8)}</span>
-                              <ExternalLink className="w-3 h-3 opacity-60" />
-                            </Link>
-                          ) : (
-                            <span>{truncateId(event.aggregateId, 8)}</span>
-                          )}
+                          <span className="text-slate-400 font-sans text-xs">{event.aggregateType}:</span>
+                          <span>{truncateId(event.aggregateId, 8)}</span>
                           <CopyButton text={event.aggregateId} />
                         </div>
                       </td>
@@ -250,17 +241,17 @@ export const OutboxStreamPage: React.FC = () => {
                       {/* Status */}
                       <td className="px-4 py-3 font-sans">
                         {isPending ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
                             PENDING
                           </span>
                         ) : event.status === 'QUARANTINED' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30">
                             <AlertTriangle className="w-3.5 h-3.5" />
                             QUARANTINED
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             PUBLISHED
                           </span>
@@ -270,12 +261,12 @@ export const OutboxStreamPage: React.FC = () => {
                       {/* Retries */}
                       <td className="px-4 py-3 font-sans">
                         {event.retryCount > 0 ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40">
                             <AlertTriangle className="w-3 h-3" />
                             {event.retryCount}
                           </span>
                         ) : (
-                          <span className="text-slate-500 font-mono">0</span>
+                          <span className="text-slate-400 font-mono">0</span>
                         )}
                       </td>
 
@@ -287,7 +278,7 @@ export const OutboxStreamPage: React.FC = () => {
                         {event.publishedAt ? (
                           <span className="text-slate-300">{formatDate(event.publishedAt)}</span>
                         ) : (
-                          <span className="text-amber-400/80 italic text-[11px] flex items-center gap-1">
+                          <span className="text-amber-400/80 italic text-xs flex items-center gap-1">
                             <Clock className="w-3 h-3" />
                             Awaiting Relay
                           </span>
@@ -327,6 +318,7 @@ export const OutboxStreamPage: React.FC = () => {
               <Button
                 variant="outline"
                 size="sm"
+                aria-label="Previous page"
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
                 className="p-1.5 h-8 w-8"
@@ -337,6 +329,7 @@ export const OutboxStreamPage: React.FC = () => {
               <Button
                 variant="outline"
                 size="sm"
+                aria-label="Next page"
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={page >= totalPages - 1}
                 className="p-1.5 h-8 w-8"
@@ -350,16 +343,15 @@ export const OutboxStreamPage: React.FC = () => {
 
       {/* Event Payload & Metadata Inspection Modal */}
       {selectedEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+        <Modal label="Outbox event details" onClose={() => setSelectedEvent(null)}>
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-3 bg-slate-900/90">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
                   <Layers className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-100 flex flex-wrap items-center gap-2">
                     <span>Transactional Outbox Event</span>
                     <span
                       className={`text-xs px-2 py-0.5 rounded font-mono border ${getEventTypeBadgeClass(
@@ -369,13 +361,14 @@ export const OutboxStreamPage: React.FC = () => {
                       {selectedEvent.eventType}
                     </span>
                   </h3>
-                  <p className="text-xs text-slate-400 font-mono mt-0.5">ID: {selectedEvent.id}</p>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5 break-all">ID: {selectedEvent.id}</p>
                 </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setSelectedEvent(null)}
+                aria-label="Close outbox event details"
                 className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -383,11 +376,11 @@ export const OutboxStreamPage: React.FC = () => {
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-6 overflow-y-auto">
+            <div className="min-h-0 p-4 sm:p-6 space-y-6 overflow-y-auto">
               {/* Event Metadata Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800 text-xs">
                 <div>
-                  <span className="text-slate-500 block text-[11px] uppercase tracking-wider font-semibold">
+                  <span className="text-slate-400 block text-xs uppercase tracking-wider font-semibold">
                     Status
                   </span>
                   <span
@@ -400,7 +393,7 @@ export const OutboxStreamPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <span className="text-slate-500 block text-[11px] uppercase tracking-wider font-semibold">
+                  <span className="text-slate-400 block text-xs uppercase tracking-wider font-semibold">
                     Aggregate
                   </span>
                   <span className="text-slate-200 font-mono mt-1 inline-block truncate max-w-full">
@@ -409,7 +402,7 @@ export const OutboxStreamPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <span className="text-slate-500 block text-[11px] uppercase tracking-wider font-semibold">
+                  <span className="text-slate-400 block text-xs uppercase tracking-wider font-semibold">
                     Created At
                   </span>
                   <span className="text-slate-300 font-sans mt-1 inline-block">
@@ -418,7 +411,7 @@ export const OutboxStreamPage: React.FC = () => {
                 </div>
 
                 <div>
-                  <span className="text-slate-500 block text-[11px] uppercase tracking-wider font-semibold">
+                  <span className="text-slate-400 block text-xs uppercase tracking-wider font-semibold">
                     Published At
                   </span>
                   <span className="text-slate-300 font-sans mt-1 inline-block">
@@ -477,23 +470,17 @@ export const OutboxStreamPage: React.FC = () => {
             </div>
 
             {/* Modal Footer */}
-            <div className="px-6 py-3.5 bg-slate-900/90 border-t border-slate-800 flex justify-between items-center">
-              {selectedEvent.aggregateType.toLowerCase() === 'payment' && (
-                <Link to={`/payments/${selectedEvent.aggregateId}`}>
-                  <Button variant="outline" size="sm" className="text-xs gap-1.5">
-                    <span>Inspect Payment Entity</span>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-                  </Button>
-                </Link>
-              )}
+            <div className="shrink-0 flex-wrap gap-3 px-4 sm:px-6 py-3.5 bg-slate-900/90 border-t border-slate-800 flex justify-between items-center">
+              <span className="min-w-0 break-all text-xs text-slate-400 font-mono">
+                {selectedEvent.aggregateType} ID: {selectedEvent.aggregateId}
+              </span>
               <div className="ml-auto">
                 <Button variant="secondary" size="sm" onClick={() => setSelectedEvent(null)} className="text-xs">
                   Close
                 </Button>
               </div>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

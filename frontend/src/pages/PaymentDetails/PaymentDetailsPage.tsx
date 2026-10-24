@@ -6,6 +6,7 @@ import { refundApi } from '../../api/refundApi';
 import { useMerchant } from '../../context/MerchantContext';
 import { RefundStatus } from '../../models/refund';
 import { Card } from '../../components/common/Card';
+import { Modal } from '../../components/common/Modal';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
 import { Badge } from '../../components/common/Badge';
@@ -225,27 +226,27 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
     switch (status) {
       case 'COMPLETED':
         return (
-          <Badge variant="success" className="font-mono text-[11px]">
+          <Badge variant="success" className="font-mono text-xs">
             <CheckCircle2 className="w-3 h-3" />
             COMPLETED
           </Badge>
         );
       case 'PENDING':
         return (
-          <Badge variant="warning" className="font-mono text-[11px]">
+          <Badge variant="warning" className="font-mono text-xs">
             <RotateCw className="w-3 h-3 animate-spin" />
             PENDING
           </Badge>
         );
       case 'FAILED':
         return (
-          <Badge variant="danger" className="font-mono text-[11px]">
+          <Badge variant="danger" className="font-mono text-xs">
             <AlertOctagon className="w-3 h-3" />
             FAILED
           </Badge>
         );
       default:
-        return <Badge className="font-mono text-[11px]">{status}</Badge>;
+        return <Badge className="font-mono text-xs">{status}</Badge>;
     }
   };
 
@@ -293,7 +294,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
             </Button>
           </Link>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold font-mono text-slate-100">{payment.id}</h1>
+            <div className="min-w-0"><h1 className="text-2xl font-bold text-slate-100">Payment details</h1><p className="text-sm font-mono text-slate-300 break-all mt-1">{payment.id}</p></div>
             <CopyButton text={payment.id} />
           </div>
           <p className="text-xs text-slate-400">
@@ -354,6 +355,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
           </div>
           <button
             type="button"
+            aria-label="Dismiss action notification"
             onClick={() => setActionSuccessMessage(null)}
             className="text-emerald-400 hover:text-emerald-200"
           >
@@ -376,7 +378,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-amber-300">Transaction In-Flight: Asynchronous Processing</h3>
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-400/20 text-amber-300 border border-amber-400/40">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-400/20 text-amber-300 border border-amber-400/40">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
                     Live Polling Active (1s)
                   </span>
@@ -391,9 +393,9 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
             <div className="flex items-center gap-2 text-xs font-mono bg-slate-900/90 px-3 py-1.5 rounded-lg border border-slate-700/70 shrink-0 self-start md:self-auto">
               <span className="text-slate-400 font-semibold">Event Pipeline:</span>
               <span className="text-emerald-400">PostgreSQL Outbox</span>
-              <span className="text-slate-500">➔</span>
+              <span className="text-slate-400">➔</span>
               <span className="text-sky-400">Kafka Topic</span>
-              <span className="text-slate-500">➔</span>
+              <span className="text-slate-400">➔</span>
               <span className="text-amber-400">Bank Acquirer</span>
             </div>
           </div>
@@ -417,7 +419,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
           <div className="space-y-4 text-xs font-sans divide-y divide-slate-700/50">
             <div className="flex justify-between py-2 items-center">
               <span className="text-slate-400 flex items-center gap-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-slate-500" />
+                <CreditCard className="w-3.5 h-3.5 text-slate-400" />
                 Original Authorized Amount
               </span>
               <span className="text-base font-bold text-slate-100">
@@ -485,7 +487,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
           <div className="space-y-4 text-xs font-sans divide-y divide-slate-700/50">
             <div className="flex justify-between py-2 items-center">
               <span className="text-slate-400 flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5 text-slate-500" />
+                <Key className="w-3.5 h-3.5 text-slate-400" />
                 Idempotency Key
               </span>
               <div className="flex items-center gap-1 font-mono text-slate-200">
@@ -496,7 +498,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
 
             <div className="flex justify-between py-2 items-center">
               <span className="text-slate-400 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-slate-500" />
+                <Shield className="w-3.5 h-3.5 text-slate-400" />
                 Optimistic Lock Version
               </span>
               <span className="font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-700 text-emerald-400">
@@ -540,6 +542,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
             <Button
               variant="ghost"
               size="sm"
+              aria-label="Refresh refunds"
               onClick={() => refetchRefunds()}
               className="text-xs h-7 px-2 text-slate-400"
             >
@@ -557,7 +560,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
           <div className="py-12 text-center">
             <RotateCcw className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
             <p className="text-sm font-medium text-slate-300">No refunds recorded for this payment</p>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-slate-400 mt-1">
               {payment.status === 'CAPTURED'
                 ? 'You can issue full or partial refunds against this captured transaction.'
                 : 'Refunds can only be issued once the payment is captured.'}
@@ -565,9 +568,9 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
           </div>
         ) : (
           <div>
-            <div className="overflow-x-auto">
+            <div className="data-scroll" role="region" aria-label="Refund history table" tabIndex={0}>
               <table className="w-full text-left text-xs">
-                <thead className="text-[11px] text-slate-400 uppercase bg-slate-900/80 border-b border-slate-700/60">
+                <thead className="text-xs text-slate-400 uppercase bg-slate-900/80 border-b border-slate-700/60">
                   <tr>
                     <th className="px-4 py-3 font-semibold">Refund ID</th>
                     <th className="px-4 py-3 font-semibold">Amount</th>
@@ -593,7 +596,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                         {getRefundStatusBadge(refund.status)}
                       </td>
                       <td className="px-4 py-3 text-slate-300 font-sans">
-                        {refund.reason || <span className="text-slate-500 italic">No reason provided</span>}
+                        {refund.reason || <span className="text-slate-400 italic">No reason provided</span>}
                       </td>
                       <td className="px-4 py-3 text-slate-400">
                         <div className="flex items-center gap-1">
@@ -638,7 +641,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
       <Card
         title="Custom Metadata (JSONB)"
         subtitle="Unstructured payload stored in PostgreSQL jsonb column"
-        action={<FileJson className="w-4 h-4 text-slate-500" />}
+        action={<FileJson className="w-4 h-4 text-slate-400" />}
       >
         <pre className="bg-slate-950 p-4 rounded-lg font-mono text-xs text-slate-300 overflow-x-auto border border-slate-800">
           {JSON.stringify(payment.metadata, null, 2)}
@@ -647,8 +650,7 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
 
       {/* Capture Confirmation Modal */}
       {isCaptureModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-150">
+        <Modal label="Capture Payment Funds" onClose={() => { if (!captureMutation.isPending) setIsCaptureModalOpen(false); }} className="max-w-lg">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
@@ -656,11 +658,13 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-100">Capture Payment Funds</h3>
-                  <p className="text-xs text-slate-400">Move authorized hold to settled ledger state</p>
+                  <p className="text-xs text-slate-400">Record a simulated capture in the ledger</p>
                 </div>
               </div>
               <button
                 type="button"
+                aria-label="Close capture dialog"
+                disabled={captureMutation.isPending}
                 onClick={() => setIsCaptureModalOpen(false)}
                 className="text-slate-400 hover:text-slate-200"
               >
@@ -677,18 +681,18 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
               )}
 
               <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2 font-mono">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Payment ID:</span>
+                <div className="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                  <span className="text-slate-400">Payment ID:</span>
                   <span className="text-slate-200">{payment.id}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Capture Amount:</span>
+                <div className="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                  <span className="text-slate-400">Capture Amount:</span>
                   <span className="text-emerald-400 font-bold text-sm">
                     {formatCentsToCurrency(payment.amountCents, payment.currency)}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Customer ID:</span>
+                <div className="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                  <span className="text-slate-400">Customer ID:</span>
                   <span className="text-slate-300">{payment.customerId}</span>
                 </div>
               </div>
@@ -700,15 +704,15 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                   onChange={(e) => setCaptureIdempotencyKey(e.target.value)}
                   className="font-mono text-xs"
                 />
-                <p className="text-[11px] text-slate-500">
+                <p className="text-xs text-slate-400">
                   Guarantees at-most-once capture execution across transient network retries.
                 </p>
               </div>
 
-              <div className="p-3 rounded-lg bg-slate-800/60 border border-slate-700/60 text-[11px] text-slate-400 flex items-start gap-2.5">
+              <div className="p-3 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs text-slate-400 flex items-start gap-2.5">
                 <Scale className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <div>
-                  <strong>Financial Mechanics:</strong> Capturing generates balancing double-entry ledger journals (Asset: Cash Clearing, Liability: Merchant Settlement, Revenue: Platform Fee) and updates real-time merchant balances.
+                  <strong>Financial Mechanics:</strong> Capturing posts balancing journals to customer receivable, merchant liability and platform fee accounts. This is simulated accounting, with no bank settlement.
                 </div>
               </div>
             </div>
@@ -733,14 +737,12 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                 Confirm & Capture
               </Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Issue Refund Modal */}
       {isRefundModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-150">
+        <Modal label="Issue Payment Refund" onClose={() => { if (!refundMutation.isPending) setIsRefundModalOpen(false); }} className="max-w-lg">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-lg bg-purple-500/15 text-purple-400 border border-purple-500/30">
@@ -753,6 +755,8 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
               </div>
               <button
                 type="button"
+                aria-label="Close refund dialog"
+                disabled={refundMutation.isPending}
                 onClick={() => setIsRefundModalOpen(false)}
                 className="text-slate-400 hover:text-slate-200"
               >
@@ -770,18 +774,18 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                 )}
 
                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2 font-mono">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Payment ID:</span>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                    <span className="text-slate-400">Payment ID:</span>
                     <span className="text-slate-200">{payment.id}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Original Amount:</span>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                    <span className="text-slate-400">Original Amount:</span>
                     <span className="text-slate-200">
                       {formatCentsToCurrency(payment.amountCents, payment.currency)}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Already Refunded:</span>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1">
+                    <span className="text-slate-400">Already Refunded:</span>
                     <span className="text-purple-400">
                       {hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(totalRefundedCents, payment.currency)}
                     </span>
@@ -796,18 +800,19 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-medium text-slate-300">
+                    <label htmlFor="refund-amount" className="block text-xs font-medium text-slate-300">
                       Refund Amount ({payment.currency})
                     </label>
                     <button
                       type="button"
                       onClick={() => setRefundAmountMyr((remainingRefundableCents / 100).toFixed(2))}
-                      className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold"
+                      className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold"
                     >
                       Full Remaining ({hasMismatchedRefundCurrency ? 'Unavailable: currency mismatch' : formatCentsToCurrency(remainingRefundableCents, payment.currency)})
                     </button>
                   </div>
                   <Input
+                    id="refund-amount"
                     type="number"
                     step="0.01"
                     min="0.01"
@@ -854,15 +859,14 @@ const MerchantPaymentDetails: React.FC<{ merchantId: string; id?: string }> = ({
                   variant="primary"
                   size="sm"
                   isLoading={refundMutation.isPending}
-                  className="gap-1.5 bg-purple-600 hover:bg-purple-500 text-white"
+                  className="gap-1.5 bg-purple-700 hover:bg-purple-800 text-white"
                 >
                   <RotateCcw className="w-4 h-4" />
                   Process Refund
                 </Button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
