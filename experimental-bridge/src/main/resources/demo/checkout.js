@@ -37,7 +37,7 @@
       return;
     }
     if (!qrChecked) {
-      const result = await fetch('/api/checkout/' + requestId + '/qr', {method: 'GET', headers: {Authorization: 'Bearer ' + key}, credentials: 'omit', cache: 'no-store', redirect: 'error', signal});
+      const result = await fetch('/api/checkout/' + requestId + '/qr', {method: 'GET', headers: {Authorization: 'Bearer ' + key}, credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal});
       if (cleared) return;
       if (result.status === 404) {
         hideQr('No payment QR configured', 'Nonpayable placeholder · ask the receiver to configure their genuine receiving QR privately.');
@@ -81,7 +81,7 @@
     controller.signal.addEventListener('abort', cancel, {once: true});
     const timeout = setTimeout(cancel, 10000);
     try {
-      const result = await fetch('/api/checkout/' + requestId, {method: 'GET', headers: {Authorization: 'Bearer ' + key}, credentials: 'omit', cache: 'no-store', redirect: 'error', signal: attempt.signal});
+      const result = await fetch('/api/checkout/' + requestId, {method: 'GET', headers: {Authorization: 'Bearer ' + key}, credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: attempt.signal});
       if (!result.ok) throw Error(result.status === 401 || result.status === 403 || result.status === 404 ? 'Private access was not accepted. Ask the receiver for a current payer link.' : 'The server could not provide a current status. Retrying automatically.');
       const request = await result.json();
       if (cleared) return;
