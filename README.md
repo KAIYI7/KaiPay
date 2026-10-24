@@ -263,46 +263,46 @@ FINAL LIFECYCLE RECONCILIATION
 
 ## 7. Visual Portfolio Assets
 
-Fresh browser captures of the real local application at source revision [446fd76](https://github.com/KAIYI7/KaiPay/commit/446fd763cc0fb6c0cca2a6fdf0da81b2c01c2b3f), using a consistent 1440 × 1100 viewport. All identities, identifiers and financial data are disposable synthetic examples. Merchant transactions below were executed through authenticated application APIs; the reconciliation mismatch is a separate, deliberately constructed fixture. No interface content or financial results were altered for the images. Hosting remains postponed and external webhook dispatch remains disabled. See the [local walkthrough](docs/local-demo.md).
+Fresh desktop browser captures of the real local application at source revision [5b26214](https://github.com/KAIYI7/KaiPay/commit/5b26214a6d4ba4f3af0b4e461a12cfd7ce0dc2ca). All identities, identifiers and financial data are disposable synthetic examples. Merchant transactions below were executed through authenticated application APIs; the reconciliation mismatch is a separate, deliberately constructed fixture. These native JPEG captures have no pixel edits; no interface content or financial results were altered for the images. Hosting remains postponed and external webhook dispatch remains disabled. See the [local walkthrough](docs/local-demo.md).
 
 ### 7.1. Merchant MYR Dashboard
-![KaiPay Financial Overview Dashboard](docs/screenshots/dashboard.png)
+![KaiPay Financial Overview Dashboard](docs/screenshots/dashboard.jpg)
 *Five application-created synthetic payments in the assigned merchant workspace. Two captures and a partial refund produce RM164.37 merchant balance, RM209.90 captured volume, RM5.53 net fees and RM40.00 refunds. These are simulated ledger projections, with no payout facility.*
 
 ---
 
 ### 7.2. Payment State Machine & Lifecycle Management
-![KaiPay Payment Lifecycle & Idempotency Stepper](docs/screenshots/payment-details.png)
+![KaiPay Payment Lifecycle & Idempotency Stepper](docs/screenshots/payment-details.jpg)
 *An actual local application flow: RM120.00 simulated authorization and capture, followed by a completed RM40.00 partial refund with RM80.00 remaining. The displayed customer UUID, request key and simulator reference are synthetic. Capture/refund records local accounting, not bank settlement.*
 
 ---
 
 ### 7.3. Double-Entry Financial Ledger & Balanced Journals
-![KaiPay Double-Entry Ledger Explorer](docs/screenshots/double-entry-ledger.png)
+![KaiPay Double-Entry Ledger Explorer](docs/screenshots/double-entry-ledger.jpg)
 *The RM40.00 refund journal from that flow: RM38.84 merchant-liability debit plus RM1.16 fee-revenue debit equals RM40.00 customer-receivable credit. The journal balances; this view is separate from the operator-only accounting consistency audit.*
 
 ---
 
 ### 7.4. Transactional Outbox Stream Monitor
-![KaiPay Transactional Outbox Buffer Monitor](docs/screenshots/outbox-stream.png)
+![KaiPay Transactional Outbox Buffer Monitor](docs/screenshots/outbox-stream.jpg)
 *Separate ADMIN diagnostics show eight published initiation, capture and refund events from the synthetic application operations. Raw payloads and error details are omitted. Publication is asynchronous and may duplicate; the screenshot does not establish exactly-once delivery or throughput.*
 
 ---
 
 ### 7.5. Dead Letter Topic (DLT) & Poison Pill Graveyard
-![KaiPay Dead Letter Topic Explorer](docs/screenshots/dlt-explorer.png)
+![KaiPay Dead Letter Topic Explorer](docs/screenshots/dlt-explorer.jpg)
 *One real local diagnostic from the RM6,666.00 definitive-no-acceptance simulator scenario. The application finalized `FAILED` before diagnostic DLT routing; the DLT itself did not change payment state. Browser payload/exception omissions remain visible. No replay action is offered.*
 
 ---
 
 ### 7.6. Authorization Reconciliation — Constructed Mismatch
-![Stored authorization report showing a constructed synthetic request mismatch](docs/screenshots/reconciliation.png)
+![Stored authorization report showing a constructed synthetic request mismatch](docs/screenshots/reconciliation.jpg)
 *A separate merchant named “Synthetic Mismatch Fixture” contains a deliberately inserted RM50.01 payment versus RM50.00 simulator request, with no initiation event. The actual operator CLI produced this stored `REQUEST_MISMATCH` report; the UI displays its evidence without repair. This fixture illustrates detection, not a failure observed in the application-created payments or a capture/refund accounting assessment.*
 
 ---
 
 ### 7.7. Webhooks — Unenrolled Delivery History
-![Merchant webhook page with no enrolled endpoint and empty delivery history](docs/screenshots/webhooks.png)
+![Merchant webhook page with no enrolled endpoint and empty delivery history](docs/screenshots/webhooks.jpg)
 *The real merchant view shows no enrolled endpoint, no historical backfill and an empty delivery history. Runtime dispatch was separately verified disabled, with zero endpoints, deliveries or attempts. This image demonstrates the unenrolled view, not successful webhook delivery.*
 
 ---
