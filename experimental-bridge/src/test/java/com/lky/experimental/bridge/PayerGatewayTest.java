@@ -87,6 +87,40 @@ class PayerGatewayTest {
         assertThat(received).hasValue(2);
     }
 
+    @Test void crossSiteTopLevelEntryDoesNotGrantCrossSiteResourceAccess() throws Exception {
+        String[] navigation = {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "document"};
+        var entry = send("/checkout", "GET", navigation);
+        assertThat(entry.statusCode()).isEqualTo(200);
+        assertThat(entry.body()).contains("checkout-reference");
+        assertThat(entry.headers().firstValue("Cache-Control")).contains("no-store");
+        assertThat(entry.headers().firstValue("Content-Security-Policy").orElse("")).contains("frame-ancestors 'none'", "connect-src 'self'");
+        assertThat(entry.headers().firstValue("Set-Cookie")).isEmpty();
+        assertThat(entry.headers().firstValue("Access-Control-Allow-Origin")).isEmpty();
+        assertThat(received).hasValue(0);
+
+        for (String resource : new String[]{"/checkout.js", "/demo.css", PATH, PATH + "/qr"}) {
+            assertThat(send(resource, "GET", "Authorization", "Bearer " + TOKEN,
+                    "Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "document").statusCode())
+                    .as(resource).isEqualTo(403);
+        }
+        for (String[] headers : new String[][]{
+                {"Sec-Fetch-Site", "cross-site"},
+                {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate"},
+                {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Dest", "document"},
+                {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "iframe"},
+                {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "cors", "Sec-Fetch-Dest", "document"},
+                {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "document", "Origin", "https://other.example"},
+                {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "document", "Origin", "https://other.example", "Origin", "https://other.example"},
+                {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Mode", "cors", "Sec-Fetch-Dest", "document"},
+                {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "document", "Sec-Fetch-Dest", "iframe"}}) {
+            assertThat(send("/checkout", "GET", headers).statusCode()).as(java.util.Arrays.toString(headers)).isEqualTo(403);
+        }
+        assertThat(send("/api/state", "GET", navigation).statusCode()).isEqualTo(404);
+        assertThat(send("/checkout?x=1", "GET", navigation).statusCode()).isEqualTo(404);
+        assertThat(send("/checkout", "POST", navigation).statusCode()).isEqualTo(405);
+        assertThat(received).hasValue(0);
+    }
+
     @Test void everyPrivateRouteAndPathAmbiguityIsDeniedBeforeUpstreamEvenWithBearer() throws Exception {
         String id = UUID.randomUUID().toString();
         for (String path : new String[]{"/", "/demo.js", "/index.html", "/favicon.ico", "/health", "/actuator/health", "/error", "/receiving.png",

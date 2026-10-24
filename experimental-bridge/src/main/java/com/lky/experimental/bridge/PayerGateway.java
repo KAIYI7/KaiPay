@@ -152,8 +152,17 @@ public final class PayerGateway implements AutoCloseable {
     }
 
     private static boolean sameOrigin(HttpServletRequest request) {
-        if ("cross-site".equalsIgnoreCase(request.getHeader("Sec-Fetch-Site"))) return false;
         List<String> origins = Collections.list(request.getHeaders("Origin"));
+        if ("cross-site".equalsIgnoreCase(request.getHeader("Sec-Fetch-Site"))) {
+            // Public document entry can follow an external link or an access-gate redirect.
+            // This serves static HTML only; cross-site assets and payer data stay denied.
+            return request.getRequestURI().equals("/checkout") && origins.isEmpty()
+                    && Collections.list(request.getHeaders("Sec-Fetch-Site")).size() == 1
+                    && Collections.list(request.getHeaders("Sec-Fetch-Mode")).size() == 1
+                    && Collections.list(request.getHeaders("Sec-Fetch-Dest")).size() == 1
+                    && "navigate".equals(request.getHeader("Sec-Fetch-Mode"))
+                    && "document".equals(request.getHeader("Sec-Fetch-Dest"));
+        }
         if (origins.isEmpty()) return true;
         if (origins.size() != 1 || Collections.list(request.getHeaders("Host")).size() != 1) return false;
         String origin = origins.getFirst(), host = request.getHeader("Host");
