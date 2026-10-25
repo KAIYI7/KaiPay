@@ -66,7 +66,8 @@ public final class PayerGateway implements AutoCloseable {
             String resource = "/demo/" + (path.equals("/checkout") ? "checkout.html" : path.substring(1));
             try (var stream = PayerGateway.class.getResourceAsStream(resource)) {
                 if (stream == null) throw new IOException("Gateway resource unavailable");
-                assets.put(path, stream.readNBytes(128 * 1024));
+                byte[] contents = stream.readNBytes(128 * 1024);
+                assets.put(path, path.equals("/checkout") ? codeOnlyCheckout(contents) : contents);
             }
         }
         workers = new ThreadPoolExecutor(4, 4, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(16),
@@ -120,6 +121,15 @@ public final class PayerGateway implements AutoCloseable {
             }
         });
         context.addServletMappingDecoded("/*", "payer");
+    }
+
+    static byte[] codeOnlyCheckout(byte[] contents) throws IOException {
+        String html = new String(contents, StandardCharsets.UTF_8);
+        String privateMode = "data-checkout-entry=\"private\"";
+        int marker = html.indexOf(privateMode);
+        if (marker < 0 || marker != html.lastIndexOf(privateMode))
+            throw new IOException("Checkout entry mode unavailable");
+        return html.replace(privateMode, "data-checkout-entry=\"code\"").getBytes(StandardCharsets.UTF_8);
     }
 
     void start() throws Exception { server.start(); }

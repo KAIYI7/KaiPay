@@ -66,15 +66,45 @@ class PayerGatewayApplicationTest {
         assertThat(send(port, "/api/checkout/" + id + "/qr", token, null).statusCode()).isEqualTo(409);
     }
 
-    @Test void assembledLifecycleOutageRestartRevocationAndRoleSeparation() throws Exception {
-        CLOCK.now = Instant.parse("2026-01-01T00:00:00Z");
-        ACCESS_CLOCK.now = CLOCK.now;
+    private void preparePlaceholder() throws Exception {
         java.nio.file.Files.createDirectory(directory.resolve("placeholder"));
         var placeholder = new java.awt.image.BufferedImage(128, 128, java.awt.image.BufferedImage.TYPE_INT_RGB);
         var graphics = placeholder.createGraphics();
         graphics.setColor(java.awt.Color.WHITE); graphics.fillRect(0, 0, 128, 128);
         graphics.setColor(java.awt.Color.BLACK); graphics.drawString("NOT PAYABLE", 10, 64); graphics.dispose();
         javax.imageio.ImageIO.write(placeholder, "png", directory.resolve("placeholder/receiving.png").toFile());
+    }
+
+    @Test void privateBackendAndGatewaySelectExplicitEntryModesWithSameSecurityBoundary() throws Exception {
+        CLOCK.now = Instant.parse("2026-01-01T00:00:00Z");
+        ACCESS_CLOCK.now = CLOCK.now;
+        preparePlaceholder();
+        client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+        try (var context = backend(0);
+             var gateway = new PayerGateway(0, context.getWebServer().getPort())) {
+            backendPort = context.getWebServer().getPort();
+            mapper = context.getBean(ObjectMapper.class);
+            gateway.start();
+            var privateDocument = send(backendPort, "/checkout", null, null);
+            var publicDocument = send(gateway.port(), "/checkout", null, null);
+            assertThat(privateDocument.statusCode()).isEqualTo(200);
+            assertThat(privateDocument.body()).contains("data-checkout-entry=\"private\"", "checkout-access-form");
+            assertThat(publicDocument.statusCode()).isEqualTo(200);
+            assertThat(publicDocument.body()).contains("data-checkout-entry=\"code\"", "checkout-access-form")
+                    .doesNotContain("data-checkout-entry=\"private\"");
+            assertThat(publicDocument.headers().firstValue("Cache-Control")).contains("no-store");
+            assertThat(publicDocument.headers().firstValue("Referrer-Policy")).contains("no-referrer");
+            assertThat(publicDocument.headers().firstValue("Content-Security-Policy").orElse("")).contains("script-src 'self'", "form-action 'none'");
+            assertThat(publicDocument.headers().firstValue("Set-Cookie")).isEmpty();
+            assertThat(send(gateway.port(), "/checkout?code=invalid", null, null).statusCode()).isEqualTo(404);
+            assertThat(send(gateway.port(), "/api/state", RECEIVER, null).statusCode()).isEqualTo(404);
+        } finally { client.close(); }
+    }
+
+    @Test void assembledLifecycleOutageRestartRevocationAndRoleSeparation() throws Exception {
+        CLOCK.now = Instant.parse("2026-01-01T00:00:00Z");
+        ACCESS_CLOCK.now = CLOCK.now;
+        preparePlaceholder();
         client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
         var context = backend(0);
         backendPort = context.getWebServer().getPort(); mapper = context.getBean(ObjectMapper.class);

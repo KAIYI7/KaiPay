@@ -87,6 +87,17 @@ class PayerGatewayTest {
         assertThat(received).hasValue(2);
     }
 
+    @Test void gatewayCheckoutIsAlwaysCodeOnlyAndTemplateAmbiguityFailsClosed() throws Exception {
+        var response = send("/checkout", "GET");
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("data-checkout-entry=\"code\"", "checkout-access-form", "checkout-code")
+                .doesNotContain("data-checkout-entry=\"private\"");
+        assertThat(received).hasValue(0);
+        assertThatIOException().isThrownBy(() -> PayerGateway.codeOnlyCheckout("<html></html>".getBytes(StandardCharsets.UTF_8)));
+        assertThatIOException().isThrownBy(() -> PayerGateway.codeOnlyCheckout(
+                "<html data-checkout-entry=\"private\"><div data-checkout-entry=\"private\"></div></html>".getBytes(StandardCharsets.UTF_8)));
+    }
+
     @Test void crossSiteTopLevelEntryDoesNotGrantCrossSiteResourceAccess() throws Exception {
         String[] navigation = {"Sec-Fetch-Site", "cross-site", "Sec-Fetch-Mode", "navigate", "Sec-Fetch-Dest", "document"};
         var entry = send("/checkout", "GET", navigation);

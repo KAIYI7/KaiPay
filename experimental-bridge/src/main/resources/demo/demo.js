@@ -1,8 +1,9 @@
 'use strict';
 const byId = id => document.getElementById(id);
 const names = {AWAITING_PAYMENT: 'Awaiting payment', PAYMENT_DETECTED: 'Potential payment detected — unverified', AWAITING_VERIFICATION: 'Awaiting receiver confirmation', MANUALLY_CONFIRMED: 'Manually confirmed', AMBIGUOUS: 'Ambiguous — receiver review required', EXPIRED: 'Payment window closed — unconfirmed', REVIEW_EXPIRED: 'Receiver review ended — unconfirmed'};
-const payerLinks = new Map();
+const payerAccess = new Map();
 const pendingConfirmations = new Set();
+const pendingAccessMutations = new Map();
 let polling, generation = 0, refreshSequence = 0, lastRendered = '', controller = new AbortController();
 const money = minor => 'RM ' + (minor / 100).toFixed(2);
 function element(tag, text, className) {
@@ -44,27 +45,93 @@ async function api(path, body, role = 'receiver') {
     throw error;
   } finally { clearTimeout(timeout); sessionSignal.removeEventListener('abort', cancel); }
 }
-function addPrivateLink(row, request) {
-  const linkValue = payerLinks.get(request.id);
-  if (!linkValue) return;
+function clearCodeFields(container) {
+  for (const input of container.querySelectorAll('[data-checkout-code]')) {
+    input.value = '';
+    input.removeAttribute('value');
+  }
+}
+function accessButtons(requestId, disabled) {
+  for (const button of byId('requests').querySelectorAll('[data-access-request-id]')) {
+    if (button.dataset.accessRequestId === requestId) button.disabled = disabled;
+  }
+}
+function beginAccessMutation(requestId) {
+  if (pendingAccessMutations.has(requestId)) return null;
+  const operation = {};
+  pendingAccessMutations.set(requestId, operation);
+  accessButtons(requestId, true);
+  return operation;
+}
+function finishAccessMutation(requestId, operation) {
+  // A cleared session may already own a different operation for this request.
+  if (pendingAccessMutations.get(requestId) !== operation) return;
+  pendingAccessMutations.delete(requestId);
+  accessButtons(requestId, false);
+}
+function addPrivateAccess(row, request) {
+  const access = payerAccess.get(request.id);
+  if (!access) return;
   const box = element('div', undefined, 'private-link');
-  const link = element('a', 'Open private payer checkout');
-  link.href = linkValue;
+  const link = element('a', 'Open clean payer checkout');
+  link.href = access.url;
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
-  const input = element('input');
-  input.value = linkValue;
-  input.readOnly = true;
-  input.setAttribute('aria-label', 'Private payer checkout link for ' + request.id);
-  input.addEventListener('focus', () => input.select());
-  const revoke = element('button', 'Revoke payer link', 'secondary');
+  const url = element('input');
+  url.value = access.url;
+  url.readOnly = true;
+  url.setAttribute('aria-label', 'Clean checkout URL for ' + request.id);
+  url.addEventListener('focus', () => url.select());
+  const code = element('input');
+  code.type = 'password';
+  code.value = access.code;
+  code.readOnly = true;
+  code.autocomplete = 'off';
+  code.spellcheck = false;
+  code.setAttribute('data-checkout-code', '');
+  code.setAttribute('aria-label', 'Checkout code for ' + request.id);
+  const status = element('p', 'Share the clean URL first. The payer signs in there, then enters the code on the KaiPay page.', 'muted');
+  status.setAttribute('aria-live', 'polite');
+  async function copyValue(value, label) {
+    if (!value) { status.textContent = 'This code is no longer available. Issue a new checkout code.'; return; }
+    try {
+      await navigator.clipboard.writeText(value);
+      status.textContent = label + ' copied. Keep the code separate from the URL.';
+    } catch {
+      status.textContent = 'Clipboard unavailable. Select the clean URL to copy it, or choose Show checkout code and copy the selected code privately.';
+    }
+  }
+  const copyUrl = element('button', 'Copy checkout URL', 'secondary');
+  copyUrl.type = 'button'; copyUrl.onclick = () => copyValue(access.url, 'Checkout URL');
+  const copyCode = element('button', 'Copy checkout code', 'secondary');
+  copyCode.type = 'button'; copyCode.onclick = () => copyValue(access.code, 'Checkout code');
+  const reveal = element('button', 'Show checkout code', 'secondary');
+  reveal.type = 'button'; reveal.setAttribute('aria-pressed', 'false');
+  reveal.onclick = () => {
+    const showing = code.type === 'password';
+    code.type = showing ? 'text' : 'password';
+    reveal.textContent = showing ? 'Hide checkout code' : 'Show checkout code';
+    reveal.setAttribute('aria-pressed', String(showing));
+    if (showing) { code.focus(); code.select(); }
+  };
+  const revoke = element('button', 'Revoke checkout code', 'secondary');
+  revoke.type = 'button';
+  revoke.dataset.accessRequestId = request.id;
+  revoke.disabled = pendingAccessMutations.has(request.id);
   revoke.onclick = () => run(async epoch => {
-    await api('/api/requests/' + request.id + '/payer-revoke', {});
-    ensureCurrent(epoch);
-    payerLinks.delete(request.id);
-    await refresh();
+    const operation = beginAccessMutation(request.id);
+    if (!operation) return;
+    try {
+      await api('/api/requests/' + request.id + '/payer-revoke', {});
+      ensureCurrent(epoch);
+      access.code = null; access.url = null; code.value = ''; url.value = '';
+      payerAccess.delete(request.id);
+      await refresh();
+    } finally { finishAccessMutation(request.id, operation); }
   });
-  box.append(link, input, revoke, element('p', 'Sensitive read-only link: anyone holding it can view this request for up to 15 minutes. Reissuing, revoking or restarting the backend invalidates it. Share only with the intended payer.', 'muted'));
+  box.append(link, element('p', 'Clean checkout URL', 'muted'), url, copyUrl,
+    element('p', 'Private checkout code', 'muted'), code, copyCode, reveal, revoke, status,
+    element('p', 'Sensitive read-only access for up to 15 minutes. Replacing, revoking or restarting the backend invalidates the code. Share only with the intended payer. Copying deliberately places the code on your device clipboard; keep that clipboard private.', 'muted'));
   row.append(box);
 }
 function render(state) {
@@ -72,6 +139,7 @@ function render(state) {
   const evidenceCapacityReached = state.observations.length >= 1000;
   for (const request of [...state.requests].reverse()) {
     const row = element('article');
+    row.dataset.requestId = request.id;
     const evidence = state.observations.find(item => item.candidate.eventId === (request.observationId || request.reviewGrant?.eventId));
     const synthetic = evidence && evidence.candidate.source !== 'TNG_NOTIFICATION_CANDIDATE';
     const reviewAvailable = request.reviewGrant && !request.reviewGrant.revoked && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status);
@@ -86,25 +154,34 @@ function render(state) {
     if (request.status === 'EXPIRED' || request.status === 'REVIEW_EXPIRED') row.append(element('p', 'This request is unconfirmed and can no longer be verified or confirmed. Contact the payer to resolve any actual transfer. Do not request another payment automatically.'));
     if (request.paymentClosed && reviewAvailable) row.append(element('p', 'The payment window is closed. Review only the previously accepted candidate; it remains unverified until your independent check and explicit confirmation. Do not ask the payer to pay again.', 'notice'));
     if (evidenceCapacityReached && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status)) row.append(element('p', 'Evidence capacity is reached. Verification and confirmation are unavailable until explicit offline recovery.', 'notice'));
-    const linkButton = element('button', payerLinks.has(request.id) ? 'Replace payer link' : 'Get private payer link', 'secondary');
+    const linkButton = element('button', payerAccess.has(request.id) ? 'Replace checkout code' : 'Issue checkout code', 'secondary');
     linkButton.type = 'button';
+    linkButton.dataset.accessRequestId = request.id;
+    linkButton.disabled = pendingAccessMutations.has(request.id);
     linkButton.onclick = () => run(async epoch => {
-      const configured = byId('payer-origin').value.trim();
-      let origin = location.origin;
-      if (configured) {
-        const remote = new URL(configured);
-        if (remote.protocol !== 'https:' || remote.username || remote.password || remote.pathname !== '/' || remote.search || remote.hash)
-          throw Error('Enter only the approved HTTPS payer gateway origin.');
-        origin = remote.origin;
-      }
-      const access = await api('/api/requests/' + request.id + '/payer-access', {});
-      ensureCurrent(epoch);
-      if (access.requestId !== request.id || !/^[A-Za-z0-9_-]{43}$/.test(access.token)) throw Error('Invalid payer access response.');
-      payerLinks.set(request.id, origin + '/checkout#id=' + encodeURIComponent(request.id) + '&key=' + encodeURIComponent(access.token));
-      await refresh();
+      const operation = beginAccessMutation(request.id);
+      if (!operation) return;
+      try {
+        const configured = byId('payer-origin').value.trim();
+        let origin = location.origin;
+        if (configured) {
+          const remote = new URL(configured);
+          if (remote.protocol !== 'https:' || remote.username || remote.password || remote.pathname !== '/' || remote.search || remote.hash)
+            throw Error('Enter only the approved HTTPS payer gateway origin.');
+          origin = remote.origin;
+        }
+        const access = await api('/api/requests/' + request.id + '/payer-access', {});
+        ensureCurrent(epoch);
+        if (access.requestId !== request.id || !/^[A-Za-z0-9_-]{43}$/.test(access.token)) throw Error('Invalid payer access response.');
+        const previous = payerAccess.get(request.id);
+        if (previous) { previous.code = null; previous.url = null; }
+        clearCodeFields(row);
+        payerAccess.set(request.id, {url: origin + '/checkout', code: 'KP1.' + request.id + '.' + access.token});
+        await refresh();
+      } finally { finishAccessMutation(request.id, operation); }
     });
     row.append(linkButton);
-    addPrivateLink(row, request);
+    addPrivateAccess(row, request);
     if (!evidenceCapacityReached && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status) && evidence?.disposition === 'MATCHED' && request.observationId === evidence.candidate.eventId && (!request.paymentClosed || reviewAvailable)) {
       const form = element('form', undefined, 'confirmation-form');
       const label = element('label', undefined, 'attestation');
@@ -161,6 +238,7 @@ function render(state) {
     }
     requestRows.push(row);
   }
+  clearCodeFields(byId('requests'));
   byId('requests').replaceChildren(...(requestRows.length ? requestRows : [element('p', 'No requests yet. Create a checkout above.', 'empty')]));
   const observationRows = [];
   for (const item of [...state.observations].reverse()) {
@@ -195,7 +273,7 @@ async function refresh() {
   const sequence = ++refreshSequence;
   const state = await api('/api/state');
   if (sequence !== refreshSequence) return;
-  const fingerprint = JSON.stringify([state, [...payerLinks]]);
+  const fingerprint = JSON.stringify([state, [...payerAccess]]);
   if (fingerprint !== lastRendered) { render(state); lastRendered = fingerprint; }
   byId('connection').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
@@ -211,12 +289,15 @@ function clearSession() {
   clearInterval(polling);
   controller.abort();
   controller = new AbortController();
-  payerLinks.clear();
+  for (const access of payerAccess.values()) { access.code = null; access.url = null; }
+  payerAccess.clear();
   byId('payer-origin').value = '';
   pendingConfirmations.clear();
+  pendingAccessMutations.clear();
   lastRendered = '';
   byId('receiver').value = '';
   byId('device').value = '';
+  clearCodeFields(byId('requests'));
   byId('requests').replaceChildren();
   byId('observations').replaceChildren();
   byId('connection').textContent = 'Disconnected';
@@ -227,3 +308,4 @@ byId('observe').onclick = () => run(async () => { await api('/api/observations',
 byId('refresh').onclick = () => run(async () => { await refresh(); startPolling(); });
 byId('clear').onclick = clearSession;
 window.addEventListener('pagehide', clearSession);
+window.addEventListener('pageshow', event => { if (event.persisted) clearSession(); });
