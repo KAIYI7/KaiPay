@@ -118,32 +118,32 @@ const LedgerExplorer: React.FC = () => {
     switch (type) {
       case 'ASSET':
         return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-            ASSET (1xxx)
+          <span className="inline-flex flex-col items-start text-left whitespace-nowrap px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+            <span>ASSET</span>{' '}<span>(1xxx)</span>
           </span>
         );
       case 'LIABILITY':
         return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-            LIABILITY (2xxx)
+          <span className="inline-flex flex-col items-start text-left whitespace-nowrap px-2 py-0.5 rounded text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+            <span>LIABILITY</span>{' '}<span>(2xxx)</span>
           </span>
         );
       case 'EQUITY':
         return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/40">
-            EQUITY (3xxx)
+          <span className="inline-flex flex-col items-start text-left whitespace-nowrap px-2 py-0.5 rounded text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+            <span>EQUITY</span>{' '}<span>(3xxx)</span>
           </span>
         );
       case 'REVENUE':
         return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">
-            REVENUE (4xxx)
+          <span className="inline-flex flex-col items-start text-left whitespace-nowrap px-2 py-0.5 rounded text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40">
+            <span>REVENUE</span>{' '}<span>(4xxx)</span>
           </span>
         );
       case 'EXPENSE':
         return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40">
-            EXPENSE (5xxx)
+          <span className="inline-flex flex-col items-start text-left whitespace-nowrap px-2 py-0.5 rounded text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+            <span>EXPENSE</span>{' '}<span>(5xxx)</span>
           </span>
         );
       default:
