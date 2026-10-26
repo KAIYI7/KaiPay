@@ -318,15 +318,30 @@ The development configuration uses these conventional ports. Compose data/manage
 | **KaiPay Backend API** | Spring Boot | **`28080`** | `28080` | `http://localhost:28080` |
 | **KaiPay Frontend UI** | Vite / React | **`28081`** | `28081` | `http://localhost:28081` |
 | **KaiPay PostgreSQL** | Docker (`postgres:16-alpine`) | **`25432`** | `5432` | `jdbc:postgresql://localhost:25432/kaipay` |
-| **KaiPay Apache Kafka** | Docker (`apache/kafka:3.8.0`) | **`29092`** | `9092` | `localhost:29092` |
+| **KaiPay Apache Kafka** | Docker (`apache/kafka:3.8.0`) | **`29092`** | `9094` | `localhost:29092` (containers use `kafka:9092`) |
 | **KaiPay Kafka-UI** | Docker (`provectuslabs/kafka-ui`) | **`28048`** | `8080` | `http://localhost:28048` |
 
 ---
 
 ### Prerequisites
 - **JDK 21** installed.
+- **Git** and internet access for the clone and initial Maven/npm dependencies and Docker images. Set `JAVA_HOME` to JDK 21 if another JDK is selected; check `java -version` and the runtime reported by the Maven wrapper.
 - **Node.js 22+** and **npm** recommended for the locked frontend toolchain; use `npm ci`.
 - **Docker** and **Docker Compose** running.
+
+Obtain the public source, then run infrastructure commands from its root:
+
+```bash
+git clone https://github.com/KAIYI7/KaiPay.git
+cd KaiPay
+docker compose version
+node --version
+npm --version
+```
+
+The commands below assume the listed ports are free and the Compose containers and database belong to this checkout. Inspect `docker compose ps -a` and `docker volume ls` first: a new clone does not imply a new database. Compose uses fixed `kaipay-*` container names and a persistent PostgreSQL volume. For a parallel checkout, use distinct container names, host ports and a unique Compose project/volume; `-p` alone does not change fixed names or host ports. Update backend connection variables and the frontend proxy if changing ports. Never reset an existing dataset to complete this walkthrough.
+
+The explicit `local` profile supplies the shipped Compose connection defaults; no ignored local file is required. Copying `.env.example` to `.env` does **not** export variables to Java, Maven or the account CLI. Set overrides in the terminal that starts each process; see [backend configuration](backend/README.md#configuration).
 
 ---
 
@@ -342,22 +357,44 @@ docker compose ps
 
 ---
 
-### Step 2: Build & Start Backend Application
+### Step 2: Package & Start Backend Application
+
+In a new terminal, from the repository root, package the executable JAR needed by both the server and account CLI. On Bash:
+
 ```bash
 cd backend
-./mvnw clean spring-boot:run -Dspring-boot.run.profiles=local
+sh ./mvnw -version
+sh ./mvnw clean package -DskipTests
+java -jar target/KaiPay-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
-*The explicit local profile binds the API to loopback on port `28080` for HTTP development, while keeping authentication and CSRF enabled. Flyway applies pending migrations from V1–V11 to the configured database. Use a fresh disposable database for a demonstration; review compatibility before upgrading retained data. No login accounts are seeded: provision individual accounts using [operator commands](backend/README.md) before signing in. Ordinary deployment configuration requires explicit database/broker settings and Secure cookies.*
+
+On Windows PowerShell:
+
+```powershell
+cd backend
+.\mvnw.cmd -version
+.\mvnw.cmd clean package -DskipTests
+java -jar target/KaiPay-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
+```
+
+This compiles and packages source while skipping test execution; run the separate [verification commands](#9-automated-testing-strategy) for regression coverage. A system Maven installation is optional: the committed wrapper selects Maven 3.9.16. `spring-boot:run` alone does not create the packaged JAR.
+
+Wait for the backend's `Started KaiPayApplication` log. The explicit local profile binds the API to loopback on port `28080` for HTTP development, while keeping authentication and CSRF enabled. Flyway applies V1–V11 to a new database and seeds synthetic merchants/customers, with no login accounts. In a second terminal, follow [operator provisioning](backend/README.md#operator-provisioning), including its database environment setup, to create separate individual MERCHANT and ADMIN accounts before signing in. Review compatibility before upgrading retained data. Ordinary deployment configuration requires explicit database/broker settings and Secure cookies.
 
 ---
 
 ### Step 3: Start Frontend Dashboard
+
+In another terminal, from the repository root:
+
 ```bash
 cd frontend
 npm ci
 npm run dev
 ```
 *The management dashboard will be available at `http://localhost:28081`.*
+
+Sign in with the individual account just provisioned. Follow the [merchant walkthrough](docs/local-demo.md#merchant-walkthrough) for authorization, capture, partial/full refund and balanced journals. Reconciliation displays manually generated reports; external webhook dispatch remains disabled.
 
 ---
 
@@ -367,6 +404,8 @@ npm run dev
 - **Merchant Balance Endpoint**: `GET http://localhost:28080/v1/ledger/balance` (requires an authenticated merchant session and assigned `X-Merchant-Id`)
 - **Transactional Outbox Event Stream**: `GET http://localhost:28080/v1/events/outbox` (ADMIN session)
 - **Dead Letter Topic (DLT) Events**: `GET http://localhost:28080/v1/events/dlt` (ADMIN session)
+
+Kafka advertises separate host and container listeners so both the local backend and Kafka-UI can connect. These local management ports are unauthenticated; keep them on loopback. Sign out and stop the frontend/backend with Ctrl+C when finished. From the same repository root/project, `docker compose down` stops its infrastructure while retaining PostgreSQL data. Remove volumes only after confirming they are disposable and task-owned; never use a broad Docker prune for this walkthrough.
 
 ---
 
@@ -388,8 +427,10 @@ Run backend verification with **JDK 21**, Maven and working Docker/Testcontainer
 
 ```bash
 cd backend
-./mvnw verify
+sh ./mvnw verify
 ```
+
+On Windows use `.\mvnw.cmd verify` from `backend/`. The wrapper requires JDK 21 and internet access on first use; subsequent builds may reuse dependency/image caches.
 
 Run frontend checks separately:
 
