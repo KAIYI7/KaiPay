@@ -132,10 +132,16 @@ class PayerGatewayTest {
         assertThat(received).hasValue(0);
     }
 
+    @Test void operationalHealthRemainsPrivateEvenWithReceiverCredential() throws Exception {
+        assertThat(send("/api/health", "GET").statusCode()).isEqualTo(404);
+        assertThat(send("/api/health", "GET", "Authorization", "Bearer " + BridgeHttpTest.RECEIVER).statusCode()).isEqualTo(404);
+        assertThat(received).hasValue(0);
+    }
+
     @Test void everyPrivateRouteAndPathAmbiguityIsDeniedBeforeUpstreamEvenWithBearer() throws Exception {
         String id = UUID.randomUUID().toString();
         for (String path : new String[]{"/", "/demo.js", "/index.html", "/favicon.ico", "/health", "/actuator/health", "/error", "/receiving.png",
-                "/api/state", "/api/requests", "/api/observations", "/api/notification-candidates",
+                "/api/health", "/api/state", "/api/requests", "/api/observations", "/api/notification-candidates",
                 "/api/notification-candidates/" + id + "/invalidate", "/api/observations/" + id + "/resolve",
                 "/api/requests/" + id + "/verify", "/api/requests/" + id + "/confirm", "/api/requests/" + id + "/payer-access", "/api/requests/" + id + "/payer-revoke",
                 "/checkout/", "/checkout.js/", "/checkout;ignored", "/Checkout", PATH + "/extra", PATH + "/QR", PATH + "/", PATH + ";x=1", PATH + "?key=" + TOKEN,

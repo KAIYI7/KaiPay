@@ -20,7 +20,7 @@ class DisabledApplicationTest {
         assertThat(context.getBeansOfType(ObservationService.class)).isEmpty();
         assertThat(context.getBeansOfType(SnapshotStore.class)).isEmpty();
         try (HttpClient client = HttpClient.newHttpClient()) {
-            for (String path : new String[]{"/", "/demo.js", "/api/state", "/api/observations"}) {
+            for (String path : new String[]{"/", "/demo.js", "/api/health", "/api/state", "/api/observations"}) {
                 var response = client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path)).GET().build(), HttpResponse.BodyHandlers.ofString());
                 assertThat(response.statusCode()).isEqualTo(404);
                 assertThat(response.body()).isEqualTo("{\"error\":\"EXPERIMENT_DISABLED\"}");

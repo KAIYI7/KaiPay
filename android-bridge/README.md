@@ -1,5 +1,7 @@
 # Experimental Android notification feasibility probe
 
+See [supervised operations and health definitions](../experimental-bridge/OPERATIONS.md) for listener uncertainty, queue/worker status and manual recovery limits.
+
 **TNG payment compatibility: UNVERIFIED. Android debug build, headless tests and lint verified; validate notification behavior on your own physical device.**
 
 This experimental companion is separate from KaiPay's financial services. Local detection and live delivery require separate explicit enabling. Minimized, unverified candidates can reach the isolated experimental server; notification text never leaves the phone. It does not verify settlement or automate TNG. Builds and synthetic tests do not establish real TNG compatibility.
@@ -114,4 +116,4 @@ Android reconnect callbacks restore capture only from explicit saved consent and
 
 A 2xx response is accepted only with a bounded JSON acknowledgement matching every minimized candidate field and a recognized receiver disposition. Empty, malformed, wrong-event and oversized acknowledgements remain uncertain and retry the same UUID within the existing budgets. Receiver DELAYED/EXPIRED/UNMATCHED/AMBIGUOUS outcomes are displayed without a settlement claim. The B5 server admission deadline remains authoritative; an old device observation timestamp cannot reopen an expired payment window.
 
-Health separates disabled controls, disconnected listener, unknown connectivity and degraded backlog/storage/failures. A healthy label means a connected listener and an acknowledgement within the previous five minutes only; it is not a continuous network probe. Older or future acknowledgements report unknown. Last acknowledged communication time persists without payloads or credentials. Queue backlog and bounded notes remain private. No foreground service, wake lock, battery exemption or public endpoint is added.
+Health displays independent process, permission, listener, capture/delivery control, private storage, queue age, worker and acknowledgement dimensions. Listener state and last state-callback time are process-local; a new process remains UNKNOWN until a callback. Recent acknowledgement means historical authorized delivery only; missing, older-than-five-minute or future acknowledgements report UNKNOWN. WorkManager samples are bounded/throttled, separate delivery from recovery, and become UNKNOWN when stale. No aggregate HEALTHY label or continuous network/listener heartbeat is provided. Queue backlog and bounded notes remain private. No foreground service, wake lock, battery exemption or public endpoint is added.

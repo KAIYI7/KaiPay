@@ -43,7 +43,7 @@ final class BridgeFilter implements Filter {
                 error(response, 401, "UNAUTHORIZED"); return;
             }
         } else if (!publicResource) {
-            boolean canonical = path.equals("/api/state") || path.equals("/api/requests") || path.equals("/api/observations") || path.equals("/api/notification-candidates")
+            boolean canonical = path.equals("/api/health") || path.equals("/api/state") || path.equals("/api/requests") || path.equals("/api/observations") || path.equals("/api/notification-candidates")
                     || path.matches("/api/notification-candidates/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/invalidate")
                     || path.matches("/api/observations/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resolve")
                     || path.matches("/api/requests/" + UUID_PATH + "/(?:verify|confirm|payer-access|payer-revoke)");
@@ -55,6 +55,10 @@ final class BridgeFilter implements Filter {
             if (Collections.list(request.getHeaders("Authorization")).size() != 1
                     || !access.authorized(request.getHeader("Authorization"), role)) {
                 error(response, 401, "UNAUTHORIZED"); return;
+            }
+            if (path.equals("/api/health")) {
+                if (request.getQueryString() != null) { error(response, 404, "NOT_FOUND"); return; }
+                if (!"GET".equals(request.getMethod())) { error(response, 405, "METHOD_INVALID"); return; }
             }
         } else if (!"GET".equals(request.getMethod())) { error(response, 405, "METHOD_INVALID"); return; }
         if ("POST".equals(request.getMethod())) {

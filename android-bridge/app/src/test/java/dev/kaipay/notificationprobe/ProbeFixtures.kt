@@ -28,6 +28,7 @@ internal fun resetBridgeProcess() {
     ProbeRuntime::class.java.getDeclaredField("context").apply { isAccessible = true }.set(null, null)
     ProbeRuntime::class.java.getDeclaredField("lastRebind").apply { isAccessible = true }.setLong(null, Long.MIN_VALUE)
     ProbeRuntime::class.java.getDeclaredField("listenerKnown").apply { isAccessible = true }.setBoolean(null, false)
+    ProbeRuntime::class.java.getDeclaredField("listenerChangedAt").apply { isAccessible = true }.set(null, null)
     ProbeRuntime.session.setConnected(false)
 }
 

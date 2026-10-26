@@ -28,6 +28,7 @@ internal object ProbeRuntime {
     @Volatile private var context: Context? = null
     private var lastRebind = Long.MIN_VALUE
     @Volatile var listenerKnown = false; private set
+    @Volatile var listenerChangedAt: Long? = null; private set
     fun initialize(app: Context) {
         context = app.applicationContext
         val controls = OwnerControlRuntime.get(app)
@@ -44,12 +45,12 @@ internal object ProbeRuntime {
         return true
     }
     fun connected(app: Context) {
-        initialize(app); listenerKnown = true; session.setConnected(true)
+        initialize(app); listenerKnown = true; listenerChangedAt = System.currentTimeMillis(); session.setConnected(true)
         if (OwnerControlRuntime.get(app).capture && app.notificationAccessGranted()) session.setEnabled(true)
     }
     fun disconnected(app: Context) {
         context = app.applicationContext
-        listenerKnown = true; session.setConnected(false); scheduleExpiry()
+        listenerKnown = true; listenerChangedAt = System.currentTimeMillis(); session.setConnected(false); scheduleExpiry()
         if (!app.notificationAccessGranted()) disable() else requestRecovery(app)
     }
     fun requestRecovery(app: Context) {

@@ -17,6 +17,14 @@ class BridgeController {
     private final ObservationService service;
     BridgeController(ObservationService service) { this.service = service; }
 
+    // A successful sample proves only this receiver-authorized process responded now.
+    // Do not inspect payment state or infer phone connectivity from backend availability.
+    @GetMapping("/api/health") OperationalHealth health() {
+        return new OperationalHealth(java.time.Instant.now().toString(), "RUNNING", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN");
+    }
+    record OperationalHealth(String sampledAt, String backendProcess, String androidListener,
+                             String androidQueue, String androidWorker, String notificationTransport) {}
+
     @GetMapping("/api/state") Snapshot state() { return service.view(); }
     @PostMapping("/api/requests") PaymentRequest create(@RequestBody CreateRequest input) { return service.create(input); }
     @PostMapping("/api/observations") Observation ingest(@RequestBody Candidate event) { return service.ingest(event); }

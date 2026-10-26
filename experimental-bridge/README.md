@@ -1,5 +1,7 @@
 # Experimental notification observation server
 
+For private synthetic startup, health interpretation, exact-process shutdown and supervised recovery, see [local operations](OPERATIONS.md).
+
 This standalone Java 21 / Spring Boot process supports synthetic checkouts and opt-in Android notification candidates. It has no dependency on KaiPay's payment backend, database, Kafka, refund services, payment transitions, or ledger. **An authenticated Android report is unverified client evidence, never settlement proof or proof of a particular order.** Real TNG classification and delivery on a fresh ordinary notification remain **UNVERIFIED** until separately observed on the receiver's phone.
 
 The experiment is disabled by default and binds `127.0.0.1:28082`. Keep the receiver backend on laptop loopback. Optional public payer access must use the separate payer gateway below; never tunnel directly to the receiver backend. The Android debug app uses the USB development tunnel `adb reverse tcp:28082 tcp:28082` and its narrowly allowed `http://127.0.0.1:28082` destination. Remote configurations require actual HTTPS and normal certificate verification; forwarded headers never establish transport trust.

@@ -29,6 +29,7 @@ internal class LiveDelivery private constructor(private val app: Application) {
     @Volatile private var consent = false
     @Volatile private var generation = 0L
     @Volatile private var localError = ""
+    private val workerHealth = WorkerHealth()
 
     init { ProbeRuntime.initialize(app); ProbeRuntime.requestRecovery(app); control {
         try {
@@ -223,37 +224,51 @@ internal class LiveDelivery private constructor(private val app: Application) {
         WorkManager.getInstance(app).enqueueUniqueWork("$prefix-$id", ExistingWorkPolicy.KEEP, work)
     }
     fun status(): String = try {
-        if (!ready) "Experimental delivery initializing; disabled until ready" else buildString {
-            append("Experimental delivery enabled: "); append(consent)
+        buildString {
+            val now = System.currentTimeMillis()
             val capture = ProbeRuntime.session.snapshot()
-            val pending = store.displayRows().filter { it.status == DeliveryStatus.PENDING || it.status == DeliveryStatus.INVALIDATION_PENDING }
-            val health = when {
+            val access = app.notificationAccessGranted()
+            append("Status sampled at: "); append(java.time.Instant.ofEpochMilli(now))
+            append("\nApplication process: RUNNING at sample time; not proof of notification receipt")
+            append("\nNotification access: "); append(if (access) "GRANTED" else "UNAVAILABLE")
+            append("\nListener: "); append(OperationalHealth.listener(access, ProbeRuntime.listenerKnown, capture.connected))
+            append("\nLast listener state callback in this process: ")
+            append(ProbeRuntime.listenerChangedAt?.let { java.time.Instant.ofEpochMilli(it) } ?: "unknown")
+            append("\nCapture enabled: "); append(capture.enabled)
+            if (!access || !capture.connected) append("\nListening uncertain. Xiaomi may need owner-supervised manual reconnection; a rebind request is not a connection.")
+            if (!ready) {
+                append("\nExperimental delivery initializing; queue, worker and receiver state UNKNOWN")
+                return@buildString
+            }
+            append("\n")
+            append("Experimental delivery enabled: "); append(consent)
+            val rows = store.displayRows()
+            val pending = rows.filter { it.status == DeliveryStatus.PENDING || it.status == DeliveryStatus.INVALIDATION_PENDING }
+            workerHealth.refresh(app, rows)
+            append("\nPrivate storage: "); append(if (store.healthy && OwnerControlRuntime.get(app).healthy) "AVAILABLE" else "UNAVAILABLE: delivery unsafe")
+            val condition = when {
                 !store.healthy || !OwnerControlRuntime.get(app).healthy -> "DEGRADED: private storage unavailable"
-                !app.notificationAccessGranted() -> "DISCONNECTED: notification access unavailable"
                 !consent -> "DISABLED: delivery owner control is off"
-                !capture.connected && ProbeRuntime.listenerKnown -> "DISCONNECTED: listener unavailable; recovery requested"
-                !capture.connected -> "UNKNOWN: listener connection not observed in this process"
-                !capture.enabled -> "DEGRADED: capture disabled"
-                store.displayRows().any { it.status == DeliveryStatus.FAILED || it.status == DeliveryStatus.EXPIRED } -> "DEGRADED: failed or stale queue entries require review"
+                rows.any { it.status == DeliveryStatus.FAILED || it.status == DeliveryStatus.EXPIRED } -> "DEGRADED: failed or stale queue entries require review"
                 store.warning.isNotEmpty() || localError.isNotEmpty() && !localError.startsWith("Device configuration saved") -> "DEGRADED: inspect local diagnostic below"
                 pending.isNotEmpty() -> "DEGRADED: pending delivery; transport not yet acknowledged"
-                store.lastAcknowledgedAt == null -> "UNKNOWN: receiver communication not yet acknowledged"
-                System.currentTimeMillis() - requireNotNull(store.lastAcknowledgedAt) !in 0..300_000 -> "UNKNOWN: last acknowledgement is stale or device clock changed"
-                else -> "HEALTHY: listener connected; recent receiver acknowledgement only"
+                else -> "No pending delivery; not proof of notification listening"
             }
-            append("\nHealth: "); append(health)
+            append("\nDelivery condition: "); append(condition)
             append("\nQueue backlog: "); append(pending.size)
-            append("\nLast successful communication: "); append(store.lastAcknowledgedAt?.let { java.time.Instant.ofEpochMilli(it) } ?: "unknown")
+            append("\nOldest pending evidence age: "); append(OperationalHealth.oldestAge(pending, now))
+            append("\nLast successfully acknowledged delivery: "); append(store.lastAcknowledgedAt?.let { java.time.Instant.ofEpochMilli(it) } ?: "unknown")
+            append("\nReceiver acknowledgement: "); append(OperationalHealth.acknowledgement(store.lastAcknowledgedAt, now))
             append("\nTransport availability: unknown between attempts; Android may defer work")
+            append("\n"); append(workerHealth.status())
             append("\nConfiguration present: "); append(config() != null)
-            val rows = store.displayRows()
             DeliveryStatus.values().forEach { status -> append("\n"); append(status); append(": "); append(rows.count { it.status == status }) }
             if (store.warning.isNotEmpty()) { append("\n"); append(store.warning) }
             if (localError.isNotEmpty()) { append("\n"); append(localError) }
             rows.takeLast(5).forEach { append("\n"); append(it.candidate.source); append(" "); append(it.status); append(" — "); append(it.note) }
             append("\nNotification evidence is unverified. Check actual TNG history before receiver confirmation.")
         }
-    } catch (_: Exception) { "Delivery storage unavailable; disable and clear before testing" }
+    } catch (_: Exception) { "Operational health UNKNOWN: local status unavailable; inspect storage before testing" }
     private fun control(dropStaleCallbacks: Boolean = false, action: () -> Unit) {
         dispatcher.control(dropStaleCallbacks, action)
     }
