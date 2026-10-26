@@ -25,6 +25,21 @@ context and resource ownership. Administrator operational pages use no merchant
 header and do not impersonate a merchant. Frontend route checks support usability;
 backend authorization remains the security boundary.
 
+Dependency security assessment (27 October 2026): the locked tree includes the
+Vite 6.4.4, Vitest 4.1.12 and selector-parser 6.1.5 security patches. Development
+and test servers should remain local; the production build contains static assets.
+Run `npm audit` and `npm audit --omit=dev` from this directory to recheck current
+advisories. Audit results depend on the registry's current advisory data.
+
+Two moderate audit entries remain for React Router 6.30.6 and its DOM wrapper,
+covering [attacker-controlled navigation destinations](https://github.com/advisories/GHSA-wrjc-x8rr-h8h6)
+and [SSR error hydration](https://github.com/advisories/GHSA-337j-9hxr-rhxg).
+The current app uses declarative `BrowserRouter` with client rendering, no SSR
+hydration, and internal navigation destinations built from fixed paths and server
+resource IDs. No affected application path was identified in this assessment.
+The published fixes start at Router 7.18.0; reassess before introducing untrusted
+navigation destinations or SSR, or as part of a separately tested Router migration.
+
 Payment/refund cache keys include merchant and resource identities. A separate query
 client is allocated for each authenticated lifetime, even when accounts share a
 merchant. Logout, expiry and identity changes clear cached private data, cancel reads
