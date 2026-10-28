@@ -81,6 +81,9 @@ spring:
       ack-mode: manual_immediate
 
 kaipay:
+  integrations:
+    # Configure operator-owned synthetic bindings explicitly; source publication does not activate them.
+    enabled: false
   webhooks:
     # Nonlocal activation is unavailable until separately verified ownership and network egress controls.
     mode: disabled

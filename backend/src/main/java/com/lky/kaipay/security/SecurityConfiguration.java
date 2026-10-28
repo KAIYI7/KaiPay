@@ -108,6 +108,7 @@ public class SecurityConfiguration {
             .requestCache(cache -> cache.disable())
             .httpBasic(basic -> basic.disable());
         http.addFilterBefore(new SessionIdentityFilter(identities), CsrfFilter.class);
+        http.addFilterBefore(new com.lky.kaipay.integration.IntegrationCredentialDestinationFilter(mapper), CsrfFilter.class);
         http.addFilterBefore(new LoginAdmissionFilter(admission, mapper), UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
