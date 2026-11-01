@@ -11,6 +11,8 @@
 
 KaiPay is a portfolio payment simulation built with **Java 21**, **Spring Boot 4.1.1**, **PostgreSQL 16** and **Kafka**, with a React merchant dashboard and separate administrator diagnostics. One backend application demonstrates asynchronous authorization, idempotent requests, durable simulator recovery and double-entry capture/refund accounting. New activity uses **MYR, in integer sen** (100 sen = RM1.00).
 
+**🎬 [Watch the KaiPay engineering demo (2:33)](https://youtu.be/PY0rIkNpsR0)** — A narrated and subtitled walkthrough of simulated MYR payments, capture/refunds, balanced journals, Kafka outbox/DLT diagnostics, and a deliberately constructed authorization-reconciliation mismatch. No real money movement or bank settlement is shown.
+
 ---
 
 ## 1. Project Overview
