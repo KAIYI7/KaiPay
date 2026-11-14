@@ -42,6 +42,18 @@ class IntegrationAuthenticationFilterTest {
         }
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
+    @Test void cookieAloneCannotAuthorizeMachineRequests() throws Exception {
+        var enabled = filter(true);
+        for (String value : List.of("", "Bearer kp_int_fixture." + "_".repeat(43))) {
+            var request = request("GET"); request.removeHeader("Authorization");
+            if (!value.isEmpty()) request.addHeader("Authorization", value);
+            request.addHeader("Cookie", "CF_Authorization=synthetic-cookie");
+            var response = new MockHttpServletResponse();
+            enabled.doFilter(request, response, (req, res) -> fail("invalid credential dispatched"));
+            assertThat(response.getStatus()).isEqualTo(401);
+            assertThat(response.getContentAsString()).doesNotContain("synthetic-cookie", value.isEmpty() ? "Bearer " : value);
+        }
+    }
     @Test void perBindingPutAndGetBudgetsAreSeparateAndBounded() throws Exception {
         var filter = filter(true); var calls = new AtomicInteger();
         for (int i=0;i<31;i++) {
