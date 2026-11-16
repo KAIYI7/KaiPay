@@ -108,7 +108,9 @@ try {
         if (!$tmpfs.ContainsKey('/var/lib/postgresql/data')) { throw 'Disposable fixture database is not mounted as tmpfs.' }
         $deadline = [DateTime]::UtcNow.AddSeconds(60)
         do {
-            & $docker exec $id pg_isready -U postgres -d postgres *> $null
+            # TCP, not the socket: the image's temporary initialization server listens only on
+            # the socket and restarts afterwards, so a socket check can pass just before that restart.
+            & $docker exec $id pg_isready -h 127.0.0.1 -U postgres -d postgres *> $null
             if ($LASTEXITCODE -eq 0) { break }
             Start-Sleep -Milliseconds 250
         } while ([DateTime]::UtcNow -lt $deadline)
