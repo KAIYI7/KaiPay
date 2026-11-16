@@ -1,0 +1,13 @@
+services:
+  kafka:
+    environment:
+      CLUSTER_ID: ${KAIPAY_DEMO_KAFKA_CLUSTER_ID:?An explicitly verified Kafka cluster ID is required}
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_METADATA_LOG_DIR: /var/lib/kafka/data
+    volumes:
+      - kaipay_demo_kafka_data:/var/lib/kafka/data
+
+volumes:
+  kaipay_demo_kafka_data:
+    external: true
+    name: ${KAIPAY_DEMO_KAFKA_VOLUME:?An existing verified Kafka volume is required}
