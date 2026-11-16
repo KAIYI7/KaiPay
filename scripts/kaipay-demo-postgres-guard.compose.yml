@@ -1,0 +1,11 @@
+services:
+  postgres:
+    entrypoint: ["/bin/sh", "/opt/kaipay/kaipay-demo-postgres-guard.sh"]
+    command: []
+    environment:
+      KAIPAY_EXPECTED_PG_SYSTEM_ID: ${KAIPAY_EXPECTED_PG_SYSTEM_ID:?An independently verified PostgreSQL system identifier is required}
+    volumes:
+      - type: bind
+        source: ${KAIPAY_DEMO_PG_GUARD_PATH:?An absolute reviewed guard script path is required}
+        target: /opt/kaipay/kaipay-demo-postgres-guard.sh
+        read_only: true
