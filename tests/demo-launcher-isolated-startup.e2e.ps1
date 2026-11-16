@@ -20,6 +20,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
+# Run as an ordinary terminal would: Vite colours its output unless NO_COLOR is set.
+# This process is disposable (pwsh -File), so the caller's environment is unaffected.
+Remove-Item Env:NO_COLOR, Env:FORCE_COLOR -ErrorAction SilentlyContinue
 $candidate = Split-Path -Parent $PSScriptRoot
 if (!$RepositoryRoot) { $RepositoryRoot = $candidate }
 if (!(Test-Path -LiteralPath (Join-Path $RepositoryRoot 'backend/pom.xml') -PathType Leaf)) { throw 'Cannot locate the KaiPay checkout; pass -RepositoryRoot.' }
