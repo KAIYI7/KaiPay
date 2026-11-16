@@ -48,7 +48,8 @@ function Read-Instance {
         !$configured.ContainsKey('name') -or $configured.name -isnot [string] -or $configured.name -cnotmatch '\A[a-z][a-z0-9]{2,30}\z' -or
         $configured.name -ceq $default.name) { throw "Instance file $instancePath must name a distinct lowercase instance." }
     $selected = [ordered]@{ name = $configured.name }
-    $defaultPorts = @($default.postgresPort, $default.kafkaPort, $default.backendPort, $default.frontendPort)
+    # The default installation's ports, including its Kafka UI on 28048, stay reserved.
+    $defaultPorts = @($default.postgresPort, $default.kafkaPort, $default.backendPort, $default.frontendPort, 28048)
     foreach ($key in @('postgresPort', 'kafkaPort', 'backendPort', 'frontendPort')) {
         if (!$configured.ContainsKey($key) -or $configured[$key] -isnot [long] -or $configured[$key] -lt 1024 -or
             $configured[$key] -gt 65535 -or $configured[$key] -in $defaultPorts) { throw "Instance file $instancePath has an invalid or default $key." }
@@ -672,6 +673,8 @@ function Start-App([string]$Name, [string]$Executable, [string]$Directory, [stri
     if ($Name -eq 'backend') { $environment['DB_USERNAME'] = $script:databaseUsername; $environment['DB_PASSWORD'] = $script:plainDatabasePassword }
     # The dev-server proxy must reach this instance's backend, never the default one.
     if ($Name -eq 'frontend' -and $isolatedInstance) { $environment['KAIPAY_DEV_API_PORT'] = "$($instance.backendPort)" }
+    # On Windows Vite colours its URL unless NO_COLOR is set; readiness matches the plain text.
+    if ($Name -eq 'frontend') { $environment['NO_COLOR'] = '1'; $environment['FORCE_COLOR'] = $null }
     $child = Start-Process -FilePath $Executable -ArgumentList $Arguments -WorkingDirectory $Directory `
         -Environment $environment -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
     $recorded = $false

@@ -229,6 +229,7 @@ try {
         '{"name":"kp-e2e","postgresPort":45432,"kafkaPort":49092,"backendPort":48080,"frontendPort":48081}',
         '{"name":"kpe2etest","postgresPort":25432,"kafkaPort":49092,"backendPort":48080,"frontendPort":48081}',
         '{"name":"kpe2etest","postgresPort":45432,"kafkaPort":45432,"backendPort":48080,"frontendPort":48081}',
+        '{"name":"kpe2etest","postgresPort":45432,"kafkaPort":28048,"backendPort":48080,"frontendPort":48081}',
         '{"name":"kpe2etest","postgresPort":"45432","kafkaPort":49092,"backendPort":48080,"frontendPort":48081}',
         '{"name":"kpe2etest","postgresPort":80,"kafkaPort":49092,"backendPort":48080,"frontendPort":48081}',
         '{"name":"kpe2etest","postgresPort":45432,"kafkaPort":49092,"backendPort":48080}',
@@ -286,6 +287,7 @@ try {
     Assert-True ($viteConfig -match "KAIPAY_DEV_API_PORT \?\? '28080'" -and $viteConfig -match 'target: `http://localhost:\$\{apiPort\}`') 'Frontend proxy default or override changed.'
     $launcherText = $source
     Assert-True ($launcherText -match "if \(\`$Name -eq 'frontend' -and \`$isolatedInstance\) \{ \`$environment\['KAIPAY_DEV_API_PORT'\]") 'Frontend proxy override is not limited to isolated instances.'
+    Assert-True ($launcherText -match "if \(\`$Name -eq 'frontend'\) \{ \`$environment\['NO_COLOR'\] = '1'; \`$environment\['FORCE_COLOR'\] = \`$null \}") 'Frontend is not started without colour; readiness would miss the coloured URL.'
     # No runtime path may keep a default name or port literal; all derive from $instance.
     $readInstance = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Read-Instance' }, $true))[0].Extent
     $outside = $source.Remove($readInstance.StartOffset, $readInstance.EndOffset - $readInstance.StartOffset)

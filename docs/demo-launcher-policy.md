@@ -49,7 +49,8 @@ adding an ignored `logs/kaipay-demo/instance.json` to that checkout:
 ```
 
 The name must be lowercase letters and digits and differ from `kaipay`; the
-four ports must be distinct, non-default and at least 1024. The launcher then
+four ports must be distinct, at least 1024, and not used by the default
+installation (25432, 29092, 28080, 28081 or its Kafka UI's 28048). The launcher then
 uses that name for the Compose project and container names, generates
 `logs/kaipay-demo/instance.compose.yml` to override container names, published
 ports and the Kafka external listener, and points the frontend dev-server proxy
