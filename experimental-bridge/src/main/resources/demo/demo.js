@@ -145,7 +145,14 @@ function render(state) {
     const reviewAvailable = request.reviewGrant && !request.reviewGrant.revoked && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status);
     const statusName = request.status === 'MANUALLY_CONFIRMED' ? (synthetic ? 'Demo manually confirmed — no funds received' : 'Payment confirmed (receiver verified)') : request.paymentClosed && reviewAvailable ? (request.status === 'PAYMENT_DETECTED' ? 'Payment window closed — receiver review pending (unverified)' : 'Payment window closed — awaiting receiver confirmation') : names[request.status];
     row.append(element('p', money(request.amountMinor), 'amount'), element('p', statusName || 'Unknown state — refresh required', 'status ' + (request.status === 'MANUALLY_CONFIRMED' ? 'confirmed' : '')),
-      element('p', 'Request / order reference', 'muted'), element('p', request.id, 'reference'), element('p', 'Payment deadline: ' + new Date(request.expiresAt).toLocaleString() + (request.paymentClosed ? ' · closed to new candidates' : ''), 'muted'));
+      element('p', 'Request / order reference', 'muted'), element('p', request.id, 'reference'));
+    if (request.integrationReference) {
+      // Receiver-only: matches the client's "Demo reference". The payer page and payer API never carry it.
+      const reference = element('p', request.integrationReference, 'reference');
+      reference.dataset.integrationReference = '';
+      row.append(element('p', 'Integration reference (SettleTable demo)', 'muted'), reference);
+    }
+    row.append(element('p', 'Payment deadline: ' + new Date(request.expiresAt).toLocaleString() + (request.paymentClosed ? ' · closed to new candidates' : ''), 'muted'));
     if (request.reviewGrant) row.append(element('p', 'Receiver review deadline: ' + new Date(request.reviewGrant.reviewExpiresAt).toLocaleString() + (request.reviewGrant.revoked ? ' · grant revoked; cannot be restored' : reviewAvailable ? ' · grant active; server rechecks eligibility on submission' : request.status === 'MANUALLY_CONFIRMED' ? ' · receiver confirmation recorded' : ' · review unavailable'), 'muted'));
     else row.append(element('p', 'No extended receiver-review period has been granted.', 'muted'));
     if (synthetic) row.append(element('p', 'SYNTHETIC DEMO — invented evidence; no actual funds received.', 'notice'));
@@ -181,6 +188,16 @@ function render(state) {
       } finally { finishAccessMutation(request.id, operation); }
     });
     row.append(linkButton);
+    const simulationOpen = !request.paymentClosed && ['AWAITING_PAYMENT', 'PAYMENT_DETECTED', 'AWAITING_VERIFICATION', 'AMBIGUOUS'].includes(request.status);
+    if (simulationOpen && !(evidence && !synthetic)) {
+      // Uses this checkout's own amount; the server still matches by amount and time. A second click is a second distinct
+      // candidate. Never offered beside genuine notification evidence, where it would make that checkout ambiguous.
+      const simulate = element('button', "Simulate synthetic candidate at this checkout's amount (" + money(request.amountMinor) + ')', 'secondary');
+      simulate.type = 'button';
+      simulate.dataset.simulateRequestId = request.id;
+      simulate.onclick = () => run(async () => { await simulateCandidate(request.amountMinor); await refresh(); });
+      row.append(simulate);
+    }
     addPrivateAccess(row, request);
     if (!evidenceCapacityReached && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status) && evidence?.disposition === 'MATCHED' && request.observationId === evidence.candidate.eventId && (!request.paymentClosed || reviewAvailable)) {
       const form = element('form', undefined, 'confirmation-form');
@@ -304,7 +321,10 @@ function clearSession() {
   byId('message').textContent = 'Private data and credentials cleared; polling stopped.';
 }
 byId('create').onclick = () => run(async () => { await api('/api/requests', {amountMinor: amountMinor()}); await refresh(); startPolling(); });
-byId('observe').onclick = () => run(async () => { await api('/api/observations', {eventId: crypto.randomUUID(), notificationId: crypto.randomUUID(), sequence: 1, observedAt: new Date().toISOString(), amountMinor: amountMinor(), source: 'SIMULATED'}, 'device'); await refresh(); });
+function simulateCandidate(amount) {
+  return api('/api/observations', {eventId: crypto.randomUUID(), notificationId: crypto.randomUUID(), sequence: 1, observedAt: new Date().toISOString(), amountMinor: amount, source: 'SIMULATED'}, 'device');
+}
+byId('observe').onclick = () => run(async () => { await simulateCandidate(amountMinor()); await refresh(); });
 byId('refresh').onclick = () => run(async () => { await refresh(); startPolling(); });
 byId('clear').onclick = clearSession;
 window.addEventListener('pagehide', clearSession);

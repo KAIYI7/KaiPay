@@ -179,6 +179,42 @@ class IntegrationHttpTest {
                 "observationId", "reviewGrant", "paymentClosed", "lifecycleVersion", "classifierProfile", "token");
     }
 
+    static final Set<String> PAYER_ALLOWLIST = Set.of("id", "amountMinor", "createdAt", "expiresAt", "status", "evidence",
+            "paymentWindowClosed", "reviewExpiresAt", "reviewAvailable");
+    String simulated(int amount) throws Exception {
+        return "{\"eventId\":\"" + UUID.randomUUID() + "\",\"notificationId\":\"" + UUID.randomUUID() + "\",\"sequence\":1,\"observedAt\":\""
+                + clock.now + "\",\"amountMinor\":" + amount + ",\"source\":\"SIMULATED\"}";
+    }
+
+    @Test void receiverSeesTheIntegrationReferenceAndCheckoutAmountSimulationWhilePayerViewsNeverCarryTheReference() throws Exception {
+        String reference = UUID.randomUUID().toString();
+        String checkoutId = mapper.readTree(put(reference, body(863), INTEGRATION).getContentAsString()).get("checkoutId").asText();
+        JsonNode receiverView = mapper.readTree(send(get("/api/state"), BridgeHttpTest.RECEIVER).getContentAsString()).get("requests").get(0);
+        assertThat(receiverView.get("id").asText()).isEqualTo(checkoutId);
+        assertThat(receiverView.get("integrationReference").asText()).isEqualTo(reference);
+        String token = mapper.readTree(send(post("/api/requests/" + checkoutId + "/payer-access").contentType(MediaType.APPLICATION_JSON).content("{}"),
+                BridgeHttpTest.RECEIVER).getContentAsString()).get("token").asText();
+        clock.now = clock.now.plusSeconds(20);
+        // The receiver page's per-checkout control sends a SIMULATED candidate at the checkout's own amount.
+        for (String expected : new String[]{"PAYMENT_DETECTED", "AMBIGUOUS"}) {
+            assertThat(send(post("/api/observations").contentType(MediaType.APPLICATION_JSON).content(simulated(863)), BridgeHttpTest.DEVICE)
+                    .getStatus()).isEqualTo(200);
+            JsonNode integration = mapper.readTree(read(reference, INTEGRATION).getContentAsString());
+            assertThat(integration.get("status").asText()).isEqualTo(expected);
+            assertThat(integration.get("evidence").asText()).isEqualTo("SYNTHETIC");
+            String payer = send(get("/api/checkout/" + checkoutId), token).getContentAsString();
+            assertThat(fields(payer)).isEqualTo(PAYER_ALLOWLIST);
+            assertThat(mapper.readTree(payer).get("status").asText()).isEqualTo(expected);
+            assertThat(payer).doesNotContain(reference, "integrationReference", "revision");
+        }
+        for (String path : new String[]{"/checkout", "/checkout.js"})
+            assertThat(send(get(path), null).getContentAsString(StandardCharsets.UTF_8)).doesNotContain(reference, "Integration reference", "integrationReference");
+        String receiverScript = send(get("/demo.js"), null).getContentAsString(StandardCharsets.UTF_8);
+        // Source guard only; the rendered behaviour is exercised by the local browser check.
+        assertThat(receiverScript).contains("'Integration reference (SettleTable demo)'", "simulate.dataset.simulateRequestId = request.id",
+                "simulateCandidate(request.amountMinor)", "if (simulationOpen && !(evidence && !synthetic))");
+    }
+
     @Test void referenceNotFoundIsFramedDistinctlyFromFilterNotFoundAndDisabledIntegration() throws Exception {
         String reference = UUID.randomUUID().toString();
         framed(read(reference, INTEGRATION), 404, "REFERENCE_NOT_FOUND");
