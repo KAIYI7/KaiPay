@@ -27,6 +27,8 @@ $env:BRIDGE_ENABLED = 'true'
 java -jar target/notification-simulator-0.1.0-SNAPSHOT.jar
 ```
 
+An optional fourth credential, `BRIDGE_INTEGRATION_TOKEN`, enables [synthetic integration mode](#synthetic-integration-mode). It must follow the same format and differ from the other three.
+
 Provision the live credential and assigned UUID in the companion app privately. Never put receiver/device credentials in URLs, screenshots, diagnostics, logs, APKs or Git. Enter only the receiver and simulation credentials in separate password fields at `http://127.0.0.1:28082/`. The browser keeps them in memory and clears them on leaving or using its cleanup control.
 
 ## Private payer checkout
@@ -54,7 +56,7 @@ The live credential and UUID are optional together: omitting both disables new r
 After stopping the experiment, clear environment settings:
 
 ```powershell
-Remove-Item Env:BRIDGE_ENABLED, Env:BRIDGE_RECEIVER_TOKEN, Env:BRIDGE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_ID
+Remove-Item Env:BRIDGE_ENABLED, Env:BRIDGE_RECEIVER_TOKEN, Env:BRIDGE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_ID, Env:BRIDGE_INTEGRATION_TOKEN -ErrorAction SilentlyContinue
 ```
 
 ## Synthetic end-to-end demonstration
@@ -66,6 +68,60 @@ Remove-Item Env:BRIDGE_ENABLED, Env:BRIDGE_RECEIVER_TOKEN, Env:BRIDGE_DEVICE_TOK
 5. Creating another checkout with an already-held amount is rejected. A second distinct same-amount candidate makes the unresolved checkout ambiguous and permanently revokes extended review. Fresh Android unmatched/ambiguous evidence can be explicitly resolved only before payment closes and only to a compatible request that never had a grant; separate verification and confirmation remain necessary. Resolution never grants extended review. Delayed, expired, changed, consumed or revoked-grant evidence cannot be resolved.
 
 This is a single-owner experimental screen. Creation, receiver review and status polling require the receiver credential. Public payer access uses a request-scoped bearer capability, not a customer identity or settlement assertion. Dynamic rendering uses text nodes and a restrictive content-security policy.
+
+## Synthetic integration mode
+
+Integration mode lets one separate local application, such as a bill-splitting demo, create a **synthetic, nonpayable** checkout by its own reference and read the outcome back. The bridge never calls that application: there is no webhook or push. Nothing in this mode moves money or changes any financial record, in KaiPay or in the client. Confirmation stays a manual receiver action on the private receiver page; the client only observes it.
+
+### What changes when `BRIDGE_INTEGRATION_TOKEN` is set
+
+- **Synthetic only, process-wide.** Startup fails if `BRIDGE_QR_DIRECTORY` is also set, so no payable QR exists. Every `TNG_NOTIFICATION_CANDIDATE` is rejected with `422 GENUINE_DISABLED` after validation and the device-scope check, and before any expiry, disqualification or other state change. Nothing is stored, so a genuine candidate cannot match, compete with, make ambiguous or disqualify any checkout. The only exception is an exact retry of a genuine event already stored before integration mode was enabled: it is acknowledged with its stored result and changes nothing. The companion marks a `422` event permanently `FAILED` and does not retry it. The labelled Android `SYNTHETIC` profile and browser `SIMULATED` candidates remain accepted.
+- **Resolve guard.** As defence in depth, `resolve` refuses (`409 RESOLUTION_NOT_ELIGIBLE`) any evidence other than the labelled `SYNTHETIC` profile for a checkout created through integration.
+- **Payer page copy.** The private backend's `/checkout` page describes a synthetic demo. It never fetches a QR and does not describe genuine wallets, payment codes or history checks. If a synthetic-only process is asked for a checkout with genuine evidence, the page stops and says it serves synthetic demo checkouts only. The separate payer gateway is not integration-aware; do not run it in this mode. The receiver page keeps its usual wording.
+- **A narrow fourth credential.** It can create a checkout by reference and read the checkouts it created, nothing else. Every other credentialed route refuses it, including `/api/health`, `/api/state`, review, verify, confirm, resolve, payer access and the QR (`401`, or the route's own `404` when that route is disabled). The public pages need no credential. The receiver, simulation, live and payer credentials are refused on the integration routes. Never give the receiver credential to the integration client.
+
+### Integration API
+
+The reference is the client's canonical **lowercase** UUID in the path. Any other spelling, an extra segment, an encoded path or a query string is an unlisted route (`404 NOT_FOUND`). Without an integration credential configured, both routes return `404 INTEGRATION_DISABLED`. Other methods return `405 METHOD_INVALID`.
+
+`PUT /api/integrations/checkouts/{reference}` takes exactly `{"amountMinor":863,"currency":"MYR"}`. The body rules match the other JSON routes: `application/json` (`415 JSON_REQUIRED` otherwise), at most 4KB (`413 BODY_TOO_LARGE`), and no unknown fields, duplicate keys, trailing JSON, string or decimal amounts (`400 INVALID_REQUEST`). An invalid amount returns `422 AMOUNT_INVALID`; a currency other than the exact string `MYR` returns `422 CURRENCY_INVALID`. The reference is looked up **before** any hold or capacity check, so a replay is never blocked by its own hold:
+
+| Situation | Response |
+| --- | --- |
+| Known reference, same amount | `200` with the bound checkout, whatever its status |
+| Known reference, different amount | `409 REFERENCE_CONFLICT` |
+| New reference, amount held by any open checkout (integration or not) | `409 SAME_AMOUNT_HELD`; nothing is created. A hold can last up to 40 minutes. |
+| New reference, request capacity reached | `409 REQUEST_CAPACITY` |
+| New reference otherwise | `201`; the checkout and its reference binding persist in one snapshot write |
+| Snapshot write failed | `503 STORE_UNAVAILABLE`; nothing is bound |
+
+`GET /api/integrations/checkouts/{reference}` returns `200` with the same body, or `404` with exactly `{"error":"REFERENCE_NOT_FOUND"}` for an unknown reference. That body differs from the filter's `NOT_FOUND`, `INTEGRATION_DISABLED` and `EXPERIMENT_DISABLED` 404s.
+
+Both routes return this allowlist and nothing else: `reference`, `checkoutId`, `amountMinor`, `status`, `evidence` (`NONE`, `SYNTHETIC` or `NOTIFICATION_UNVERIFIED`), `createdAt`, `expiresAt` (payment deadline), `reviewExpiresAt` (`null` until a review grant exists) and `revision`. Timestamps are UTC ISO-8601 strings. Observation, device and candidate identifiers, grant internals and payer material never appear.
+
+`revision` is a persisted change counter. A new checkout starts at `1`, and every later persisted change increments it: match, ambiguity, disqualification, resolution, verification, confirmation and lazy expiry during reads. Expiry also sets an internal payment-closed latch on terminal checkouts, so the revision can rise with no visible change in the allowlist; treat that as a newer observation, not a conflict. A repeated read or an idempotent retry that changes nothing leaves it unchanged. Requests stored before revisions existed load as `0`.
+
+### Native startup
+
+The supervised `ops.ps1` helper stays synthetic-receiver-only and does not start this mode. Start integration mode manually from this directory with JDK 21, in a terminal you keep open. Use a fresh private store for the demo:
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+# New-ExperimentalToken is defined above; these commands never print the values.
+$env:BRIDGE_RECEIVER_TOKEN = New-ExperimentalToken
+$env:BRIDGE_DEVICE_TOKEN = New-ExperimentalToken
+$env:BRIDGE_INTEGRATION_TOKEN = New-ExperimentalToken
+# Optional, only for the companion's labelled synthetic event. Keep real notification capture off on the phone.
+$env:BRIDGE_LIVE_DEVICE_TOKEN = New-ExperimentalToken
+$env:BRIDGE_LIVE_DEVICE_ID = [guid]::NewGuid().ToString()
+Remove-Item Env:BRIDGE_QR_DIRECTORY -ErrorAction SilentlyContinue
+$env:BRIDGE_STORE = '<absolute path to a fresh private synthetic store>.json'
+$env:BRIDGE_ENABLED = 'true'
+java -jar target/notification-simulator-0.1.0-SNAPSHOT.jar
+```
+
+Give the integration credential privately to the client application, which reads it from its own configuration. Stop with Ctrl+C in that terminal, then clear the environment as shown above together with `Env:BRIDGE_STORE`. A restart keeps checkouts, reference bindings and revisions, and revokes payer codes, so the receiver issues a new one. A diner's browser on the owner's test phone can reach the private checkout at `http://127.0.0.1:28082/checkout` through `adb reverse tcp:28082 tcp:28082`; keep the checkout code off any recorded screen.
 
 ## Optional remote payer gateway
 
@@ -107,6 +163,8 @@ Send exactly one `Authorization: Bearer <credential>` header. No cookies, query 
 | `POST /api/observations/{eventId}/resolve` | Receiver | `{"requestId":"<UUID>","historyChecked":true}`; explicit fresh Android resolution |
 | `POST /api/requests/{id}/verify` | Receiver | `{"historyChecked":true,"expectedEventId":"<selected event UUID>"}`; begin candidate-bound verification |
 | `POST /api/requests/{id}/confirm` | Receiver | Same candidate-bound attestation; separate manual confirmation |
+| `PUT /api/integrations/checkouts/{reference}` | Integration | `{"amountMinor":863,"currency":"MYR"}`; idempotent synthetic create by reference ([integration mode](#synthetic-integration-mode)) |
+| `GET /api/integrations/checkouts/{reference}` | Integration | Allowlisted read of that reference only |
 
 Candidate fields are `eventId` (stable random UUID), `notificationId` (random local lifecycle UUID, never Android notification key), `sequence` (integer), `deviceId` (assigned UUID), `source`, `classification`, `classifierProfile`, `amountMinor` (integer MYR cents), `observedAt` (textual UTC ISO instant ending in `Z`) and `evidenceQuality`.
 
@@ -141,6 +199,6 @@ Bounds are 500 requests, 1,000 observations and two million snapshot bytes. Capa
 
 Active receiver verification/confirmation also fails closed when observation capacity or the reserved snapshot headroom could prevent recording a competitor. Capacity recovery is an explicit offline operation; it never deletes replay history automatically. Already-confirmed same-event retries remain no-ops. Failed I/O cannot expose a successful transition, but the process does not claim knowledge of reports never durably admitted.
 
-New requests are versioned v2; snapshots retain server admission times, immutable review grants and a payment-closed latch. A latched closed window and terminal states do not reopen after a clock rollback. Absolute timing still trusts the host clock. Existing requests without a lifecycle version retain the original ten-minute behavior and never gain review from historical device timestamps or MATCHED labels. Existing expired/confirmed states and evidence remain historical. Actionable v2 associations are validated on startup and invalid snapshots fail closed. Back up private stores before upgrading: the old binary cannot read new fields/states. Rolling back requires stopping the process and deliberately restoring a pre-upgrade private backup, with loss of later experimental changes; never silently discard new fields or replay history.
+New requests are versioned v2; snapshots retain server admission times, immutable review grants and a payment-closed latch. A latched closed window and terminal states do not reopen after a clock rollback. Absolute timing still trusts the host clock. Existing requests without a lifecycle version retain the original ten-minute behavior and never gain review from historical device timestamps or MATCHED labels. Existing expired/confirmed states and evidence remain historical. Actionable v2 associations are validated on startup and invalid snapshots fail closed. Requests also persist a `revision` counter and, for integration checkouts, their reference binding; startup refuses a reused reference, an integration binding outside lifecycle v2 or one carrying genuine evidence. A process without the integration credential refuses to start while any integration checkout is still open (payment window or review deadline running), because only integration mode keeps genuine candidates away from it. Back up private stores before upgrading: the old binary cannot read new fields/states. Rolling back requires stopping the process and deliberately restoring a pre-upgrade private backup, with loss of later experimental changes; never silently discard new fields or replay history.
 
 Real ordinary-payment validation remains a separate opt-in experiment: observe a fresh notification on the receiver's phone, verify the supported strict classification, inspect the unverified server/browser evidence, and independently check transaction history before receiver confirmation. Synthetic tests do not establish real TNG compatibility or production reliability.

@@ -49,16 +49,31 @@ public final class Model {
         }
     }
     public record ReviewGrant(UUID eventId, Instant reviewExpiresAt, boolean revoked) {}
+    // revision counts persisted changes (0 for snapshots written before it existed); integrationReference binds an
+    // integration client's canonical reference to exactly this request and is null for receiver-created requests.
     public record PaymentRequest(UUID id, int amountMinor, Instant createdAt, Instant expiresAt,
                                  Status status, UUID observationId, Integer lifecycleVersion,
-                                 boolean paymentClosed, ReviewGrant reviewGrant) {
+                                 boolean paymentClosed, ReviewGrant reviewGrant, long revision, UUID integrationReference) {
         public PaymentRequest(UUID id, int amountMinor, Instant createdAt, Instant expiresAt, Status status, UUID observationId) {
             this(id, amountMinor, createdAt, expiresAt, status, observationId, null, false, null);
         }
-        PaymentRequest withStatus(Status next, UUID observation) {
-            return new PaymentRequest(id, amountMinor, createdAt, expiresAt, next, observation, lifecycleVersion, paymentClosed, reviewGrant);
+        public PaymentRequest(UUID id, int amountMinor, Instant createdAt, Instant expiresAt, Status status, UUID observationId,
+                              Integer lifecycleVersion, boolean paymentClosed, ReviewGrant reviewGrant) {
+            this(id, amountMinor, createdAt, expiresAt, status, observationId, lifecycleVersion, paymentClosed, reviewGrant, 0, null);
+        }
+        PaymentRequest withStatus(Status next, UUID observation) { return changed(next, observation, paymentClosed, reviewGrant); }
+        /** The only path for later changes: a real change increments revision, an identical one returns this request. */
+        PaymentRequest changed(Status next, UUID observation, boolean closed, ReviewGrant grant) {
+            if (next == status && java.util.Objects.equals(observation, observationId) && closed == paymentClosed
+                    && java.util.Objects.equals(grant, reviewGrant)) return this;
+            return new PaymentRequest(id, amountMinor, createdAt, expiresAt, next, observation, lifecycleVersion, closed, grant,
+                    revision + 1, integrationReference);
         }
     }
+    public record IntegrationCreate(Integer amountMinor, com.fasterxml.jackson.databind.JsonNode currency) {}
+    // Explicit allowlist for the integration credential: no observation, grant, candidate or payer material.
+    public record IntegrationCheckout(UUID reference, UUID checkoutId, int amountMinor, Status status, PayerEvidence evidence,
+                                      Instant createdAt, Instant expiresAt, Instant reviewExpiresAt, long revision) {}
     public record Observation(Candidate candidate, Disposition disposition, UUID requestId, Instant acceptedAt) {
         public Observation(Candidate candidate, Disposition disposition, UUID requestId) { this(candidate, disposition, requestId, null); }
         Observation withDisposition(Disposition next) { return new Observation(candidate, next, requestId, acceptedAt); }

@@ -15,17 +15,28 @@ final class ObservationService {
     private final Clock clock;
     private final UUID deviceId;
     private final int reviewPeriodSeconds;
+    // Integration mode: no genuine candidate is admitted, so none can match, compete with or disqualify any checkout.
+    private final boolean syntheticOnly;
     private Snapshot state;
 
     ObservationService(SnapshotStore store, Clock clock) { this(store, clock, null); }
     ObservationService(SnapshotStore store, Clock clock, UUID deviceId) { this(store, clock, deviceId, 1800); }
     ObservationService(SnapshotStore store, Clock clock, UUID deviceId, int reviewPeriodSeconds) {
+        this(store, clock, deviceId, reviewPeriodSeconds, false);
+    }
+    ObservationService(SnapshotStore store, Clock clock, UUID deviceId, int reviewPeriodSeconds, boolean syntheticOnly) {
         if (reviewPeriodSeconds < 300 || reviewPeriodSeconds > 1800)
             throw new IllegalStateException("Review period must be between 300 and 1800 seconds");
         this.store = store; this.clock = clock; this.deviceId = deviceId; this.reviewPeriodSeconds = reviewPeriodSeconds;
+        this.syntheticOnly = syntheticOnly;
         state = store.load();
         try { validateStored(); }
         catch (Exception ignored) { throw new IllegalStateException("Invalid experimental store"); }
+        // Bindings outlive the process mode. Only integration mode keeps genuine candidates away from a bound
+        // checkout, so an open one must never be served by a process that admits genuine evidence.
+        Instant now = clock.instant();
+        if (!syntheticOnly && state.requests().stream().anyMatch(r -> r.integrationReference() != null && !terminal(r) && held(r, now)))
+            throw new IllegalStateException("Open integration checkouts require integration mode");
         state = new Snapshot(List.copyOf(state.requests()), List.copyOf(state.observations()));
     }
 
@@ -39,8 +50,12 @@ final class ObservationService {
         if (state.requests().stream().map(PaymentRequest::id).distinct().count() != state.requests().size()
                 || state.observations().stream().map(o -> o.candidate().eventId()).distinct().count() != state.observations().size())
             throw new IllegalArgumentException();
+        List<UUID> references = state.requests().stream().map(PaymentRequest::integrationReference).filter(Objects::nonNull).toList();
+        if (references.stream().distinct().count() != references.size()) throw new IllegalArgumentException();
         for (PaymentRequest r : state.requests()) {
             amount(r.amountMinor());
+            if (r.revision() < 0 || r.integrationReference() != null && (!v2(r) || r.revision() < 1
+                    || evidence(r) == PayerEvidence.NOTIFICATION_UNVERIFIED)) throw new IllegalArgumentException();
             if (r.id() == null || r.createdAt() == null || r.expiresAt() == null || r.status() == null
                     || !r.expiresAt().equals(r.createdAt().plusSeconds(600))) throw new IllegalArgumentException();
             if (!v2(r)) {
@@ -98,11 +113,7 @@ final class ObservationService {
         Instant now = clock.instant(); expire(now);
         PaymentRequest r = state.requests().stream().filter(request -> request.id().equals(id)).findFirst()
                 .orElseThrow(() -> new BridgeFailure(404, "CHECKOUT_NOT_FOUND"));
-        Observation selected = observation(r.observationId() != null ? r.observationId()
-                : r.reviewGrant() != null ? r.reviewGrant().eventId() : null);
-        PayerEvidence evidence = selected == null ? PayerEvidence.NONE
-                : selected.candidate().source() == Source.TNG_NOTIFICATION_CANDIDATE ? PayerEvidence.NOTIFICATION_UNVERIFIED : PayerEvidence.SYNTHETIC;
-        return new Checkout(r.id(), r.amountMinor(), r.createdAt(), r.expiresAt(), r.status(), evidence,
+        return new Checkout(r.id(), r.amountMinor(), r.createdAt(), r.expiresAt(), r.status(), evidence(r),
                 r.paymentClosed() || !now.isBefore(r.expiresAt()), r.reviewGrant() == null ? null : r.reviewGrant().reviewExpiresAt(),
                 (r.status() == Status.PAYMENT_DETECTED || r.status() == Status.AWAITING_VERIFICATION)
                         && eligible(r, now) && hasEvidenceCapacity());
@@ -110,19 +121,61 @@ final class ObservationService {
     synchronized PaymentRequest create(CreateRequest input) {
         if (input == null) throw new BridgeFailure(422, "AMOUNT_INVALID");
         amount(input.amountMinor()); Instant now = clock.instant(); expire(now);
+        return add(input.amountMinor(), null, now);
+    }
+    record IntegrationPut(IntegrationCheckout checkout, boolean created) {}
+    /** Idempotent create-by-reference. The reference lookup precedes every hold and capacity check, so a replay is never blocked by its own hold. */
+    synchronized IntegrationPut putIntegration(UUID reference, Integer amountMinor) {
+        Objects.requireNonNull(reference);
+        amount(amountMinor); Instant now = clock.instant(); expire(now);
+        PaymentRequest bound = integration(reference);
+        if (bound != null) {
+            if (bound.amountMinor() != amountMinor) throw new BridgeFailure(409, "REFERENCE_CONFLICT");
+            return new IntegrationPut(integrationView(bound), false);
+        }
+        // The reference binding and its new request persist in the same snapshot write.
+        return new IntegrationPut(integrationView(add(amountMinor, reference, now)), true);
+    }
+    synchronized IntegrationCheckout integrationCheckout(UUID reference) {
+        expire(clock.instant());
+        PaymentRequest bound = integration(reference);
+        if (bound == null) throw new BridgeFailure(404, "REFERENCE_NOT_FOUND");
+        return integrationView(bound);
+    }
+    private PaymentRequest add(int amountMinor, UUID reference, Instant now) {
         if (state.requests().size() >= MAX_REQUESTS) throw new BridgeFailure(409, "REQUEST_CAPACITY");
-        if (state.requests().stream().anyMatch(r -> r.amountMinor() == input.amountMinor() && held(r, now)))
+        if (state.requests().stream().anyMatch(r -> r.amountMinor() == amountMinor && held(r, now)))
             throw new BridgeFailure(409, "SAME_AMOUNT_HELD");
-        PaymentRequest r = new PaymentRequest(UUID.randomUUID(), input.amountMinor(), now, now.plusSeconds(600),
-                Status.AWAITING_PAYMENT, null, 2, false, null);
+        PaymentRequest r = new PaymentRequest(UUID.randomUUID(), amountMinor, now, now.plusSeconds(600),
+                Status.AWAITING_PAYMENT, null, 2, false, null, 1, reference);
         List<PaymentRequest> requests = new ArrayList<>(state.requests()); requests.add(r);
         publish(new Snapshot(requests, state.observations())); return r;
+    }
+    private PaymentRequest integration(UUID reference) {
+        return state.requests().stream().filter(r -> reference.equals(r.integrationReference())).findFirst().orElse(null);
+    }
+    private IntegrationCheckout integrationView(PaymentRequest r) {
+        return new IntegrationCheckout(r.integrationReference(), r.id(), r.amountMinor(), r.status(), evidence(r), r.createdAt(),
+                r.expiresAt(), r.reviewGrant() == null ? null : r.reviewGrant().reviewExpiresAt(), r.revision());
+    }
+    private PayerEvidence evidence(PaymentRequest r) {
+        Observation selected = observation(r.observationId() != null ? r.observationId()
+                : r.reviewGrant() != null ? r.reviewGrant().eventId() : null);
+        return selected == null ? PayerEvidence.NONE
+                : selected.candidate().source() == Source.TNG_NOTIFICATION_CANDIDATE ? PayerEvidence.NOTIFICATION_UNVERIFIED : PayerEvidence.SYNTHETIC;
     }
     synchronized Observation ingest(Candidate event) { return ingest(event, false); }
     synchronized Observation ingestNotification(Candidate event) {
         if (deviceId == null) throw new BridgeFailure(404, "LIVE_DELIVERY_DISABLED");
         validate(event, true);
         if (!deviceId.equals(event.deviceId())) throw new BridgeFailure(422, "DEVICE_SCOPE_INVALID");
+        if (syntheticOnly && event.source() == Source.TNG_NOTIFICATION_CANDIDATE) {
+            // Placed before expire(), disqualification or any other state change. Only an exact retry of an event
+            // stored before integration mode is acknowledged, unchanged; no genuine candidate is stored in this mode.
+            Observation existing = observation(event.eventId());
+            if (existing != null && existing.candidate().equals(event)) return existing;
+            throw new BridgeFailure(422, "GENUINE_DISABLED");
+        }
         return ingest(event, true);
     }
     private Observation ingest(Candidate event, boolean live) {
@@ -188,7 +241,8 @@ final class ObservationService {
         Observation current = observation(eventId);
         if (current == null) throw new BridgeFailure(404, "OBSERVATION_NOT_FOUND");
         PaymentRequest target = request(input.requestId()); Candidate event = current.candidate();
-        if (event.source() == Source.SIMULATED || current.disposition() != Disposition.UNMATCHED && current.disposition() != Disposition.AMBIGUOUS
+        // Defence in depth: only labelled SYNTHETIC evidence may ever be resolved onto an integration checkout.
+        if (event.source() == Source.SIMULATED || target.integrationReference() != null && event.source() != Source.SYNTHETIC || current.disposition() != Disposition.UNMATCHED && current.disposition() != Disposition.AMBIGUOUS
                 || event.observedAt().isBefore(now.minusSeconds(120)) || !paymentOpen(target, now) || target.reviewGrant() != null
                 || target.status() != Status.AWAITING_PAYMENT && target.status() != Status.AMBIGUOUS
                 || !targetAmountTime(target, event) || v2(target) && (current.acceptedAt() == null || !serverWindow(target, current.acceptedAt()))
@@ -301,7 +355,7 @@ final class ObservationService {
     private static boolean terminal(PaymentRequest r) { return r.status() == Status.EXPIRED || r.status() == Status.REVIEW_EXPIRED || r.status() == Status.MANUALLY_CONFIRMED; }
     private static boolean actionable(PaymentRequest r) { return r.status() == Status.PAYMENT_DETECTED || r.status() == Status.AWAITING_VERIFICATION; }
     private static PaymentRequest copy(PaymentRequest r, Status status, UUID event, boolean closed, ReviewGrant grant) {
-        return new PaymentRequest(r.id(), r.amountMinor(), r.createdAt(), r.expiresAt(), status, event, r.lifecycleVersion(), closed, grant);
+        return r.changed(status, event, closed, grant);
     }
     private Observation observation(UUID id) { return id == null ? null : state.observations().stream().filter(o -> o.candidate().eventId().equals(id)).findFirst().orElse(null); }
     private PaymentRequest request(UUID id) { return state.requests().stream().filter(r -> r.id().equals(id)).findFirst().orElseThrow(() -> new BridgeFailure(404, "REQUEST_NOT_FOUND")); }

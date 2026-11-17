@@ -32,6 +32,8 @@ Ignored checkout `.local/supervised-ops/` holds the bounded ownership record, sn
 
 This helper supports synthetic receiver operation only. Separately provisioned private live-delivery operation retains the existing manual configuration; this helper does not activate it. Do not point a live phone at the synthetic helper. Public activation and physical settings changes require separate authorization.
 
+The helper also never starts [synthetic integration mode](README.md#synthetic-integration-mode): it passes no integration credential, and a companion's synthetic event would need the live-device configuration the helper forces off. Use the README's manual native startup for an integration demo, in a terminal kept open for the session, and stop it there with Ctrl+C. Check that no other process owns the port first. Integration mode refuses a configured receiving QR and every genuine notification candidate; it remains a supervised local demo, with no public connector.
+
 ## Interpret dimensions separately
 
 | Signal | Evidence and limit |

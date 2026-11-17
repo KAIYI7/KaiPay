@@ -2,6 +2,8 @@
 (() => {
   const byId = id => document.getElementById(id);
   const privateEntry = document.documentElement.dataset.checkoutEntry === 'private';
+  // Set only by the private backend in synthetic-only integration mode: no QR fetch and no genuine-payment wording.
+  const synthetic = privateEntry && document.documentElement.dataset.checkoutMode === 'synthetic';
   const legacy = new URLSearchParams(location.hash.slice(1));
   const hadFragment = location.hash.length > 0, hadQuery = location.search.length > 0;
   let legacyId = privateEntry ? legacy.get('id') : null, legacyKey = privateEntry ? legacy.get('key') : null;
@@ -20,9 +22,19 @@
     EXPIRED: ['Payment window closed — unconfirmed', 'This request can no longer accept candidates or be confirmed. Contact the receiver. If money may have been sent, do not pay again automatically.'],
     REVIEW_EXPIRED: ['Receiver review ended — unconfirmed', 'The receiver review deadline has passed without confirmation. Contact the receiver. If money may have been sent, do not pay again automatically.']
   };
+  const syntheticStates = {
+    AWAITING_PAYMENT: ['Awaiting synthetic evidence', 'No invented candidate has been detected for this demo checkout. No payment is needed.'],
+    PAYMENT_DETECTED: ['Potential payment detected — unverified (synthetic)', 'An invented candidate has tentatively matched. It is not a payment, and the organizer has not reviewed it.'],
+    AWAITING_VERIFICATION: ['Awaiting organizer confirmation (synthetic)', 'The organizer recorded the review step for invented evidence. Explicit confirmation is still required. No money moves.'],
+    MANUALLY_CONFIRMED: ['Demo manually confirmed', 'The organizer manually confirmed an invented demonstration scenario. No actual funds were received.'],
+    AMBIGUOUS: ['Ambiguous — organizer review required (synthetic)', 'Competing invented evidence cannot identify this demo checkout. No payment is involved.'],
+    EXPIRED: ['Demo window closed — unconfirmed', 'This demo checkout no longer accepts invented candidates. No payment is involved.'],
+    REVIEW_EXPIRED: ['Organizer review ended — unconfirmed (synthetic)', 'The review deadline passed without confirmation. No payment is involved.']
+  };
   let active = null, timer, deadlineTimer, qrUrl = null;
   const current = session => active === session && !session.controller.signal.aborted;
   function hideQr(title, detail) {
+    if (synthetic) { title = 'Synthetic demonstration — no payment needed'; detail = 'Invented evidence only. No actual funds are involved; do not make a transfer for this demonstration.'; }
     byId('receiving-qr').removeAttribute('src');
     if (qrUrl) URL.revokeObjectURL(qrUrl);
     qrUrl = null;
@@ -30,7 +42,7 @@
     byId('qr-placeholder').classList.remove('hidden');
     byId('qr-placeholder-title').textContent = title;
     byId('qr-placeholder-detail').textContent = detail;
-    byId('payment-instructions').textContent = 'No payment code is displayed. Do not attempt a payment from this page while the QR is unavailable.';
+    byId('payment-instructions').textContent = synthetic ? 'No payment is needed or possible for this synthetic demo.' : 'No payment code is displayed. Do not attempt a payment from this page while the QR is unavailable.';
   }
   function unavailable(title, detail) {
     hideQr('Payment QR unavailable', 'Current checkout status could not be verified. Retry before attempting a payment.');
@@ -38,7 +50,7 @@
     byId('status-title').textContent = title;
     byId('status-detail').textContent = detail;
     byId('checkout-status').className = 'checkout-status';
-    byId('updated').textContent = 'Current payment status is unavailable.';
+    byId('updated').textContent = synthetic ? 'Current demo status is unavailable.' : 'Current payment status is unavailable.';
     byId('evidence-note').className = 'notice hidden';
     byId('evidence-note').textContent = '';
   }
@@ -61,6 +73,7 @@
   }
   async function loadQr(request, session, signal) {
     if (!current(session)) return;
+    if (synthetic) { hideQr('', ''); session.qrChecked = false; return; }
     if (request.paymentWindowClosed || request.status !== 'AWAITING_PAYMENT' || Date.now() >= Date.parse(request.expiresAt)) {
       hideQr('Payment QR hidden', request.status === 'MANUALLY_CONFIRMED' ? 'This checkout is already confirmed. Do not pay again.' : 'The payment window is closed or candidate evidence requires review. Do not pay again while awaiting the receiver.');
       session.qrChecked = false;
@@ -122,14 +135,23 @@
       const request = await result.json();
       if (!current(session)) return;
       if (request.id !== session.id || !Number.isInteger(request.amountMinor) || request.amountMinor < 1 || request.amountMinor > 1000000 || !Object.hasOwn(states, request.status) || !['NONE', 'SYNTHETIC', 'NOTIFICATION_UNVERIFIED'].includes(request.evidence) || !Number.isFinite(Date.parse(request.expiresAt)) || typeof request.paymentWindowClosed !== 'boolean' || typeof request.reviewAvailable !== 'boolean' || (request.reviewExpiresAt !== null && !Number.isFinite(Date.parse(request.reviewExpiresAt)))) throw Error('RESPONSE_INVALID');
+      if (synthetic && request.evidence === 'NOTIFICATION_UNVERIFIED') {
+        // A synthetic-only process never describes genuine evidence as part of a demo; stop instead.
+        clearAccess('Not a synthetic demo checkout', 'This process serves synthetic demo checkouts only. Ask the receiver about this request.');
+        return;
+      }
       byId('checkout-amount').textContent = 'RM ' + (request.amountMinor / 100).toFixed(2);
       byId('checkout-reference').textContent = request.id;
       session.paymentDeadline = Date.parse(request.expiresAt);
-      byId('checkout-expiry').textContent = 'Payment deadline: ' + new Date(request.expiresAt).toLocaleString() + (request.paymentWindowClosed ? ' · closed to new candidates' : '');
-      byId('checkout-review').textContent = request.reviewExpiresAt ? 'Receiver review deadline: ' + new Date(request.reviewExpiresAt).toLocaleString() + (request.reviewAvailable ? ' · review available, still unconfirmed' : request.status === 'MANUALLY_CONFIRMED' ? ' · receiver confirmation recorded' : ' · review unavailable') : 'No extended receiver-review period has been granted.';
-      byId('status-title').textContent = request.evidence === 'SYNTHETIC' && request.status === 'MANUALLY_CONFIRMED' ? 'Demo manually confirmed' : states[request.status][0];
-      byId('status-detail').textContent = request.evidence === 'SYNTHETIC' && request.status === 'MANUALLY_CONFIRMED' ? 'The receiver manually confirmed an invented demonstration scenario. No actual funds were received.' : states[request.status][1];
-      if (request.paymentWindowClosed && request.reviewAvailable && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status)) {
+      const demo = synthetic, copy = demo ? syntheticStates : states;
+      byId('checkout-expiry').textContent = (demo ? 'Demo evidence deadline: ' : 'Payment deadline: ') + new Date(request.expiresAt).toLocaleString() + (request.paymentWindowClosed ? ' · closed to new candidates' : '');
+      byId('checkout-review').textContent = request.reviewExpiresAt ? (demo ? 'Organizer review deadline: ' : 'Receiver review deadline: ') + new Date(request.reviewExpiresAt).toLocaleString() + (request.reviewAvailable ? ' · review available, still unconfirmed' : request.status === 'MANUALLY_CONFIRMED' ? (demo ? ' · organizer confirmation recorded' : ' · receiver confirmation recorded') : ' · review unavailable') : demo ? 'No extended organizer-review period has been granted.' : 'No extended receiver-review period has been granted.';
+      byId('status-title').textContent = request.evidence === 'SYNTHETIC' && request.status === 'MANUALLY_CONFIRMED' ? 'Demo manually confirmed' : copy[request.status][0];
+      byId('status-detail').textContent = request.evidence === 'SYNTHETIC' && request.status === 'MANUALLY_CONFIRMED' ? (demo ? copy.MANUALLY_CONFIRMED[1] : 'The receiver manually confirmed an invented demonstration scenario. No actual funds were received.') : copy[request.status][1];
+      if (demo && request.paymentWindowClosed && request.reviewAvailable && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status)) {
+        byId('status-title').textContent = request.status === 'PAYMENT_DETECTED' ? 'Demo window closed — organizer review pending (synthetic, unverified)' : 'Demo window closed — awaiting organizer confirmation (synthetic)';
+        byId('status-detail').textContent = request.status === 'PAYMENT_DETECTED' ? 'An invented candidate was accepted before the demo deadline. The organizer must acknowledge the synthetic scenario and explicitly confirm before the review deadline. No payment is involved.' : 'The organizer recorded the review step, but explicit confirmation is still outstanding. The review deadline has not changed. No money moves.';
+      } else if (request.paymentWindowClosed && request.reviewAvailable && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status)) {
         byId('status-title').textContent = request.status === 'PAYMENT_DETECTED' ? 'Payment window closed — receiver review pending (unverified)' : 'Payment window closed — awaiting receiver confirmation';
         byId('status-detail').textContent = request.status === 'PAYMENT_DETECTED' ? (request.evidence === 'SYNTHETIC' ? 'An invented candidate was accepted before the payment deadline. The receiver must acknowledge the synthetic scenario and explicitly confirm before the review deadline. No actual history check or funds are asserted. Do not make a payment for this demo.' : 'An eligible candidate was accepted before the payment deadline. It remains unverified. The receiver must independently check actual history and explicitly confirm before the review deadline. Do not pay again.') : 'Verification is recorded, but explicit receiver confirmation is still outstanding. The review deadline has not changed. Do not pay again.';
       }
@@ -140,7 +162,7 @@
       if (!current(session)) return;
       byId('updated').textContent = 'Updated ' + new Date().toLocaleTimeString() + ' · checks automatically every 3 seconds';
     } catch {
-      if (current(session)) unavailable('Unable to retrieve current status', 'The connection or current status is unavailable. Retrying automatically; do not pay while status is unavailable.');
+      if (current(session)) unavailable('Unable to retrieve current status', synthetic ? 'The connection or current demo status is unavailable. Retrying automatically; no payment is involved.' : 'The connection or current status is unavailable. Retrying automatically; do not pay while status is unavailable.');
     } finally {
       clearTimeout(timeout);
       session.controller.signal.removeEventListener('abort', cancel);

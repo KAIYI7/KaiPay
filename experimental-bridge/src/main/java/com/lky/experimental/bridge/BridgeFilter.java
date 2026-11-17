@@ -18,6 +18,8 @@ import java.util.Collections;
 final class BridgeFilter implements Filter {
     private static final int MAX_BODY = 4096;
     private static final String UUID_PATH = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+    // Integration references are canonical lowercase UUIDs; any other spelling is an unlisted route.
+    static final String INTEGRATION_PATH = "/api/integrations/checkouts/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
     private final BridgeAccess access;
     BridgeFilter(BridgeAccess access) { this.access = access; }
 
@@ -42,6 +44,15 @@ final class BridgeFilter implements Filter {
                     || !access.payers.authorized(java.util.UUID.fromString(path.substring("/api/checkout/".length(), "/api/checkout/".length() + 36)), request.getHeader("Authorization"))) {
                 error(response, 401, "UNAUTHORIZED"); return;
             }
+        } else if (path.matches(INTEGRATION_PATH)) {
+            // Explicit role mapping: only the integration credential, never the receiver default.
+            if (!access.integrationEnabled()) { error(response, 404, "INTEGRATION_DISABLED"); return; }
+            if (Collections.list(request.getHeaders("Authorization")).size() != 1
+                    || !access.authorized(request.getHeader("Authorization"), "integration")) {
+                error(response, 401, "UNAUTHORIZED"); return;
+            }
+            if (request.getQueryString() != null) { error(response, 404, "NOT_FOUND"); return; }
+            if (!"GET".equals(request.getMethod()) && !"PUT".equals(request.getMethod())) { error(response, 405, "METHOD_INVALID"); return; }
         } else if (!publicResource) {
             boolean canonical = path.equals("/api/health") || path.equals("/api/state") || path.equals("/api/requests") || path.equals("/api/observations") || path.equals("/api/notification-candidates")
                     || path.matches("/api/notification-candidates/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/invalidate")
@@ -61,7 +72,7 @@ final class BridgeFilter implements Filter {
                 if (!"GET".equals(request.getMethod())) { error(response, 405, "METHOD_INVALID"); return; }
             }
         } else if (!"GET".equals(request.getMethod())) { error(response, 405, "METHOD_INVALID"); return; }
-        if ("POST".equals(request.getMethod())) {
+        if ("POST".equals(request.getMethod()) || "PUT".equals(request.getMethod())) {
             if (request.getContentType() == null || !request.getContentType().matches("(?i)application/json(?:;\\s*charset=utf-8)?")) {
                 error(response, 415, "JSON_REQUIRED"); return;
             }

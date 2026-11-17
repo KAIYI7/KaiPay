@@ -40,14 +40,14 @@ class BridgeConfiguration {
     @Bean @ConditionalOnProperty(name = "bridge.enabled", havingValue = "true")
     ObservationService observations(SnapshotStore store, BridgeAccess access, Environment env) {
         return new ObservationService(store, Clock.systemUTC(), access.deviceId,
-                env.getProperty("bridge.review-period-seconds", Integer.class, 1800));
+                env.getProperty("bridge.review-period-seconds", Integer.class, 1800), access.integrationEnabled());
     }
 }
 
 final class BridgeAccess {
     final boolean enabled;
     final PayerTokens payers;
-    private final byte[] device, receiver, liveDevice;
+    private final byte[] device, receiver, liveDevice, integration;
     final java.util.UUID deviceId;
 
     BridgeAccess(Environment env) { this(env, new PayerTokens()); }
@@ -55,7 +55,7 @@ final class BridgeAccess {
     BridgeAccess(Environment env, PayerTokens payers) {
         this.payers = java.util.Objects.requireNonNull(payers);
         enabled = env.getProperty("bridge.enabled", Boolean.class, false);
-        if (!enabled) { device = new byte[0]; receiver = new byte[0]; liveDevice = new byte[0]; deviceId = null; return; }
+        if (!enabled) { device = new byte[0]; receiver = new byte[0]; liveDevice = new byte[0]; integration = new byte[0]; deviceId = null; return; }
         String deviceToken = env.getProperty("bridge.device-token", "");
         String receiverToken = env.getProperty("bridge.receiver-token", "");
         if (!deviceToken.matches("[A-Za-z0-9_-]{32,256}") || !receiverToken.matches("[A-Za-z0-9_-]{32,256}") || deviceToken.equals(receiverToken))
@@ -78,14 +78,30 @@ final class BridgeAccess {
             liveDevice = liveToken.getBytes(StandardCharsets.UTF_8);
             deviceId = java.util.UUID.fromString(assignedId);
         }
+        // Optional fourth credential: create-by-reference and read-own-reference only. Configuring it makes the
+        // process synthetic-only, so no payable QR may be configured alongside it.
+        String integrationToken = env.getProperty("bridge.integration-token", "");
+        if (integrationToken.isEmpty()) integration = new byte[0];
+        else {
+            if (!integrationToken.matches("[A-Za-z0-9_-]{32,256}") || integrationToken.equals(deviceToken)
+                    || integrationToken.equals(receiverToken) || integrationToken.equals(liveToken))
+                throw new IllegalStateException("Distinct integration credential of 32 to 256 URL-safe characters required");
+            if (!env.getProperty("bridge.qr-directory", "").isEmpty())
+                throw new IllegalStateException("Integration mode is synthetic-only; a receiving QR must not be configured");
+            integration = integrationToken.getBytes(StandardCharsets.UTF_8);
+        }
     }
+
+    boolean integrationEnabled() { return integration.length > 0; }
 
     boolean authorized(String header, boolean deviceRole) {
         return authorized(header, deviceRole ? "simulation" : "receiver");
     }
     boolean authorized(String header, String role) {
         if (header == null || !header.startsWith("Bearer ") || header.length() > 263) return false;
-        byte[] expected = switch (role) { case "live" -> liveDevice; case "simulation" -> device; default -> receiver; };
+        byte[] expected = switch (role) {
+            case "live" -> liveDevice; case "simulation" -> device; case "integration" -> integration; default -> receiver;
+        };
         return expected.length > 0 && MessageDigest.isEqual(expected, header.substring(7).getBytes(StandardCharsets.UTF_8));
     }
 }
