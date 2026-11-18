@@ -43,6 +43,7 @@ final class ReceivingQr {
         }
     }
 
+    boolean configured() { return png != null; }
     byte[] bytes() {
         if (png == null) throw new BridgeFailure(404, "QR_NOT_CONFIGURED");
         return png.clone();

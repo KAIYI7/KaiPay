@@ -25,7 +25,7 @@ class CheckoutController {
         byte[] html;
         try { html = resource("demo/checkout.html"); }
         catch (IOException ignored) { throw new IllegalStateException("Checkout page unavailable"); }
-        page = access.integrationEnabled() ? syntheticCheckout(html) : html;
+        page = access.observedMode() ? observedCheckout(html) : access.integrationEnabled() ? syntheticCheckout(html) : html;
     }
 
     // Integration mode is synthetic-only: the payer page must not describe genuine wallets, QR codes or history checks.
@@ -43,10 +43,30 @@ class CheckoutController {
         {"<h2>Payment instructions</h2><div id=\"payment-instructions\"><p>Wait for a configured receiving QR before attempting a payment. This placeholder cannot receive money.</p></div><p>The receiving QR does not necessarily include this amount or KaiPay request reference. A matching amount or notification cannot identify the intended checkout or prove settlement. Keep the reference available for the receiver.</p>",
             "<h2>Demo instructions</h2><div id=\"payment-instructions\"><p>No payment is needed or possible for this synthetic demo. This placeholder cannot receive money.</p></div><p>Matching invented evidence by amount cannot identify a payer or prove settlement. Keep the reference available for the organizer.</p>"},
     };
-    static byte[] syntheticCheckout(byte[] html) {
+    static byte[] syntheticCheckout(byte[] html) { return rewrite(html, SYNTHETIC_COPY, "Synthetic checkout copy is out of date"); }
+
+    // Observed-evidence mode: genuine notifications, but the page never requests, takes or claims a payment and never
+    // fetches a QR. data-bridge-mode selects checkout.js's observed copy set. Drift fails startup, as above.
+    static final String[][] OBSERVED_COPY = {
+        {"data-checkout-entry=\"private\"", "data-checkout-entry=\"private\" data-bridge-mode=\"observed\""},
+        {"<p class=\"intro\">A read-only view of one experimental payment request.</p>",
+            "<p class=\"intro\">A read-only view of one observed-evidence checkout.</p>"},
+        {"<p class=\"notice\">Private owner-controlled experiment. A notification is unverified evidence. Payment is confirmed only after the receiver independently checks TNG history.</p>",
+            "<p class=\"notice\">This page does not request or take payment. It shows what the receiver's phone observed. A wallet notification is unverified; the receiver checks their own wallet history before any manual confirmation.</p>"},
+        {"<strong id=\"qr-placeholder-title\">Payment QR unavailable</strong><span id=\"qr-placeholder-detail\">No payment code is displayed. Do not send a payment using this placeholder.</span>",
+            "<strong id=\"qr-placeholder-title\">No payment code on this page</strong><span id=\"qr-placeholder-detail\">This page does not request or take payment.</span>"},
+        {"<img id=\"receiving-qr\" alt=\"Receiver-supplied TNG receiving QR\"><figcaption>Receiver-supplied personal TNG receiving QR</figcaption>",
+            "<img id=\"receiving-qr\" alt=\"No payment code in observed mode\"><figcaption>No payment code in observed mode</figcaption>"},
+        {"<h2>Payment instructions</h2><div id=\"payment-instructions\"><p>Wait for a configured receiving QR before attempting a payment. This placeholder cannot receive money.</p></div><p>The receiving QR does not necessarily include this amount or KaiPay request reference. A matching amount or notification cannot identify the intended checkout or prove settlement. Keep the reference available for the receiver.</p>",
+            "<h2>About this page</h2><div id=\"payment-instructions\"><p>This page does not request or take payment. It shows what the receiver's phone observed. Transfer at most once; if you already sent money, do not send again.</p></div><p>A notification of a matching amount does not show who sent money, or that it arrived. Keep the reference available for the receiver.</p>"},
+    };
+    static byte[] observedCheckout(byte[] html) { return rewrite(html, OBSERVED_COPY, "Observed checkout copy is out of date"); }
+
+    /** Every replaced passage must exist exactly once, so copy drift fails startup instead of serving another mode's wording. */
+    static byte[] rewrite(byte[] html, String[][] table, String drift) {
         String text = new String(html, java.nio.charset.StandardCharsets.UTF_8);
-        for (String[] passage : SYNTHETIC_COPY) {
-            if (!text.contains(passage[0])) throw new IllegalStateException("Synthetic checkout copy is out of date");
+        for (String[] passage : table) {
+            if (text.indexOf(passage[0]) < 0 || text.indexOf(passage[0]) != text.lastIndexOf(passage[0])) throw new IllegalStateException(drift);
             text = text.replace(passage[0], passage[1]);
         }
         return text.getBytes(java.nio.charset.StandardCharsets.UTF_8);

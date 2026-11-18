@@ -1,5 +1,6 @@
 package com.lky.experimental.bridge;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -18,6 +19,8 @@ public final class Model {
     }
     public record CreateRequest(Integer amountMinor) {}
     public enum PayerEvidence { NONE, SYNTHETIC, NOTIFICATION_UNVERIFIED }
+    /** Persisted on the one checkout of an observed-evidence store; absent (null, never serialized) everywhere else. */
+    public enum EvidenceMode { OBSERVED_NOTIFICATION }
     // Explicit allowlist: payer access never serializes request observation IDs or candidate metadata.
     public record Checkout(UUID id, int amountMinor, Instant createdAt, Instant expiresAt,
                            Status status, PayerEvidence evidence, boolean paymentWindowClosed,
@@ -51,9 +54,17 @@ public final class Model {
     public record ReviewGrant(UUID eventId, Instant reviewExpiresAt, boolean revoked) {}
     // revision counts persisted changes (0 for snapshots written before it existed); integrationReference binds an
     // integration client's canonical reference to exactly this request and is null for receiver-created requests.
+    // evidenceMode is omitted while null, so synthetic and non-integration snapshots and responses keep their bytes,
+    // and an older binary (fail-on-unknown-properties) refuses only an observed-mode snapshot.
     public record PaymentRequest(UUID id, int amountMinor, Instant createdAt, Instant expiresAt,
                                  Status status, UUID observationId, Integer lifecycleVersion,
-                                 boolean paymentClosed, ReviewGrant reviewGrant, long revision, UUID integrationReference) {
+                                 boolean paymentClosed, ReviewGrant reviewGrant, long revision, UUID integrationReference,
+                                 @JsonInclude(JsonInclude.Include.NON_NULL) EvidenceMode evidenceMode) {
+        public PaymentRequest(UUID id, int amountMinor, Instant createdAt, Instant expiresAt, Status status, UUID observationId,
+                              Integer lifecycleVersion, boolean paymentClosed, ReviewGrant reviewGrant, long revision, UUID integrationReference) {
+            this(id, amountMinor, createdAt, expiresAt, status, observationId, lifecycleVersion, paymentClosed, reviewGrant, revision,
+                    integrationReference, null);
+        }
         public PaymentRequest(UUID id, int amountMinor, Instant createdAt, Instant expiresAt, Status status, UUID observationId) {
             this(id, amountMinor, createdAt, expiresAt, status, observationId, null, false, null);
         }
@@ -67,13 +78,20 @@ public final class Model {
             if (next == status && java.util.Objects.equals(observation, observationId) && closed == paymentClosed
                     && java.util.Objects.equals(grant, reviewGrant)) return this;
             return new PaymentRequest(id, amountMinor, createdAt, expiresAt, next, observation, lifecycleVersion, closed, grant,
-                    revision + 1, integrationReference);
+                    revision + 1, integrationReference, evidenceMode);
         }
     }
     public record IntegrationCreate(Integer amountMinor, com.fasterxml.jackson.databind.JsonNode currency) {}
     // Explicit allowlist for the integration credential: no observation, grant, candidate or payer material.
+    // evidenceMode is the observed-mode-only key; omitted while null, so synthetic bodies keep their exact bytes.
     public record IntegrationCheckout(UUID reference, UUID checkoutId, int amountMinor, Status status, PayerEvidence evidence,
-                                      Instant createdAt, Instant expiresAt, Instant reviewExpiresAt, long revision) {}
+                                      Instant createdAt, Instant expiresAt, Instant reviewExpiresAt, long revision,
+                                      @JsonInclude(JsonInclude.Include.NON_NULL) EvidenceMode evidenceMode) {
+        public IntegrationCheckout(UUID reference, UUID checkoutId, int amountMinor, Status status, PayerEvidence evidence,
+                                   Instant createdAt, Instant expiresAt, Instant reviewExpiresAt, long revision) {
+            this(reference, checkoutId, amountMinor, status, evidence, createdAt, expiresAt, reviewExpiresAt, revision, null);
+        }
+    }
     public record Observation(Candidate candidate, Disposition disposition, UUID requestId, Instant acceptedAt) {
         public Observation(Candidate candidate, Disposition disposition, UUID requestId) { this(candidate, disposition, requestId, null); }
         Observation withDisposition(Disposition next) { return new Observation(candidate, next, requestId, acceptedAt); }

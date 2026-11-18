@@ -1,5 +1,8 @@
 'use strict';
 const byId = id => document.getElementById(id);
+// Set only by the server in observed-evidence integration mode: genuine notifications, never described as payment.
+const observedMode = document.documentElement.dataset.bridgeMode === 'observed';
+const observedNames = {AWAITING_PAYMENT: "Waiting for the receiver's own wallet notification", PAYMENT_DETECTED: 'Notification observed — unverified', AWAITING_VERIFICATION: 'Notification observed — unverified · awaiting manual confirmation', MANUALLY_CONFIRMED: 'Manually confirmed by the receiver — notification unverified', AMBIGUOUS: 'Ambiguous — not confirmed', EXPIRED: 'Ended without confirmation', REVIEW_EXPIRED: 'Ended without confirmation'};
 const names = {AWAITING_PAYMENT: 'Awaiting payment', PAYMENT_DETECTED: 'Potential payment detected — unverified', AWAITING_VERIFICATION: 'Awaiting receiver confirmation', MANUALLY_CONFIRMED: 'Manually confirmed', AMBIGUOUS: 'Ambiguous — receiver review required', EXPIRED: 'Payment window closed — unconfirmed', REVIEW_EXPIRED: 'Receiver review ended — unconfirmed'};
 const payerAccess = new Map();
 const pendingConfirmations = new Set();
@@ -143,7 +146,8 @@ function render(state) {
     const evidence = state.observations.find(item => item.candidate.eventId === (request.observationId || request.reviewGrant?.eventId));
     const synthetic = evidence && evidence.candidate.source !== 'TNG_NOTIFICATION_CANDIDATE';
     const reviewAvailable = request.reviewGrant && !request.reviewGrant.revoked && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status);
-    const statusName = request.status === 'MANUALLY_CONFIRMED' ? (synthetic ? 'Demo manually confirmed — no funds received' : 'Payment confirmed (receiver verified)') : request.paymentClosed && reviewAvailable ? (request.status === 'PAYMENT_DETECTED' ? 'Payment window closed — receiver review pending (unverified)' : 'Payment window closed — awaiting receiver confirmation') : names[request.status];
+    const statusName = observedMode ? (request.paymentClosed && reviewAvailable ? (request.status === 'PAYMENT_DETECTED' ? 'Notification window closed — receiver review pending (unverified)' : 'Notification window closed — awaiting manual confirmation (unverified)') : observedNames[request.status])
+      : request.status === 'MANUALLY_CONFIRMED' ? (synthetic ? 'Demo manually confirmed — no funds received' : 'Payment confirmed (receiver verified)') : request.paymentClosed && reviewAvailable ? (request.status === 'PAYMENT_DETECTED' ? 'Payment window closed — receiver review pending (unverified)' : 'Payment window closed — awaiting receiver confirmation') : names[request.status];
     row.append(element('p', money(request.amountMinor), 'amount'), element('p', statusName || 'Unknown state — refresh required', 'status ' + (request.status === 'MANUALLY_CONFIRMED' ? 'confirmed' : '')),
       element('p', 'Request / order reference', 'muted'), element('p', request.id, 'reference'));
     if (request.integrationReference) {
@@ -152,14 +156,21 @@ function render(state) {
       reference.dataset.integrationReference = '';
       row.append(element('p', 'Integration reference (SettleTable demo)', 'muted'), reference);
     }
-    row.append(element('p', 'Payment deadline: ' + new Date(request.expiresAt).toLocaleString() + (request.paymentClosed ? ' · closed to new candidates' : ''), 'muted'));
+    row.append(element('p', (observedMode ? 'Notification window ends: ' : 'Payment deadline: ') + new Date(request.expiresAt).toLocaleString() + (request.paymentClosed ? (observedMode ? ' · closed to new notifications' : ' · closed to new candidates') : ''), 'muted'));
     if (request.reviewGrant) row.append(element('p', 'Receiver review deadline: ' + new Date(request.reviewGrant.reviewExpiresAt).toLocaleString() + (request.reviewGrant.revoked ? ' · grant revoked; cannot be restored' : reviewAvailable ? ' · grant active; server rechecks eligibility on submission' : request.status === 'MANUALLY_CONFIRMED' ? ' · receiver confirmation recorded' : ' · review unavailable'), 'muted'));
     else row.append(element('p', 'No extended receiver-review period has been granted.', 'muted'));
+    if (observedMode) {
+      if (evidence) row.append(element('p', 'Wallet notification observed · UNVERIFIED. It does not show who sent money, or that it arrived.', 'notice'));
+      if (request.status === 'AMBIGUOUS') row.append(element('p', 'Competing or changed notifications make this checkout ambiguous. It cannot be confirmed. Do not transfer again.'));
+      if (request.status === 'EXPIRED' || request.status === 'REVIEW_EXPIRED') row.append(element('p', 'Ended without confirmation; it can no longer be confirmed. If money was sent, check your own wallet history. Do not transfer again.'));
+      if (request.paymentClosed && reviewAvailable) row.append(element('p', 'The notification window is closed. Review only the notification already observed; it stays unverified until you check your own wallet history and confirm manually. Do not transfer again.', 'notice'));
+    } else {
     if (synthetic) row.append(element('p', 'SYNTHETIC DEMO — invented evidence; no actual funds received.', 'notice'));
     else if (evidence) row.append(element('p', 'Notification candidate — unverified evidence, not settlement proof.', 'notice'));
     if (request.status === 'AMBIGUOUS') row.append(element('p', 'Competing or changed evidence needs receiver review. Equal amount and time cannot identify the correct payer.'));
     if (request.status === 'EXPIRED' || request.status === 'REVIEW_EXPIRED') row.append(element('p', 'This request is unconfirmed and can no longer be verified or confirmed. Contact the payer to resolve any actual transfer. Do not request another payment automatically.'));
     if (request.paymentClosed && reviewAvailable) row.append(element('p', 'The payment window is closed. Review only the previously accepted candidate; it remains unverified until your independent check and explicit confirmation. Do not ask the payer to pay again.', 'notice'));
+    }
     if (evidenceCapacityReached && ['PAYMENT_DETECTED', 'AWAITING_VERIFICATION'].includes(request.status)) row.append(element('p', 'Evidence capacity is reached. Verification and confirmation are unavailable until explicit offline recovery.', 'notice'));
     const linkButton = element('button', payerAccess.has(request.id) ? 'Replace checkout code' : 'Issue checkout code', 'secondary');
     linkButton.type = 'button';
@@ -169,7 +180,8 @@ function render(state) {
       const operation = beginAccessMutation(request.id);
       if (!operation) return;
       try {
-        const configured = byId('payer-origin').value.trim();
+        // Observed mode never uses the payer gateway: the code is always for this private origin.
+        const configured = observedMode ? '' : byId('payer-origin').value.trim();
         let origin = location.origin;
         if (configured) {
           const remote = new URL(configured);
@@ -189,7 +201,8 @@ function render(state) {
     });
     row.append(linkButton);
     const simulationOpen = !request.paymentClosed && ['AWAITING_PAYMENT', 'PAYMENT_DETECTED', 'AWAITING_VERIFICATION', 'AMBIGUOUS'].includes(request.status);
-    if (simulationOpen && !(evidence && !synthetic)) {
+    // Observed mode: hidden, and the server refuses SIMULATED candidates with SYNTHETIC_DISABLED anyway.
+    if (!observedMode && simulationOpen && !(evidence && !synthetic)) {
       // Uses this checkout's own amount; the server still matches by amount and time. A second click is a second distinct
       // candidate. Never offered beside genuine notification evidence, where it would make that checkout ambiguous.
       const simulate = element('button', "Simulate synthetic candidate at this checkout's amount (" + money(request.amountMinor) + ')', 'secondary');
@@ -209,7 +222,7 @@ function render(state) {
       label.append(checkbox, element('span', synthetic
         ? 'I acknowledge this is invented synthetic evidence for this checkout. No actual TNG transaction or funds are being asserted, and no unresolved ambiguity prevents this demo confirmation.'
         : 'I independently checked actual TNG transaction history: the incoming transaction exists, its actual amount matches this checkout, I identified this intended checkout, and no unresolved ambiguity or conflicting evidence prevents confirmation.'));
-      const button = element('button', synthetic ? 'Confirm synthetic demo — no funds received' : "I've checked TNG history — Confirm payment");
+      const button = element('button', synthetic ? 'Confirm synthetic demo — no funds received' : observedMode ? 'I checked my own wallet history — confirm manually' : "I've checked TNG history — Confirm payment");
       button.type = 'submit';
       button.disabled = true;
       checkbox.onchange = () => { button.disabled = !checkbox.checked || pendingConfirmations.has(request.id); };
@@ -256,16 +269,17 @@ function render(state) {
     requestRows.push(row);
   }
   clearCodeFields(byId('requests'));
-  byId('requests').replaceChildren(...(requestRows.length ? requestRows : [element('p', 'No requests yet. Create a checkout above.', 'empty')]));
+  byId('requests').replaceChildren(...(requestRows.length ? requestRows : [element('p', observedMode ? 'No checkout yet. The integration client creates the one checkout for this mode.' : 'No requests yet. Create a checkout above.', 'empty')]));
   const observationRows = [];
   for (const item of [...state.observations].reverse()) {
     const row = element('article');
     const candidate = item.candidate;
     const synthetic = candidate.source !== 'TNG_NOTIFICATION_CANDIDATE';
-    row.append(element('p', synthetic ? 'SYNTHETIC · invented evidence · no funds received' : 'TNG notification candidate · UNVERIFIED', 'eyebrow'), element('p', money(candidate.amountMinor) + ' · ' + item.disposition, 'status'), element('p', 'Device-reported observation: ' + new Date(candidate.observedAt).toLocaleString() + ' · not proof of payment time', 'muted'), element('p', item.acceptedAt ? 'Server admission: ' + new Date(item.acceptedAt).toLocaleString() : 'Historical evidence: server admission time unknown', 'muted'), element('p', 'Event ' + candidate.eventId, 'reference'));
-    if (item.disposition === 'UNMATCHED') row.append(element('p', 'No eligible matching request. This evidence does not change any checkout to paid.'));
-    if (['EXPIRED', 'DELAYED', 'INVALIDATED', 'UPDATE_IGNORED'].includes(item.disposition)) row.append(element('p', 'Review-only evidence. This observation cannot establish payment completion.'));
-    if (candidate.source !== 'SIMULATED' && ['UNMATCHED', 'AMBIGUOUS'].includes(item.disposition)) {
+    row.append(element('p', synthetic ? 'SYNTHETIC · invented evidence · no funds received' : observedMode ? 'Wallet notification observed · UNVERIFIED' : 'TNG notification candidate · UNVERIFIED', 'eyebrow'), element('p', money(candidate.amountMinor) + ' · ' + item.disposition, 'status'), element('p', 'Device-reported observation: ' + new Date(candidate.observedAt).toLocaleString() + (observedMode ? ' · not proof of when money moved' : ' · not proof of payment time'), 'muted'), element('p', item.acceptedAt ? 'Server admission: ' + new Date(item.acceptedAt).toLocaleString() : 'Historical evidence: server admission time unknown', 'muted'), element('p', 'Event ' + candidate.eventId, 'reference'));
+    if (item.disposition === 'UNMATCHED') row.append(element('p', observedMode ? 'No eligible checkout matched. This notification changes nothing.' : 'No eligible matching request. This evidence does not change any checkout to paid.'));
+    if (['EXPIRED', 'DELAYED', 'INVALIDATED', 'UPDATE_IGNORED'].includes(item.disposition)) row.append(element('p', observedMode ? 'Review-only notification. It can never be confirmed.' : 'Review-only evidence. This observation cannot establish payment completion.'));
+    // Observed mode: manual resolve is hidden, and the server refuses genuine evidence onto an integration checkout anyway.
+    if (!observedMode && candidate.source !== 'SIMULATED' && ['UNMATCHED', 'AMBIGUOUS'].includes(item.disposition)) {
       const eligible = state.requests.filter(request => !request.paymentClosed && !request.reviewGrant && ['AWAITING_PAYMENT', 'AMBIGUOUS'].includes(request.status) && request.amountMinor === candidate.amountMinor
         && new Date(candidate.observedAt) >= new Date(request.createdAt) && new Date(candidate.observedAt) < new Date(request.expiresAt));
       if (eligible.length) {
@@ -327,5 +341,6 @@ function simulateCandidate(amount) {
 byId('observe').onclick = () => run(async () => { await simulateCandidate(amountMinor()); await refresh(); });
 byId('refresh').onclick = () => run(async () => { await refresh(); startPolling(); });
 byId('clear').onclick = clearSession;
+if (observedMode) { byId('create').disabled = true; byId('observe').disabled = true; }
 window.addEventListener('pagehide', clearSession);
 window.addEventListener('pageshow', event => { if (event.persisted) clearSession(); });

@@ -15,7 +15,34 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController @ConditionalOnProperty(name = "bridge.enabled", havingValue = "true")
 class BridgeController {
     private final ObservationService service;
-    BridgeController(ObservationService service) { this.service = service; }
+    private final byte[] page;
+    BridgeController(ObservationService service) { this(service, false); }
+    @org.springframework.beans.factory.annotation.Autowired
+    BridgeController(ObservationService service, BridgeAccess access) { this(service, access.observedMode()); }
+    private BridgeController(ObservationService service, boolean observed) {
+        this.service = service;
+        byte[] html;
+        try { html = resource("demo/index.html"); }
+        catch (IOException ignored) { throw new IllegalStateException("Receiver page unavailable"); }
+        page = observed ? observedIndex(html) : html;
+    }
+
+    // Observed-evidence mode: factual receiver copy, and the create and developer panels hidden (the server refuses both).
+    // data-bridge-mode selects demo.js's observed copy set. Every passage must exist, so drift fails startup.
+    static final String[][] OBSERVED_INDEX = {
+        {"<html lang=\"en\">", "<html lang=\"en\" data-bridge-mode=\"observed\">"},
+        {"<p class=\"intro\">Create a checkout, review candidate evidence, and confirm only after your own verification.</p>",
+            "<p class=\"intro\">Review the wallet notification your own phone observed for the one integration checkout. Confirm manually only after checking your own wallet history.</p>"},
+        {"<p class=\"notice\">Android notifications are UNVERIFIED candidate evidence. Amount and time do not identify the payer or prove settlement. This isolated experiment never changes KaiPay payments or ledger entries.</p>",
+            "<p class=\"notice\">Observed-evidence mode. A wallet notification observed on your own phone is UNVERIFIED: amount and time do not identify who sent money, or show that it arrived. This bridge does not take, move or verify money, and never changes KaiPay records.</p>"},
+        {"<label>Approved remote payer origin (optional) ", "<label class=\"hidden\">Approved remote payer origin (optional) "},
+        {"<p class=\"muted\">Use only the HTTPS origin of the payer gateway you control.", "<p class=\"muted\" hidden>Use only the HTTPS origin of the payer gateway you control."},
+        {"<section class=\"panel\" aria-labelledby=\"create-title\">", "<section class=\"panel\" aria-labelledby=\"create-title\" hidden>"},
+        {"<details class=\"panel\"><summary>Developer tools", "<details class=\"panel\" hidden><summary>Developer tools"},
+        {"<footer>Genuine payments always require manual receiver confirmation after independently checking actual TNG history, amount and intended checkout. Notification matching never confirms a payment automatically. Synthetic evidence is invented. Expired, unmatched and ambiguous evidence never proves a payment.</footer>",
+            "<footer>Observed-evidence mode serves one integration checkout at one fixed amount. A matched notification is never confirmed automatically: the receiver checks their own wallet history and confirms manually. Expired, unmatched and ambiguous notifications are never confirmed. Creating checkouts, simulation and manual resolve are disabled in this mode.</footer>"},
+    };
+    static byte[] observedIndex(byte[] html) { return CheckoutController.rewrite(html, OBSERVED_INDEX, "Observed receiver copy is out of date"); }
 
     // A successful sample proves only this receiver-authorized process responded now.
     // Do not inspect payment state or infer phone connectivity from backend availability.
@@ -36,10 +63,10 @@ class BridgeController {
         return service.beginVerification(id, input);
     }
     @PostMapping("/api/requests/{id}/confirm") PaymentRequest confirm(@PathVariable UUID id, @RequestBody Confirmation input) { return service.confirm(id, input); }
-    @GetMapping(value = "/", produces = MediaType.TEXT_HTML_VALUE) byte[] demo() throws IOException { return resource("demo/index.html"); }
+    @GetMapping(value = "/", produces = MediaType.TEXT_HTML_VALUE) byte[] demo() { return page.clone(); }
     @GetMapping(value = "/demo.js", produces = "text/javascript") byte[] script() throws IOException { return resource("demo/demo.js"); }
     @GetMapping(value = "/demo.css", produces = "text/css") byte[] styles() throws IOException { return resource("demo/demo.css"); }
-    private byte[] resource(String path) throws IOException {
+    private static byte[] resource(String path) throws IOException {
         try (var stream = new ClassPathResource(path).getInputStream()) { return stream.readAllBytes(); }
     }
 }

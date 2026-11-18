@@ -32,8 +32,9 @@ public final class LifecycleBrowserServer {
     @TestConfiguration(proxyBeanMethods = false)
     static class ClockConfiguration {
         @Bean @Primary ObservationService controlledObservations(SnapshotStore store, BridgeAccess access, Environment environment) {
+            // Same mode inputs as the production bean, so a harness run reaches every mode with a controlled clock.
             return new ObservationService(store, CLOCK, access.deviceId,
-                    environment.getProperty("bridge.review-period-seconds", Integer.class, 1800));
+                    environment.getProperty("bridge.review-period-seconds", Integer.class, 1800), access.integrationEnabled(), access.observedAmountMinor);
         }
     }
 

@@ -212,7 +212,7 @@ class IntegrationHttpTest {
         String receiverScript = send(get("/demo.js"), null).getContentAsString(StandardCharsets.UTF_8);
         // Source guard only; the rendered behaviour is exercised by the local browser check.
         assertThat(receiverScript).contains("'Integration reference (SettleTable demo)'", "simulate.dataset.simulateRequestId = request.id",
-                "simulateCandidate(request.amountMinor)", "if (simulationOpen && !(evidence && !synthetic))");
+                "simulateCandidate(request.amountMinor)", "if (!observedMode && simulationOpen && !(evidence && !synthetic))");
     }
 
     @Test void referenceNotFoundIsFramedDistinctlyFromFilterNotFoundAndDisabledIntegration() throws Exception {
@@ -283,10 +283,10 @@ class IntegrationHttpTest {
         assertThat(synthetic).doesNotContain("TNG", "receiving QR", "Payment instructions", "Payment QR", "experimental payment request", "send a payment");
         assertThat(synthetic.getBytes(StandardCharsets.UTF_8)).isEqualTo(CheckoutController.syntheticCheckout(Files.readAllBytes(Path.of("src/main/resources/demo/checkout.html"))));
         String script = send(get("/checkout.js"), null).getContentAsString(StandardCharsets.UTF_8);
-        assertThat(script).contains("dataset.checkoutMode === 'synthetic'", "if (synthetic) { hideQr('', ''); session.qrChecked = false; return; }",
-                "Potential payment detected — unverified (synthetic)");
-        // The synthetic branch returns before the only QR fetch in the script.
-        assertThat(script.indexOf("if (synthetic) { hideQr")).isLessThan(script.indexOf("fetch('/api/checkout/' + session.id + '/qr'"));
+        assertThat(script).contains("dataset.checkoutMode === 'synthetic'", "const noQr = synthetic || observed;",
+                "if (noQr) { hideQr('', ''); session.qrChecked = false; return; }", "Potential payment detected — unverified (synthetic)");
+        // The synthetic (and observed) branch returns before the only QR fetch in the script.
+        assertThat(script.indexOf("if (noQr) { hideQr")).isLessThan(script.indexOf("fetch('/api/checkout/' + session.id + '/qr'"));
         assertThat(script.split("/qr'", -1)).hasSize(2);
 
         configure(NotificationHttpTest.environment());

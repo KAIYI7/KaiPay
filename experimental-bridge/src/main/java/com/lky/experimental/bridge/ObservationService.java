@@ -17,6 +17,9 @@ final class ObservationService {
     private final int reviewPeriodSeconds;
     // Integration mode: no genuine candidate is admitted, so none can match, compete with or disqualify any checkout.
     private final boolean syntheticOnly;
+    // Observed-evidence integration mode (null otherwise): one integration checkout per store at this pinned amount, and
+    // genuine candidates of that amount only while it is held. Set only by the owner's startup configuration.
+    private final Integer observedAmount;
     private Snapshot state;
 
     ObservationService(SnapshotStore store, Clock clock) { this(store, clock, null); }
@@ -25,17 +28,34 @@ final class ObservationService {
         this(store, clock, deviceId, reviewPeriodSeconds, false);
     }
     ObservationService(SnapshotStore store, Clock clock, UUID deviceId, int reviewPeriodSeconds, boolean syntheticOnly) {
+        this(store, clock, deviceId, reviewPeriodSeconds, syntheticOnly, null);
+    }
+    /** {@code integration}: the integration credential is configured. A non-null observed amount selects observed mode. */
+    ObservationService(SnapshotStore store, Clock clock, UUID deviceId, int reviewPeriodSeconds, boolean integration, Integer observedAmount) {
         if (reviewPeriodSeconds < 300 || reviewPeriodSeconds > 1800)
             throw new IllegalStateException("Review period must be between 300 and 1800 seconds");
+        if (observedAmount != null && (!integration || deviceId == null || observedAmount < 1 || observedAmount > BridgeAccess.OBSERVED_AMOUNT_CAP))
+            throw new IllegalStateException("Invalid observed mode");
         this.store = store; this.clock = clock; this.deviceId = deviceId; this.reviewPeriodSeconds = reviewPeriodSeconds;
-        this.syntheticOnly = syntheticOnly;
+        this.syntheticOnly = integration && observedAmount == null;
+        this.observedAmount = observedAmount;
         state = store.load();
         try { validateStored(); }
         catch (Exception ignored) { throw new IllegalStateException("Invalid experimental store"); }
+        // Stores never cross modes. A process outside observed mode refuses any observed request, whatever its status.
+        // An observed process accepts only an empty store, or one observed checkout at its own amount with genuine
+        // notification candidates only. Observations without that checkout came from another mode.
+        if (observedAmount == null && state.requests().stream().anyMatch(r -> r.evidenceMode() != null))
+            throw new IllegalStateException("Observed-mode store requires observed mode");
+        if (observedAmount != null && (state.requests().size() > 1
+                || state.requests().isEmpty() && !state.observations().isEmpty()
+                || state.requests().stream().anyMatch(r -> r.evidenceMode() != EvidenceMode.OBSERVED_NOTIFICATION || r.amountMinor() != observedAmount)
+                || state.observations().stream().anyMatch(o -> o.candidate().source() != Source.TNG_NOTIFICATION_CANDIDATE)))
+            throw new IllegalStateException("Observed mode requires an empty or observed-mode store");
         // Bindings outlive the process mode. Only integration mode keeps genuine candidates away from a bound
         // checkout, so an open one must never be served by a process that admits genuine evidence.
         Instant now = clock.instant();
-        if (!syntheticOnly && state.requests().stream().anyMatch(r -> r.integrationReference() != null && !terminal(r) && held(r, now)))
+        if (!integration && state.requests().stream().anyMatch(r -> r.integrationReference() != null && !terminal(r) && held(r, now)))
             throw new IllegalStateException("Open integration checkouts require integration mode");
         state = new Snapshot(List.copyOf(state.requests()), List.copyOf(state.observations()));
     }
@@ -54,8 +74,11 @@ final class ObservationService {
         if (references.stream().distinct().count() != references.size()) throw new IllegalArgumentException();
         for (PaymentRequest r : state.requests()) {
             amount(r.amountMinor());
+            // Genuine evidence on an integration binding is valid only on the observed checkout, loaded by an observed
+            // process pinned to its amount. An observed marker is valid only on a lifecycle v2 integration binding.
             if (r.revision() < 0 || r.integrationReference() != null && (!v2(r) || r.revision() < 1
-                    || evidence(r) == PayerEvidence.NOTIFICATION_UNVERIFIED)) throw new IllegalArgumentException();
+                    || evidence(r) == PayerEvidence.NOTIFICATION_UNVERIFIED && !observedHere(r))
+                    || r.evidenceMode() != null && r.integrationReference() == null) throw new IllegalArgumentException();
             if (r.id() == null || r.createdAt() == null || r.expiresAt() == null || r.status() == null
                     || !r.expiresAt().equals(r.createdAt().plusSeconds(600))) throw new IllegalArgumentException();
             if (!v2(r)) {
@@ -119,6 +142,7 @@ final class ObservationService {
                         && eligible(r, now) && hasEvidenceCapacity());
     }
     synchronized PaymentRequest create(CreateRequest input) {
+        if (observedAmount != null) throw new BridgeFailure(409, "RECEIVER_CREATE_DISABLED");
         if (input == null) throw new BridgeFailure(422, "AMOUNT_INVALID");
         amount(input.amountMinor()); Instant now = clock.instant(); expire(now);
         return add(input.amountMinor(), null, now);
@@ -127,7 +151,14 @@ final class ObservationService {
     /** Idempotent create-by-reference. The reference lookup precedes every hold and capacity check, so a replay is never blocked by its own hold. */
     synchronized IntegrationPut putIntegration(UUID reference, Integer amountMinor) {
         Objects.requireNonNull(reference);
-        amount(amountMinor); Instant now = clock.instant(); expire(now);
+        amount(amountMinor); Instant now = clock.instant();
+        if (observedAmount != null && integration(reference) == null) {
+            // Observed mode, new reference: amount pinned, then single use, then the existing capacity and hold checks.
+            // Both refusals come before lazy expiry, so a refused PUT writes nothing.
+            if (amountMinor.intValue() != observedAmount) throw new BridgeFailure(409, "OBSERVED_AMOUNT_MISMATCH");
+            if (!state.requests().isEmpty()) throw new BridgeFailure(409, "OBSERVED_CHECKOUT_SPENT");
+        }
+        expire(now);
         PaymentRequest bound = integration(reference);
         if (bound != null) {
             if (bound.amountMinor() != amountMinor) throw new BridgeFailure(409, "REFERENCE_CONFLICT");
@@ -147,7 +178,8 @@ final class ObservationService {
         if (state.requests().stream().anyMatch(r -> r.amountMinor() == amountMinor && held(r, now)))
             throw new BridgeFailure(409, "SAME_AMOUNT_HELD");
         PaymentRequest r = new PaymentRequest(UUID.randomUUID(), amountMinor, now, now.plusSeconds(600),
-                Status.AWAITING_PAYMENT, null, 2, false, null, 1, reference);
+                Status.AWAITING_PAYMENT, null, 2, false, null, 1, reference,
+                observedAmount != null && reference != null ? EvidenceMode.OBSERVED_NOTIFICATION : null);
         List<PaymentRequest> requests = new ArrayList<>(state.requests()); requests.add(r);
         publish(new Snapshot(requests, state.observations())); return r;
     }
@@ -156,7 +188,7 @@ final class ObservationService {
     }
     private IntegrationCheckout integrationView(PaymentRequest r) {
         return new IntegrationCheckout(r.integrationReference(), r.id(), r.amountMinor(), r.status(), evidence(r), r.createdAt(),
-                r.expiresAt(), r.reviewGrant() == null ? null : r.reviewGrant().reviewExpiresAt(), r.revision());
+                r.expiresAt(), r.reviewGrant() == null ? null : r.reviewGrant().reviewExpiresAt(), r.revision(), r.evidenceMode());
     }
     private PayerEvidence evidence(PaymentRequest r) {
         Observation selected = observation(r.observationId() != null ? r.observationId()
@@ -164,7 +196,10 @@ final class ObservationService {
         return selected == null ? PayerEvidence.NONE
                 : selected.candidate().source() == Source.TNG_NOTIFICATION_CANDIDATE ? PayerEvidence.NOTIFICATION_UNVERIFIED : PayerEvidence.SYNTHETIC;
     }
-    synchronized Observation ingest(Candidate event) { return ingest(event, false); }
+    synchronized Observation ingest(Candidate event) {
+        if (observedAmount != null) throw new BridgeFailure(422, "SYNTHETIC_DISABLED"); // before validation or any state change
+        return ingest(event, false);
+    }
     synchronized Observation ingestNotification(Candidate event) {
         if (deviceId == null) throw new BridgeFailure(404, "LIVE_DELIVERY_DISABLED");
         validate(event, true);
@@ -176,17 +211,31 @@ final class ObservationService {
             if (existing != null && existing.candidate().equals(event)) return existing;
             throw new BridgeFailure(422, "GENUINE_DISABLED");
         }
-        return ingest(event, true);
+        if (observedAmount != null) {
+            if (event.source() != Source.TNG_NOTIFICATION_CANDIDATE) throw new BridgeFailure(422, "SYNTHETIC_DISABLED");
+            // The existing exact-retry acknowledgement first: a lost acknowledgement retried after confirmation still
+            // gets its stored result, unchanged. Then the gate, decided without expire() or any other state change.
+            Observation existing = observation(event.eventId());
+            if (existing != null && existing.candidate().equals(event)) return existing;
+            Instant now = clock.instant();
+            PaymentRequest observed = state.requests().isEmpty() ? null : state.requests().getFirst();
+            // held() deliberately includes an AMBIGUOUS checkout whose grant is revoked, so a second same-amount
+            // notification during the review hold is stored and disqualifies under the existing rule.
+            if (event.amountMinor().intValue() != observedAmount || observed == null || terminal(observed) || !held(observed, now))
+                throw new BridgeFailure(422, "GENUINE_DISABLED");
+            return ingest(event, true, now); // admitted at the gate's own decision time
+        }
+        return ingest(event, true, clock.instant());
     }
-    private Observation ingest(Candidate event, boolean live) {
+    private Observation ingest(Candidate event, boolean live) { return ingest(event, live, clock.instant()); }
+    // Admission uses the serialized decision time, never device/HTTP arrival time.
+    private Observation ingest(Candidate event, boolean live, Instant now) {
         validate(event, live);
         Observation existing = observation(event.eventId());
         if (existing != null) {
             if (!existing.candidate().equals(event)) throw new BridgeFailure(409, "EVENT_ID_REUSED");
             return existing;
         }
-        // Admission uses the serialized decision time, never device/HTTP arrival time.
-        Instant now = clock.instant();
         if (event.observedAt().isBefore(now.minusSeconds(live ? 86400 : 120)) || event.observedAt().isAfter(now.plusSeconds(30)))
             throw new BridgeFailure(422, "EVENT_TIME_INVALID");
         expire(now);
@@ -334,6 +383,9 @@ final class ObservationService {
         Observation selected = observation(r.observationId());
         Observation granted = r.reviewGrant() == null ? null : observation(r.reviewGrant().eventId());
         return selected != null && sameLifecycle(selected.candidate(), event) || granted != null && sameLifecycle(granted.candidate(), event);
+    }
+    private boolean observedHere(PaymentRequest r) {
+        return observedAmount != null && r.evidenceMode() == EvidenceMode.OBSERVED_NOTIFICATION && r.amountMinor() == observedAmount;
     }
     private boolean hasEvidenceCapacity() { return state.observations().size() < MAX_OBSERVATIONS && store.hasEvidenceHeadroom(state); }
     private static boolean held(PaymentRequest r, Instant now) {

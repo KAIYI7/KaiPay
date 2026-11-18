@@ -35,6 +35,8 @@ Provision the live credential and assigned UUID in the companion app privately. 
 
 The receiver page at `/` creates an experimental request with an expected RM amount and a server-generated request UUID as its reference. **Issue checkout code** returns separate shareable items: a clean `/checkout` URL and a private `KP1.<request UUID>.<bearer>` code. For remote access, enter only your approved HTTPS payer gateway origin first. Send the clean URL first: the payer completes any provider warning/sign-in, reaches the real KaiPay page, then explicitly pastes the code into **Enter/Paste checkout code**. Never append the code to a URL or paste it into a provider page. Anyone holding it can read that request; this is a bearer capability, not payer identity. Do not record it in screenshots, logs, fixtures or Git. Issuing a code does not start a tunnel or configure a payment destination.
 
+The payer page re-checks status immediately when it becomes visible again, gains focus or comes back online, in every mode, besides its three-second polling. Every awaited step of a status check is bounded by the same 10-second abort, so a stalled step cannot stop later checks. The "Updated" line shows when status was last read.
+
 The separate payer page shows only the reference, amount, payment/review deadlines, actual request status, review availability and a limited evidence label. The code contains the existing request UUID and unchanged 256-bit, 43-character bearer; it is not a shorter numeric PIN or a new exchange/session API. Submitting clears the password field immediately. Payer access stays in a JavaScript closure and travels only in the Authorization header, never in URL paths, queries, fragments, cookies, browser storage or telemetry. Reloading, leaving or returning from browser history clears access and requires code entry again. Invalid, expired or revoked access stops polling and asks for a new code; temporary network/backend failure hides the QR and retries using memory only. An active checkout polls every three seconds and cannot list requests, read candidates, simulate, resolve, verify or confirm. Codes expire after 15 minutes, bounded by wall and elapsed process time. **Replace checkout code**, **Revoke checkout code** and backend restart invalidate prior access without changing persisted requests or replay history. Gateway restart alone does not revoke backend-held capabilities. Clear/leave controls erase page-held access and stop polling.
 
 Without owner configuration the placeholder is nonpayable. To display the owner's genuine personal TNG receiving QR, privately supply its original PNG as `receiving.png` in a dedicated local directory outside source and build folders. Set `BRIDGE_QR_DIRECTORY` to that absolute directory before starting the process. Keep the directory private and Git-ignored; never put personal QR material in source, fixtures, logs or screenshots. Only this fixed filename is read, once at startup, with no upload or request-selected path. The server never rewrites the original bytes or calls an external service. Replace the file and restart to change it; clearing the setting and restarting disables it. Existing payer links are revoked by restart.
@@ -56,7 +58,7 @@ The live credential and UUID are optional together: omitting both disables new r
 After stopping the experiment, clear environment settings:
 
 ```powershell
-Remove-Item Env:BRIDGE_ENABLED, Env:BRIDGE_RECEIVER_TOKEN, Env:BRIDGE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_ID, Env:BRIDGE_INTEGRATION_TOKEN -ErrorAction SilentlyContinue
+Remove-Item Env:BRIDGE_ENABLED, Env:BRIDGE_RECEIVER_TOKEN, Env:BRIDGE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_TOKEN, Env:BRIDGE_LIVE_DEVICE_ID, Env:BRIDGE_INTEGRATION_TOKEN, Env:BRIDGE_INTEGRATION_OBSERVED_AMOUNT_MINOR -ErrorAction SilentlyContinue
 ```
 
 ## Synthetic end-to-end demonstration
@@ -97,7 +99,7 @@ The reference is the client's canonical **lowercase** UUID in the path. Any othe
 
 `GET /api/integrations/checkouts/{reference}` returns `200` with the same body, or `404` with exactly `{"error":"REFERENCE_NOT_FOUND"}` for an unknown reference. That body differs from the filter's `NOT_FOUND`, `INTEGRATION_DISABLED` and `EXPERIMENT_DISABLED` 404s.
 
-Both routes return this allowlist and nothing else: `reference`, `checkoutId`, `amountMinor`, `status`, `evidence` (`NONE`, `SYNTHETIC` or `NOTIFICATION_UNVERIFIED`), `createdAt`, `expiresAt` (payment deadline), `reviewExpiresAt` (`null` until a review grant exists) and `revision`. Timestamps are UTC ISO-8601 strings. Observation, device and candidate identifiers, grant internals and payer material never appear.
+Both routes return this allowlist and nothing else: `reference`, `checkoutId`, `amountMinor`, `status`, `evidence` (`NONE`, `SYNTHETIC` or `NOTIFICATION_UNVERIFIED`), `createdAt`, `expiresAt` (payment deadline), `reviewExpiresAt` (`null` until a review grant exists) and `revision`. [Observed-evidence mode](#observed-evidence-integration-mode) adds one key, `evidenceMode`. Timestamps are UTC ISO-8601 strings. Observation, device and candidate identifiers, grant internals and payer material never appear.
 
 `revision` is a persisted change counter. A new checkout starts at `1`, and every later persisted change increments it: match, ambiguity, disqualification, resolution, verification, confirmation and lazy expiry during reads. Expiry also sets an internal payment-closed latch on terminal checkouts, so the revision can rise with no visible change in the allowlist; treat that as a newer observation, not a conflict. A repeated read or an idempotent retry that changes nothing leaves it unchanged. Requests stored before revisions existed load as `0`.
 
@@ -122,6 +124,55 @@ java -jar target/notification-simulator-0.1.0-SNAPSHOT.jar
 ```
 
 Give the integration credential privately to the client application, which reads it from its own configuration. Stop with Ctrl+C in that terminal, then clear the environment as shown above together with `Env:BRIDGE_STORE`. A restart keeps checkouts, reference bindings and revisions, and revokes payer codes, so the receiver issues a new one. A diner's browser on the owner's test phone can reach the private checkout at `http://127.0.0.1:28082/checkout` through `adb reverse tcp:28082 tcp:28082`; keep the checkout code off any recorded screen.
+
+## Observed-evidence integration mode
+
+An owner-started variant of integration mode in which **one** integration checkout, at **one** owner-pinned amount, may be matched by a genuine `TNG_NOTIFICATION_CANDIDATE` from the owner's own phone. It exists for one supervised own-wallet test. A notification stays UNVERIFIED evidence: it never proves who sent money, that money arrived, or settlement. Confirmation stays a manual receiver action after checking actual wallet history, exactly as in the other modes. Nothing in this mode moves money or changes any financial record. It is off unless configured, and synthetic integration mode stays the default.
+
+### Startup
+
+Set `BRIDGE_INTEGRATION_OBSERVED_AMOUNT_MINOR` (`bridge.integration.observed-amount-minor`) to a whole number of sen from `1` to `100`. The RM1.00 cap is compiled in; no setting can raise it. The process then refuses to start unless all of these hold:
+
+- `BRIDGE_INTEGRATION_TOKEN` is set, so the process is in integration mode.
+- `BRIDGE_LIVE_DEVICE_TOKEN` and `BRIDGE_LIVE_DEVICE_ID` are set.
+- `BRIDGE_QR_DIRECTORY` is empty (the integration-mode QR refusal).
+- The store is absent or empty, or holds exactly one checkout created in observed mode at the same amount, plus only genuine notification candidates. Any `SIMULATED` or `SYNTHETIC` observation, any receiver-created request, or a checkout from another mode or amount is refused. Same-store restarts exist only to finish a crashed run; use a fresh store for every attempt.
+
+The reverse guard also holds: a process that is not in observed mode, whether synthetic integration or non-integration, refuses any store holding an observed-mode checkout, whatever its status. The observed checkout persists `"evidenceMode":"OBSERVED_NOTIFICATION"`; other requests carry no such field, so their snapshots keep their exact bytes. An older binary refuses an observed snapshot.
+
+Once serving, every enabled process prints one text-free line from its effective configuration, for example `BRIDGE_MODE mode=OBSERVED amount=1 qr=none live=true integration=true`. The other modes print `mode=SYNTHETIC` or `mode=NON_INTEGRATION` with `amount=none`. Check this line before any real step.
+
+### What changes
+
+| Route | Observed mode |
+| --- | --- |
+| `PUT /api/integrations/checkouts/{reference}`, known reference | Unchanged: `200` replay, or `409 REFERENCE_CONFLICT` for another amount. The reference lookup still comes first. |
+| `PUT`, new reference, amount other than the pinned one | `409 OBSERVED_AMOUNT_MISMATCH`; nothing is created |
+| `PUT`, new reference, the store already holds its checkout | `409 OBSERVED_CHECKOUT_SPENT`; nothing is created. One checkout per store, whatever its status. |
+| `PUT`, new reference otherwise | The existing capacity and `SAME_AMOUNT_HELD` checks, then `201` |
+| `PUT` and `GET` success bodies | The usual allowlist **plus** `"evidenceMode":"OBSERVED_NOTIFICATION"`. Synthetic-mode bodies are unchanged, byte for byte, so a client can tell the modes apart and fail closed. |
+| `POST /api/notification-candidates`, `TNG_NOTIFICATION_CANDIDATE` | After validation and the device-scope check, an exact retry of a stored event is acknowledged unchanged. Otherwise the candidate is admitted into normal matching **only if** its amount equals the pinned amount and the store's checkout exists, is not terminal and still holds its amount (payment window open, or an unconfirmed review grant running, including a revoked one after ambiguity). Every other candidate gets `422 GENUINE_DISABLED` with no state change and is never stored. Admission during the review hold is intended: a second same-amount notification makes the checkout `AMBIGUOUS` under the usual rule. |
+| `POST /api/notification-candidates`, companion `SYNTHETIC` | `422 SYNTHETIC_DISABLED`, no state change |
+| `POST /api/observations` (browser `SIMULATED`) | `422 SYNTHETIC_DISABLED`, no state change |
+| `POST /api/requests` (receiver create) | `409 RECEIVER_CREATE_DISABLED` |
+| `resolve`, verify, confirm, invalidate, payer access | Unchanged. `resolve` still refuses any non-`SYNTHETIC` evidence onto an integration checkout, so genuine evidence is never attached by hand; a missed automatic match ends the run. |
+
+The integration credential is as narrow as before: it cannot choose the mode, the amount, the evidence or review.
+
+For every rejected `POST` on the two live-device routes, an observed-mode process prints one line `LIVE_REJECTED code=<CODE>`. The code comes only from a compiled allowlist (the service's codes plus the filter's `UNAUTHORIZED`, `LIVE_DELIVERY_DISABLED`, `JSON_REQUIRED`, `BODY_TOO_LARGE`, `INVALID_REQUEST` and `TLS_REQUIRED`); anything else prints `UNLISTED`. The line never carries request text, an exception message, a path, a header, an event ID or an amount. At most 20 lines are printed per minute; the rest are counted and reported as `LIVE_REJECTED_SUPPRESSED count=<n>` at the next rejection after the minute, or when the bridge stops. `GENUINE_DISABLED` lines still reveal **when** unrelated incoming transfers were observed, so keep this output private to the run and delete it afterwards.
+
+The receiver page and the payer page are rewritten by the server with startup-checked replacement tables and `data-bridge-mode="observed"`. Their copy describes an observed, unverified notification and a manual confirmation, and never claims a payment. The payer page never fetches a QR. The receiver page hides the create panel, the developer tools, the remote payer origin field, the per-card simulate control and manual resolve.
+
+### Native startup
+
+As for [synthetic integration mode](#native-startup), with a fresh store, the live-device credential and UUID, and:
+
+```powershell
+$env:BRIDGE_INTEGRATION_OBSERVED_AMOUNT_MINOR = '1'
+```
+
+Never start the separate payer gateway with this mode: it is not integration-aware and would serve the genuine-payment payer page in front of an observed backend. Nothing in the gateway enforces this. An observed process starts only on an empty store or its own observed store; reusing a store from any other mode, including one holding only notification candidates, refuses startup. Stop with Ctrl+C and clear the environment, including `Env:BRIDGE_INTEGRATION_OBSERVED_AMOUNT_MINOR` and `Env:BRIDGE_STORE`.
+
 
 ## Optional remote payer gateway
 

@@ -34,6 +34,8 @@ This helper supports synthetic receiver operation only. Separately provisioned p
 
 The helper also never starts [synthetic integration mode](README.md#synthetic-integration-mode): it passes no integration credential, and a companion's synthetic event would need the live-device configuration the helper forces off. Use the README's manual native startup for an integration demo, in a terminal kept open for the session, and stop it there with Ctrl+C. Check that no other process owns the port first. Integration mode refuses a configured receiving QR and every genuine notification candidate; it remains a supervised local demo, with no public connector.
 
+The helper never starts [observed-evidence integration mode](README.md#observed-evidence-integration-mode) either: it passes no integration credential and forces live delivery off, and the observed setting without them refuses startup. Run observed mode only from its own supervised launcher, with a fresh store for each attempt. Never start the payer gateway with it, and never route a public connector to it. Its stdout carries the `BRIDGE_MODE` line and `LIVE_REJECTED` lines, which reveal when unrelated notifications were rejected; keep that output in the run's private folder and delete it after the run.
+
 ## Interpret dimensions separately
 
 | Signal | Evidence and limit |
