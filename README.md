@@ -25,6 +25,12 @@ A narrated engineering walkthrough of KaiPay's Java/Spring Boot payment platform
 
 All payment processing demonstrated in this video is simulated; no real funds are moved.
 
+**3. [SettleTable × KaiPay Observed Wallet Notification (1:55)](https://youtu.be/8ehPvtxuEzE)**
+
+A captioned screen recording (excerpts, cuts marked) of the [experimental notification-observation bridge](experimental-bridge/README.md) working with SettleTable through its integration API. SettleTable requests one RM0.01 checkout; the owner makes one real RM0.01 transfer between their own two e-wallets off camera; the Android companion's text-free candidate is matched automatically about 0.4 s after the phone sees the notification; the organizer checks their own wallet history and confirms manually.
+
+The notification remains unverified evidence: it does not prove settlement, payer identity or intent, the named diner in the test meal did not pay, and SettleTable balances stay unchanged. KaiPay does not move or hold any money.
+
 ---
 
 ## 1. Project Overview
