@@ -219,11 +219,12 @@ Send exactly one `Authorization: Bearer <credential>` header. No cookies, query 
 
 Candidate fields are `eventId` (stable random UUID), `notificationId` (random local lifecycle UUID, never Android notification key), `sequence` (integer), `deviceId` (assigned UUID), `source`, `classification`, `classifierProfile`, `amountMinor` (integer MYR cents), `observedAt` (textual UTC ISO instant ending in `Z`) and `evidenceQuality`.
 
-Exactly two reviewed tuples are accepted:
+Exactly three reviewed tuples are accepted:
 
 | Source | Classification | Classifier profile | Evidence quality |
 | --- | --- | --- | --- |
 | `TNG_NOTIFICATION_CANDIDATE` | `INCOMING_CANDIDATE` | `tng.receipt.en.observed.v1` | `RULE_MATCHED` |
+| `TNG_NOTIFICATION_CANDIDATE` | `INCOMING_CANDIDATE` | `tng.receipt.kaching.en.observed.v1` | `RULE_MATCHED` |
 | `SYNTHETIC` | `INCOMING_CANDIDATE` | `synthetic.debug.v1` | `SYNTHETIC` |
 
 The live credential's configured UUID must equal the reported UUID. No raw title/body, sender, wallet details, OTP, screenshot, Android notification key or provider transaction reference is accepted or invented. Amounts range from 1 to 1,000,000 cents; sequences from 1 to 1,000,000. Unknown fields, duplicate keys, trailing JSON, string/decimal amounts, numeric sources and bodies over 4KB are rejected. Sanitized errors/logs contain neither rejected payloads nor credentials.

@@ -15,6 +15,7 @@ import dev.kaipay.probe.ClassificationOutcome
 import dev.kaipay.probe.Delivery
 import dev.kaipay.probe.EvidenceQuality
 import dev.kaipay.probe.RedactedEvent
+import dev.kaipay.probe.TngNotificationProfiles
 import dev.kaipay.probe.TransactionDirection
 import java.util.concurrent.TimeUnit
 
@@ -155,8 +156,9 @@ internal class LiveDelivery private constructor(private val app: Application) {
         }.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
         val incoming = result.outcome == ClassificationOutcome.INCOMING_CANDIDATE &&
             result.direction == TransactionDirection.INCOMING && result.currency == "MYR" &&
-            result.confidence == EvidenceQuality.RULE_MATCHED && result.ruleId == "tng.receipt.en.observed.v1" &&
+            result.confidence == EvidenceQuality.RULE_MATCHED && result.ruleId in TngNotificationProfiles.deliveredRuleIds &&
             amount in 1L..1_000_000L && !metadata.groupSummary
+        val profile = result.ruleId.takeIf { incoming }
         val captured = generation
         // Capture only minimized values. The Runnable never captures event/inspection/raw notification fields.
         val postTime = metadata.postTime
@@ -164,7 +166,8 @@ internal class LiveDelivery private constructor(private val app: Application) {
         candidate(captured) {
             if (!eligibleConsent() || captured != generation) return@candidate
             val deviceId = config()?.deviceId ?: return@candidate
-            if (incoming) store.observe(key, postTime, amount, deviceId, changed, contentDigest)?.let { schedule(it.eventId) }
+            if (incoming && profile != null) store.observe(key, postTime, amount, deviceId, profile, changed, contentDigest)
+                ?.let { schedule(it.eventId) }
             else store.unknownUpdate(key, postTime)
             store.rows().filter { it.status == DeliveryStatus.INVALIDATION_PENDING }.forEach { schedule(it.candidate.eventId) }
         }

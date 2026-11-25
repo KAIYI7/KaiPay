@@ -361,4 +361,25 @@ class ObservedModeHttpTest {
         String tail = block(script, "    } finally {\n      clearTimeout(timeout);", "  }\n");
         assertThat(tail).contains("session.busy = false;");
     }
+
+    @Test void kachingCandidateIsAdmittedOverHttpAndAnUnreviewedProfilePrintsOnlyItsCode() throws Exception {
+        String reference = UUID.randomUUID().toString();
+        putCheckout(reference, 1);
+        clock.now = clock.now.plusSeconds(20);
+        String unreviewed = candidate(1, Source.TNG_NOTIFICATION_CANDIDATE).replace("\"tng.receipt.en.observed.v1\"", "\"tng.receipt.kaching.en.observed.v2\"");
+        assertThat(live(unreviewed).getStatus()).isEqualTo(422);
+        String missing = candidate(1, Source.TNG_NOTIFICATION_CANDIDATE).replace("\"tng.receipt.en.observed.v1\"", "null");
+        assertThat(live(missing).getStatus()).isEqualTo(422);
+        assertThat(lines()).containsExactly("LIVE_REJECTED code=PROFILE_UNSUPPORTED", "LIVE_REJECTED code=PROFILE_UNSUPPORTED");
+        assertThat(service.view().observations()).isEmpty();
+        output.reset();
+        String kaching = candidate(1, Source.TNG_NOTIFICATION_CANDIDATE).replace("\"tng.receipt.en.observed.v1\"", "\"tng.receipt.kaching.en.observed.v1\"");
+        assertThat(kaching).contains("\"classifierProfile\":\"tng.receipt.kaching.en.observed.v1\"");
+        assertThat(live(kaching).getStatus()).isEqualTo(200);
+        assertThat(live(kaching).getStatus()).isEqualTo(200); // exact retry
+        assertThat(lines()).isEmpty();
+        MockHttpServletResponse checkout = send(get(ROUTE + reference), INTEGRATION);
+        assertThat(mapper.readTree(checkout.getContentAsString()).get("status").asText()).isEqualTo("PAYMENT_DETECTED");
+        assertThat(checkout.getContentAsString()).doesNotContain("kaching").doesNotContain("classifierProfile");
+    }
 }

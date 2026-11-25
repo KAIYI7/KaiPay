@@ -370,4 +370,50 @@ class ObservedModeServiceTest {
         assertThat(only().reviewGrant()).isNull();
         refusedUnchanged(() -> service.resolve(ambiguous.candidate().eventId(), new Resolution(checkout.checkoutId(), true)), 409, "RESOLUTION_NOT_ELIGIBLE");
     }
+
+    Candidate kaching(int amount, Instant observedAt) {
+        return new Candidate(UUID.randomUUID(), UUID.randomUUID(), 1, observedAt, amount, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE,
+                "INCOMING_CANDIDATE", "tng.receipt.kaching.en.observed.v1", "RULE_MATCHED");
+    }
+
+    @Test void kachingEvidenceMatchesExactlyLikeTheFirstRuleAndRestartsInObservedMode() throws Exception {
+        UUID reference = UUID.randomUUID();
+        IntegrationCheckout checkout = created(reference);
+        clock.now = START.plusSeconds(20);
+        refusedUnchanged(() -> service.ingestNotification(kaching(2, clock.now)), 422, "GENUINE_DISABLED"); // other amount
+        Candidate event = kaching(PINNED, clock.now);
+        Observation matched = service.ingestNotification(event);
+        assertThat(matched.disposition()).isEqualTo(Disposition.MATCHED);
+        assertThat(matched.requestId()).isEqualTo(checkout.checkoutId());
+        IntegrationCheckout detected = service.integrationCheckout(reference);
+        assertThat(detected.status()).isEqualTo(Status.PAYMENT_DETECTED);
+        assertThat(detected.evidence()).isEqualTo(PayerEvidence.NOTIFICATION_UNVERIFIED);
+        assertThat(detected.evidenceMode()).isEqualTo(EvidenceMode.OBSERVED_NOTIFICATION);
+        assertThat(detected.reviewExpiresAt()).isEqualTo(START.plusSeconds(600 + 1800));
+        service = reopen(PINNED, true);
+        assertThat(service.integrationCheckout(reference).status()).isEqualTo(Status.PAYMENT_DETECTED);
+        confirm(checkout.checkoutId(), event.eventId());
+        assertThat(service.integrationCheckout(reference).status()).isEqualTo(Status.MANUALLY_CONFIRMED);
+    }
+
+    @Test void sameAmountEvidenceFromEitherRuleIsAmbiguous() throws Exception {
+        UUID reference = UUID.randomUUID();
+        created(reference);
+        clock.now = START.plusSeconds(20);
+        service.ingestNotification(genuine(PINNED, clock.now));
+        clock.now = START.plusSeconds(30);
+        assertThat(service.ingestNotification(kaching(PINNED, clock.now)).disposition()).isEqualTo(Disposition.AMBIGUOUS);
+        assertThat(service.integrationCheckout(reference).status()).isEqualTo(Status.AMBIGUOUS);
+        assertThat(only().reviewGrant().revoked()).isTrue();
+    }
+
+    @Test void lateKachingUploadIsDelayedAndNeverMatches() throws Exception {
+        UUID reference = UUID.randomUUID();
+        created(reference);
+        clock.now = START.plusSeconds(200);
+        Observation delayed = service.ingestNotification(kaching(PINNED, START.plusSeconds(60))); // observed 140 s before admission
+        assertThat(delayed.disposition()).isEqualTo(Disposition.DELAYED);
+        assertThat(delayed.requestId()).isNull();
+        assertThat(service.integrationCheckout(reference).status()).isEqualTo(Status.AWAITING_PAYMENT);
+    }
 }
