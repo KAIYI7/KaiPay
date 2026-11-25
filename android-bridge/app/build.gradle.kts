@@ -6,8 +6,8 @@ android {
         applicationId = "dev.kaipay.notificationprobe"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.5-reliability-experimental"
+        versionCode = 6
+        versionName = "0.6-b0-report-experimental"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

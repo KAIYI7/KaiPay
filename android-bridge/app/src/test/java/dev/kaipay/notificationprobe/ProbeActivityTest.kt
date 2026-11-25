@@ -243,4 +243,37 @@ class ProbeActivityTest {
         click("Enable local detection")
         assertFalse(ProbeRuntime.session.snapshot().enabled)
     }
+
+    private fun clip(): String? = activity.getSystemService(android.content.ClipboardManager::class.java)
+        .primaryClip?.getItemAt(0)?.text?.toString()
+
+    @Test fun `copy B0 report puts only the redacted line on the clipboard and keeps screen protection`() {
+        grantAccess(activity)
+        ProbeRuntime.session.setConnected(true)
+        click("Enable local detection")
+        click("Copy B0 report (redacted)")
+        assertEquals("B0 v${BuildConfig.VERSION_CODE} r=? f=? o=M n=0/0 rem=0 det=Y lis=Y", clip())
+        assertTrue(uiText().contains("no inspected observation is kept"))
+        val listener = Robolectric.buildService(TngNotificationListener::class.java).create()
+        try {
+            // Invented name, amount and note.
+            listener.get().onNotificationPosted(syntheticNotification(extras = android.os.Bundle().apply {
+                putString(android.app.Notification.EXTRA_TITLE, "Ka-ching! Incoming Money.")
+                putString(android.app.Notification.EXTRA_TEXT, "RM45.67 received from QUINN DEMOFAKE for SYNTHNOTE")
+                putString(android.app.Notification.EXTRA_BIG_TEXT, "RM45.67 received from QUINN DEMOFAKE for SYNTHNOTE")
+            }))
+            click("Copy B0 report (redacted)")
+            val copied = requireNotNull(clip())
+            assertEquals(dev.kaipay.probe.B0Report.line(ProbeRuntime.session.snapshot(), BuildConfig.VERSION_CODE).text, copied)
+            assertTrue(copied, copied.contains("o=C e=RM rule=tng.receipt.kaching.en.observed.v1"))
+            assertTrue(copied, copied.contains("b=\"RM[AMOUNT] received from [NAME] for [NOTE]\""))
+            listOf("QUINN", "DEMOFAKE", "45", "67", "SYNTHNOTE", "SYNTHETIC_TAG").forEach { assertFalse(it, copied.contains(it)) }
+            assertTrue(uiText().contains("observation 1 of 1"))
+            assertTrue(activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0)
+            controller.pause()
+            assertFalse(uiText().contains("QUINN"))
+            assertFalse(uiText().contains("observation 1 of 1"))
+            controller.resume()
+        } finally { listener.destroy() }
+    }
 }
