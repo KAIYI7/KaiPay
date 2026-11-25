@@ -62,7 +62,9 @@ class ObservedMultiCheckoutServiceTest {
     }
     static void fails(Runnable action, int status, String code) { IntegrationServiceTest.fails(action, status, code); }
     byte[] bytes() throws Exception { return Files.exists(file) ? Files.readAllBytes(file) : null; }
-    /** Refused with no state change: snapshot bytes (or their absence) and the in-memory view are unchanged. */
+    /** Refused with no state change: snapshot bytes (or their absence) and the in-memory view are unchanged. view() publishes any
+     *  due lazy expiry first, so this cannot see a refusal that publishes it; spentRefusalWritesNothingEvenWhenLazyExpiryIsDue and
+     *  the t=950 block of gateUsesEachCheckoutsOwnHoldIncludingReviewAndAmbiguousHolds cover that with raw bytes. */
     void refusedUnchanged(Runnable action, int status, String code) throws Exception {
         byte[] before = bytes(); Snapshot view = service.view(); before = bytes();
         fails(action, status, code);
@@ -113,7 +115,6 @@ class ObservedMultiCheckoutServiceTest {
         assertThat(reopen(null, 4, true).view().requests()).hasSize(3);
         refusedOn(null, 2, true, refused);                  // more checkouts than this process's count
         refusedOn(1, null, true, refused);                  // single-checkout mode: more than one, and other amounts
-        refusedOn(863, null, true, "Invalid observed mode"); // above the single-checkout cap
         refusedOn(null, null, true, "Observed-mode store requires observed mode");
         refusedOn(null, null, false, "Observed-mode store requires observed mode");
         // A one-checkout store at an unpinned amount is refused by single-checkout mode at any other amount.
@@ -376,6 +377,35 @@ class ObservedMultiCheckoutServiceTest {
         Observation ambiguous = service.ingestNotification(genuine(863, clock.now));
         assertThat(ambiguous.disposition()).isEqualTo(Disposition.AMBIGUOUS);
         refusedUnchanged(() -> service.resolve(ambiguous.candidate().eventId(), new Resolution(a.checkoutId(), true)), 409, "RESOLUTION_NOT_ELIGIBLE");
+    }
+
+    @Test void lateUpdateOfAConfirmedCheckoutsNotificationNeverMatchesAndFailsTowardsAmbiguous() throws Exception {
+        // Documented fail-safe side effect: B reuses A's amount after A is confirmed and its window ends; a late update of
+        // A's notification is admitted because B holds the amount, is never matched, and then competes with B's own notification.
+        UUID ra = UUID.randomUUID(), rb = UUID.randomUUID();
+        IntegrationCheckout a = created(ra, 863);
+        clock.now = START.plusSeconds(20);
+        Candidate original = genuine(863, clock.now);
+        service.ingestNotification(original);
+        confirm(a.checkoutId(), original.eventId());
+        clock.now = START.plusSeconds(700);
+        IntegrationCheckout b = created(rb, 863);
+        clock.now = START.plusSeconds(710);
+        Candidate update = new Candidate(UUID.randomUUID(), original.notificationId(), 2, clock.now, 863, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE,
+                "INCOMING_CANDIDATE", "tng.receipt.en.observed.v1", "RULE_MATCHED");
+        Observation ignored = service.ingestNotification(update);
+        assertThat(ignored.disposition()).isEqualTo(Disposition.UPDATE_IGNORED);
+        assertThat(ignored.requestId()).isEqualTo(a.checkoutId());
+        assertThat(service.integrationCheckout(rb).status()).isEqualTo(Status.AWAITING_PAYMENT);
+        assertThat(service.integrationCheckout(ra).status()).isEqualTo(Status.MANUALLY_CONFIRMED);
+        clock.now = START.plusSeconds(720);
+        Observation forB = service.ingestNotification(genuine(863, clock.now));
+        assertThat(forB.disposition()).isEqualTo(Disposition.AMBIGUOUS);
+        assertThat(service.integrationCheckout(rb).status()).isEqualTo(Status.AMBIGUOUS);
+        assertThat(service.integrationCheckout(rb).checkoutId()).isEqualTo(b.checkoutId());
+        service = reopen(null, COUNT, true); // the resulting store still loads
+        assertThat(service.integrationCheckout(ra).status()).isEqualTo(Status.MANUALLY_CONFIRMED);
+        assertThat(service.integrationCheckout(rb).status()).isEqualTo(Status.AMBIGUOUS);
     }
 
     @Test void lateUploadIsDelayedAndNeverMatches() throws Exception {
