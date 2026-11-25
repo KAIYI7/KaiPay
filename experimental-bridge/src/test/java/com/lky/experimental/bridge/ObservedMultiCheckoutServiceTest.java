@@ -398,6 +398,9 @@ class ObservedMultiCheckoutServiceTest {
         assertThat(ignored.requestId()).isEqualTo(a.checkoutId());
         assertThat(service.integrationCheckout(rb).status()).isEqualTo(Status.AWAITING_PAYMENT);
         assertThat(service.integrationCheckout(ra).status()).isEqualTo(Status.MANUALLY_CONFIRMED);
+        // A stays confirmed; only its original observation is marked AMBIGUOUS, which the receiver page then shows.
+        assertThat(service.view().observations().stream().filter(o -> o.candidate().eventId().equals(original.eventId())).findFirst().orElseThrow()
+                .disposition()).isEqualTo(Disposition.AMBIGUOUS);
         clock.now = START.plusSeconds(720);
         Observation forB = service.ingestNotification(genuine(863, clock.now));
         assertThat(forB.disposition()).isEqualTo(Disposition.AMBIGUOUS);
