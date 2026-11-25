@@ -386,4 +386,29 @@ class DeliveryWorkerTest {
         assertEquals(2, paths.size)
         assertTrue(paths.last().endsWith("/invalidate"))
     }
+    @Test fun `only the first reviewed rule is queued and the second rule stays display only`() {
+        ProbeRuntime.session.setConnected(true); ProbeRuntime.session.setEnabled(true)
+        // Invented values only. Both wordings classify as candidates; only v1 may reach the wire.
+        val local = dev.kaipay.probe.ProbeSession(profile = dev.kaipay.probe.TngNotificationProfiles.current).apply {
+            setConnected(true); setEnabled(true)
+        }
+        fun post(key: String, title: String, text: String) = requireNotNull(local.posted(
+            dev.kaipay.probe.ProbeParser.OFFICIAL_PACKAGE, key, System.currentTimeMillis()) { dev.kaipay.probe.Fields(title, text, text) })
+        // Controls run before callbacks, so wait on a FIFO callback queued after the candidate itself.
+        fun callbacksComplete() {
+            val done = CountDownLatch(1)
+            assertEquals(DeliveryDispatcher.Admission.ENQUEUED, dispatcher().candidate({ true }) { done.countDown() })
+            assertTrue(done.await(5, TimeUnit.SECONDS))
+        }
+        val second = post("second", "Ka-ching! Incoming Money.", "RM45.67 received from ALEX DEMO for demo")
+        assertEquals("tng.receipt.kaching.en.observed.v1", second.inspection!!.classification.ruleId)
+        delivery.observed("second", second); callbacksComplete()
+        assertTrue(delivery.store.rows().isEmpty())
+        val first = post("first", "You’ve received money!",
+            "Alex Demo has transferred RM12.34 to you. Tap here to check the transaction details.")
+        delivery.observed("first", first); callbacksComplete()
+        val row = delivery.store.rows().single()
+        assertEquals("tng.receipt.en.observed.v1", row.candidate.classifierProfile)
+        assertEquals(1234L, row.candidate.amountMinor)
+    }
 }

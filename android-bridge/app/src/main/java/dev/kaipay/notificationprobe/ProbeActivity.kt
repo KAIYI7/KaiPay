@@ -1,6 +1,8 @@
 package dev.kaipay.notificationprobe
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Build
@@ -18,6 +20,7 @@ import android.widget.TextView
 import android.widget.EditText
 import android.text.InputType
 import java.math.BigDecimal
+import dev.kaipay.probe.B0Report
 import dev.kaipay.probe.RedactedEvent
 
 class ProbeActivity : Activity() {
@@ -54,6 +57,7 @@ class ProbeActivity : Activity() {
         button(R.string.disable_and_clear) { ProbeRuntime.disable() }
         button(R.string.clear_diagnostics) { ProbeRuntime.session.clear() }
         button(R.string.refresh_status) { }
+        button(R.string.copy_b0_report) { copyB0Report() }
         column.addView(TextView(this).apply { setText(R.string.delivery_explanation) })
         fun input(hintId: Int, kind: Int = InputType.TYPE_CLASS_TEXT): EditText = EditText(this).apply {
             setHint(hintId); inputType = kind; isSaveEnabled = false; column.addView(this)
@@ -97,6 +101,17 @@ class ProbeActivity : Activity() {
         setContentView(scroll)
         scroll.requestApplyInsets()
         refresh()
+    }
+
+    /** Copies one redacted short-code line only; the raw notification text never reaches the clipboard. */
+    private fun copyB0Report() {
+        val report = B0Report.line(ProbeRuntime.session.snapshot(), BuildConfig.VERSION_CODE)
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        deliveryMessage = try {
+            requireNotNull(clipboard).setPrimaryClip(ClipData.newPlainText(getString(R.string.b0_report_clip_label), report.text))
+            if (report.index == 0) getString(R.string.b0_report_copied_missed)
+            else getString(R.string.b0_report_copied, report.index, report.total)
+        } catch (_: RuntimeException) { getString(R.string.b0_report_copy_failed) }
     }
 
     override fun onResume() {

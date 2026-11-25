@@ -7,6 +7,11 @@
     <string name="disable_and_clear">Disable and clear</string>
     <string name="clear_diagnostics">Clear diagnostics</string>
     <string name="refresh_status">Refresh status</string>
+    <string name="copy_b0_report">Copy B0 report (redacted)</string>
+    <string name="b0_report_clip_label">KaiPay B0 report</string>
+    <string name="b0_report_copied">Copied a redacted line for observation %1$d of %2$d. Read it before you send it.</string>
+    <string name="b0_report_copied_missed">Copied a redacted line: no inspected observation is kept. Read it before you send it.</string>
+    <string name="b0_report_copy_failed">The clipboard is unavailable; nothing was copied.</string>
     <string name="delivery_explanation">EXPERIMENTAL DELIVERY — default off. Sends only minimized candidate fields; never notification text. Unverified evidence requires independent TNG history review. Delays and failures are possible. Disable cancels pending transmissions; an in-flight request may already have arrived. Explicit capture and delivery opt-ins persist; disabling stays off across restart. Android may defer background recovery.</string>
     <string name="delivery_status">%1$s\n%2$s</string>
     <string name="delivery_base_url">Server base URL (debug USB: http://127.0.0.1:28082)</string>
