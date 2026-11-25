@@ -40,7 +40,7 @@ class BridgeConfiguration {
     @Bean @ConditionalOnProperty(name = "bridge.enabled", havingValue = "true")
     ObservationService observations(SnapshotStore store, BridgeAccess access, Environment env) {
         return new ObservationService(store, Clock.systemUTC(), access.deviceId,
-                env.getProperty("bridge.review-period-seconds", Integer.class, 1800), access.integrationEnabled(), access.observedAmountMinor);
+                env.getProperty("bridge.review-period-seconds", Integer.class, 1800), access.integrationEnabled(), access.observedAmountMinor, access.observedCheckoutCount);
     }
 
     /** Printed once the process is serving, after every startup refusal has passed. */
@@ -61,15 +61,17 @@ final class BridgeAccess {
     final java.util.UUID deviceId;
     /** RM1.00. A compiled constant: the observed amount can be lowered by configuration, never raised. */
     static final int OBSERVED_AMOUNT_CAP = 100;
-    /** Null unless observed-evidence integration mode is configured. */
+    /** Null unless single-checkout observed-evidence mode (pinned amount) is configured. */
     final Integer observedAmountMinor;
+    /** Null unless multi-checkout observed-evidence mode is configured: the owner-set total of checkouts per store. */
+    final Integer observedCheckoutCount;
 
     BridgeAccess(Environment env) { this(env, new PayerTokens()); }
 
     BridgeAccess(Environment env, PayerTokens payers) {
         this.payers = java.util.Objects.requireNonNull(payers);
         enabled = env.getProperty("bridge.enabled", Boolean.class, false);
-        if (!enabled) { device = new byte[0]; receiver = new byte[0]; liveDevice = new byte[0]; integration = new byte[0]; deviceId = null; observedAmountMinor = null; return; }
+        if (!enabled) { device = new byte[0]; receiver = new byte[0]; liveDevice = new byte[0]; integration = new byte[0]; deviceId = null; observedAmountMinor = null; observedCheckoutCount = null; return; }
         String deviceToken = env.getProperty("bridge.device-token", "");
         String receiverToken = env.getProperty("bridge.receiver-token", "");
         if (!deviceToken.matches("[A-Za-z0-9_-]{32,256}") || !receiverToken.matches("[A-Za-z0-9_-]{32,256}") || deviceToken.equals(receiverToken))
@@ -115,15 +117,32 @@ final class BridgeAccess {
             if (deviceId == null) throw new IllegalStateException("Observed mode requires the live device credential and UUID");
             observedAmountMinor = Integer.parseInt(observed);
         }
+        // Multi-checkout observed mode: the same owner-launched start, with a total checkout count instead of a pinned
+        // amount. The count is validated as input only (positive, at most nine digits so it always fits an int); there
+        // is no compiled maximum on it or on the amounts. Absent, the single-checkout mode above is unchanged.
+        String count = env.getProperty("bridge.integration.observed-checkout-count", "");
+        if (count.isEmpty()) observedCheckoutCount = null;
+        else {
+            if (!count.matches("[1-9][0-9]{0,8}"))
+                throw new IllegalStateException("Observed checkout count must be a positive whole number of at most nine digits");
+            if (observedAmountMinor != null)
+                throw new IllegalStateException("Set either the observed amount or the observed checkout count, not both");
+            if (integration.length == 0) throw new IllegalStateException("Observed mode requires the integration credential");
+            if (deviceId == null) throw new IllegalStateException("Observed mode requires the live device credential and UUID");
+            observedCheckoutCount = Integer.parseInt(count);
+        }
     }
 
     boolean integrationEnabled() { return integration.length > 0; }
-    boolean observedMode() { return observedAmountMinor != null; }
+    boolean observedMode() { return observedAmountMinor != null || observedCheckoutCount != null; }
+    boolean multiCheckout() { return observedCheckoutCount != null; }
 
     /** One text-free line from the effective configuration; it never carries a credential, path or identifier. */
     String modeLine(boolean qrConfigured) {
         return "BRIDGE_MODE mode=" + (observedMode() ? "OBSERVED" : integrationEnabled() ? "SYNTHETIC" : "NON_INTEGRATION")
-                + " amount=" + (observedMode() ? observedAmountMinor.toString() : "none") + " qr=" + (qrConfigured ? "configured" : "none")
+                + " amount=" + (observedAmountMinor != null ? observedAmountMinor.toString()
+                        : multiCheckout() ? "unpinned checkouts=" + observedCheckoutCount : "none")
+                + " qr=" + (qrConfigured ? "configured" : "none")
                 + " live=" + (deviceId != null) + " integration=" + integrationEnabled();
     }
 

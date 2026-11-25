@@ -127,7 +127,7 @@ Give the integration credential privately to the client application, which reads
 
 ## Observed-evidence integration mode
 
-An owner-started variant of integration mode in which **one** integration checkout, at **one** owner-pinned amount, may be matched by a genuine `TNG_NOTIFICATION_CANDIDATE` from the owner's own phone. It exists for one supervised own-wallet test. A notification stays UNVERIFIED evidence: it never proves who sent money, that money arrived, or settlement. Confirmation stays a manual receiver action after checking actual wallet history, exactly as in the other modes. Nothing in this mode moves money or changes any financial record. It is off unless configured, and synthetic integration mode stays the default.
+An owner-started variant of integration mode in which **one** integration checkout, at **one** owner-pinned amount (or, in [multi-checkout observed mode](#multi-checkout-observed-mode), a configured number of checkouts), may be matched by a genuine `TNG_NOTIFICATION_CANDIDATE` from the owner's own phone. It exists for one supervised own-wallet test. A notification stays UNVERIFIED evidence: it never proves who sent money, that money arrived, or settlement. Confirmation stays a manual receiver action after checking actual wallet history, exactly as in the other modes. Nothing in this mode moves money or changes any financial record. It is off unless configured, and synthetic integration mode stays the default.
 
 ### Startup
 
@@ -172,6 +172,24 @@ $env:BRIDGE_INTEGRATION_OBSERVED_AMOUNT_MINOR = '1'
 ```
 
 Never start the separate payer gateway with this mode: it is not integration-aware and would serve the genuine-payment payer page in front of an observed backend. Nothing in the gateway enforces this. An observed process starts only on an empty store or its own observed store; reusing a store from any other mode, including one holding only notification candidates, refuses startup. Stop with Ctrl+C and clear the environment, including `Env:BRIDGE_INTEGRATION_OBSERVED_AMOUNT_MINOR` and `Env:BRIDGE_STORE`.
+
+### Multi-checkout observed mode
+
+A variant of observed-evidence mode for several payers in one supervised session. Instead of one checkout at a pinned amount, the store accepts an owner-configured **total** number of integration checkouts, each single-use, at any valid amount. Everything else in observed-evidence mode applies unchanged: notifications stay UNVERIFIED, confirmation stays a manual receiver action after checking actual wallet history, and nothing moves money or changes a financial record.
+
+Set `BRIDGE_INTEGRATION_OBSERVED_CHECKOUT_COUNT` (`bridge.integration.observed-checkout-count`) to a positive whole number of at most nine digits, **instead of** `BRIDGE_INTEGRATION_OBSERVED_AMOUNT_MINOR`; startup refuses both together. The count and the amounts have no compiled maximum. They are still validated as input: the count must parse as above, and each amount is the usual `1` to `1000000` sen. The store's own capacity still applies (`409 REQUEST_CAPACITY` at 500 requests). The other startup conditions are those of observed-evidence mode: the integration credential, the live-device credential and UUID, and no receiving QR. The store must be absent or empty, or hold at most the configured number of observed-mode checkouts, at any amounts, plus only genuine notification candidates. The process prints `BRIDGE_MODE mode=OBSERVED amount=unpinned checkouts=<count> qr=none live=true integration=true`.
+
+| Route | Multi-checkout observed mode |
+| --- | --- |
+| `PUT`, known reference | Unchanged: `200` replay, or `409 REFERENCE_CONFLICT`. The reference lookup still comes first. |
+| `PUT`, new reference, the store already holds the configured number of checkouts | `409 OBSERVED_CHECKOUT_SPENT`; nothing is created. Every checkout counts, whatever its status, so a slot is never reused. Checked before lazy expiry, so the refusal writes nothing. |
+| `PUT`, new reference, an amount held by another checkout | `409 SAME_AMOUNT_HELD`, unchanged; nothing is created and no slot is used. No two checkouts hold the same amount at once. |
+| `PUT`, new reference otherwise | The existing capacity check, then `201` with the observed-mode body. `OBSERVED_AMOUNT_MISMATCH` never occurs in this mode. |
+| `PUT` and `GET` success bodies | As in observed-evidence mode: the usual allowlist plus `"evidenceMode":"OBSERVED_NOTIFICATION"`. Each checkout is read by its own reference. |
+| `POST /api/notification-candidates`, `TNG_NOTIFICATION_CANDIDATE` | An exact retry of a stored event is acknowledged unchanged. Otherwise the candidate is admitted into normal matching **only if** its amount equals that of at least one checkout that is not terminal and still holds its amount. Every other candidate gets `422 GENUINE_DISABLED` with no state change. An admitted candidate can match only a checkout of its own amount; a second same-amount notification makes that checkout `AMBIGUOUS` under the usual rule. |
+| Every other route | As in observed-evidence mode, including `resolve`, which never attaches genuine evidence to an integration checkout. |
+
+The receiver page and its script describe several checkouts instead of one; the single-checkout mode's pages and script are unchanged. Stop with Ctrl+C and clear `Env:BRIDGE_INTEGRATION_OBSERVED_CHECKOUT_COUNT` with the rest of the environment.
 
 
 ## Optional remote payer gateway

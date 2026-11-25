@@ -21,9 +21,13 @@ final class ObservationService {
     private final int reviewPeriodSeconds;
     // Integration mode: no genuine candidate is admitted, so none can match, compete with or disqualify any checkout.
     private final boolean syntheticOnly;
-    // Observed-evidence integration mode (null otherwise): one integration checkout per store at this pinned amount, and
-    // genuine candidates of that amount only while it is held. Set only by the owner's startup configuration.
-    private final Integer observedAmount;
+    // Observed-evidence integration mode, set only by the owner's startup configuration. Genuine candidates are admitted
+    // only for the amount of an observed checkout that still holds it. Single-checkout mode: one integration checkout
+    // per store at the pinned amount (observedCheckouts is 1). Multi-checkout mode: up to observedCheckouts single-use
+    // checkouts per store, amounts unpinned (pinnedAmount is null); SAME_AMOUNT_HELD keeps held amounts distinct.
+    private final boolean observed;
+    private final Integer pinnedAmount;
+    private final int observedCheckouts;
     private Snapshot state;
 
     ObservationService(SnapshotStore store, Clock clock) { this(store, clock, null); }
@@ -36,24 +40,36 @@ final class ObservationService {
     }
     /** {@code integration}: the integration credential is configured. A non-null observed amount selects observed mode. */
     ObservationService(SnapshotStore store, Clock clock, UUID deviceId, int reviewPeriodSeconds, boolean integration, Integer observedAmount) {
+        this(store, clock, deviceId, reviewPeriodSeconds, integration, observedAmount, null);
+    }
+    /** A non-null observed amount selects single-checkout observed mode; a non-null count selects multi-checkout mode. */
+    ObservationService(SnapshotStore store, Clock clock, UUID deviceId, int reviewPeriodSeconds, boolean integration, Integer observedAmount,
+                       Integer observedCount) {
         if (reviewPeriodSeconds < 300 || reviewPeriodSeconds > 1800)
             throw new IllegalStateException("Review period must be between 300 and 1800 seconds");
-        if (observedAmount != null && (!integration || deviceId == null || observedAmount < 1 || observedAmount > BridgeAccess.OBSERVED_AMOUNT_CAP))
+        boolean observedMode = observedAmount != null || observedCount != null;
+        if (observedMode && (!integration || deviceId == null || observedAmount != null && observedCount != null
+                || observedAmount != null && (observedAmount < 1 || observedAmount > BridgeAccess.OBSERVED_AMOUNT_CAP)
+                || observedCount != null && observedCount < 1))
             throw new IllegalStateException("Invalid observed mode");
         this.store = store; this.clock = clock; this.deviceId = deviceId; this.reviewPeriodSeconds = reviewPeriodSeconds;
-        this.syntheticOnly = integration && observedAmount == null;
-        this.observedAmount = observedAmount;
+        this.syntheticOnly = integration && !observedMode;
+        this.observed = observedMode;
+        this.pinnedAmount = observedAmount;
+        this.observedCheckouts = observedCount != null ? observedCount : 1;
         state = store.load();
         try { validateStored(); }
         catch (Exception ignored) { throw new IllegalStateException("Invalid experimental store"); }
         // Stores never cross modes. A process outside observed mode refuses any observed request, whatever its status.
-        // An observed process accepts only an empty store, or one observed checkout at its own amount with genuine
-        // notification candidates only. Observations without that checkout came from another mode.
-        if (observedAmount == null && state.requests().stream().anyMatch(r -> r.evidenceMode() != null))
+        // An observed process accepts only an empty store, or up to its configured number of observed checkouts (at
+        // its own amount when pinned) with genuine notification candidates only. Observations without a checkout came
+        // from another mode.
+        if (!observed && state.requests().stream().anyMatch(r -> r.evidenceMode() != null))
             throw new IllegalStateException("Observed-mode store requires observed mode");
-        if (observedAmount != null && (state.requests().size() > 1
+        if (observed && (state.requests().size() > observedCheckouts
                 || state.requests().isEmpty() && !state.observations().isEmpty()
-                || state.requests().stream().anyMatch(r -> r.evidenceMode() != EvidenceMode.OBSERVED_NOTIFICATION || r.amountMinor() != observedAmount)
+                || state.requests().stream().anyMatch(r -> r.evidenceMode() != EvidenceMode.OBSERVED_NOTIFICATION
+                    || pinnedAmount != null && r.amountMinor() != pinnedAmount)
                 || state.observations().stream().anyMatch(o -> o.candidate().source() != Source.TNG_NOTIFICATION_CANDIDATE)))
             throw new IllegalStateException("Observed mode requires an empty or observed-mode store");
         // Bindings outlive the process mode. Only integration mode keeps genuine candidates away from a bound
@@ -78,8 +94,8 @@ final class ObservationService {
         if (references.stream().distinct().count() != references.size()) throw new IllegalArgumentException();
         for (PaymentRequest r : state.requests()) {
             amount(r.amountMinor());
-            // Genuine evidence on an integration binding is valid only on the observed checkout, loaded by an observed
-            // process pinned to its amount. An observed marker is valid only on a lifecycle v2 integration binding.
+            // Genuine evidence on an integration binding is valid only on an observed checkout, loaded by an observed
+            // process (pinned to its amount, when pinned). An observed marker is valid only on a lifecycle v2 integration binding.
             if (r.revision() < 0 || r.integrationReference() != null && (!v2(r) || r.revision() < 1
                     || evidence(r) == PayerEvidence.NOTIFICATION_UNVERIFIED && !observedHere(r))
                     || r.evidenceMode() != null && r.integrationReference() == null) throw new IllegalArgumentException();
@@ -146,7 +162,7 @@ final class ObservationService {
                         && eligible(r, now) && hasEvidenceCapacity());
     }
     synchronized PaymentRequest create(CreateRequest input) {
-        if (observedAmount != null) throw new BridgeFailure(409, "RECEIVER_CREATE_DISABLED");
+        if (observed) throw new BridgeFailure(409, "RECEIVER_CREATE_DISABLED");
         if (input == null) throw new BridgeFailure(422, "AMOUNT_INVALID");
         amount(input.amountMinor()); Instant now = clock.instant(); expire(now);
         return add(input.amountMinor(), null, now);
@@ -156,11 +172,12 @@ final class ObservationService {
     synchronized IntegrationPut putIntegration(UUID reference, Integer amountMinor) {
         Objects.requireNonNull(reference);
         amount(amountMinor); Instant now = clock.instant();
-        if (observedAmount != null && integration(reference) == null) {
-            // Observed mode, new reference: amount pinned, then single use, then the existing capacity and hold checks.
-            // Both refusals come before lazy expiry, so a refused PUT writes nothing.
-            if (amountMinor.intValue() != observedAmount) throw new BridgeFailure(409, "OBSERVED_AMOUNT_MISMATCH");
-            if (!state.requests().isEmpty()) throw new BridgeFailure(409, "OBSERVED_CHECKOUT_SPENT");
+        if (observed && integration(reference) == null) {
+            // Observed mode, new reference: the pinned amount (single-checkout mode only), then the configured total of
+            // single-use checkouts, then the existing capacity and hold checks. Both refusals come before lazy expiry,
+            // so a refused PUT writes nothing. Every request in an observed store is an observed checkout.
+            if (pinnedAmount != null && amountMinor.intValue() != pinnedAmount) throw new BridgeFailure(409, "OBSERVED_AMOUNT_MISMATCH");
+            if (state.requests().size() >= observedCheckouts) throw new BridgeFailure(409, "OBSERVED_CHECKOUT_SPENT");
         }
         expire(now);
         PaymentRequest bound = integration(reference);
@@ -183,7 +200,7 @@ final class ObservationService {
             throw new BridgeFailure(409, "SAME_AMOUNT_HELD");
         PaymentRequest r = new PaymentRequest(UUID.randomUUID(), amountMinor, now, now.plusSeconds(600),
                 Status.AWAITING_PAYMENT, null, 2, false, null, 1, reference,
-                observedAmount != null && reference != null ? EvidenceMode.OBSERVED_NOTIFICATION : null);
+                observed && reference != null ? EvidenceMode.OBSERVED_NOTIFICATION : null);
         List<PaymentRequest> requests = new ArrayList<>(state.requests()); requests.add(r);
         publish(new Snapshot(requests, state.observations())); return r;
     }
@@ -201,7 +218,7 @@ final class ObservationService {
                 : selected.candidate().source() == Source.TNG_NOTIFICATION_CANDIDATE ? PayerEvidence.NOTIFICATION_UNVERIFIED : PayerEvidence.SYNTHETIC;
     }
     synchronized Observation ingest(Candidate event) {
-        if (observedAmount != null) throw new BridgeFailure(422, "SYNTHETIC_DISABLED"); // before validation or any state change
+        if (observed) throw new BridgeFailure(422, "SYNTHETIC_DISABLED"); // before validation or any state change
         return ingest(event, false);
     }
     synchronized Observation ingestNotification(Candidate event) {
@@ -215,17 +232,18 @@ final class ObservationService {
             if (existing != null && existing.candidate().equals(event)) return existing;
             throw new BridgeFailure(422, "GENUINE_DISABLED");
         }
-        if (observedAmount != null) {
+        if (observed) {
             if (event.source() != Source.TNG_NOTIFICATION_CANDIDATE) throw new BridgeFailure(422, "SYNTHETIC_DISABLED");
             // The existing exact-retry acknowledgement first: a lost acknowledgement retried after confirmation still
-            // gets its stored result, unchanged. Then the gate, decided without expire() or any other state change.
+            // gets its stored result, unchanged. Then the gate, decided without expire() or any other state change:
+            // admitted only if its amount equals that of at least one non-terminal observed checkout that is held now.
+            // held() deliberately includes an AMBIGUOUS checkout whose grant is revoked, so a second same-amount
+            // notification during the review hold is stored and disqualifies under the existing rule.
             Observation existing = observation(event.eventId());
             if (existing != null && existing.candidate().equals(event)) return existing;
             Instant now = clock.instant();
-            PaymentRequest observed = state.requests().isEmpty() ? null : state.requests().getFirst();
-            // held() deliberately includes an AMBIGUOUS checkout whose grant is revoked, so a second same-amount
-            // notification during the review hold is stored and disqualifies under the existing rule.
-            if (event.amountMinor().intValue() != observedAmount || observed == null || terminal(observed) || !held(observed, now))
+            int amount = event.amountMinor();
+            if (state.requests().stream().noneMatch(r -> r.amountMinor() == amount && !terminal(r) && held(r, now)))
                 throw new BridgeFailure(422, "GENUINE_DISABLED");
             return ingest(event, true, now); // admitted at the gate's own decision time
         }
@@ -389,7 +407,7 @@ final class ObservationService {
         return selected != null && sameLifecycle(selected.candidate(), event) || granted != null && sameLifecycle(granted.candidate(), event);
     }
     private boolean observedHere(PaymentRequest r) {
-        return observedAmount != null && r.evidenceMode() == EvidenceMode.OBSERVED_NOTIFICATION && r.amountMinor() == observedAmount;
+        return observed && r.evidenceMode() == EvidenceMode.OBSERVED_NOTIFICATION && (pinnedAmount == null || r.amountMinor() == pinnedAmount);
     }
     private boolean hasEvidenceCapacity() { return state.observations().size() < MAX_OBSERVATIONS && store.hasEvidenceHeadroom(state); }
     private static boolean held(PaymentRequest r, Instant now) {
