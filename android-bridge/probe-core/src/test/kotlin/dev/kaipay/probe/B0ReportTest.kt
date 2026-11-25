@@ -222,4 +222,11 @@ class B0ReportTest {
         assertEquals(B0Report.SKELETON_LIMIT + 1, long.length)
         assertTrue(long.endsWith("…"))
     }
+    @Test fun `a rejected second-wording note keeps the template and reports no rule`() {
+        val line = report(kaching to "RM12.34 received from ALEX DEMO for 退款").text
+        assertTrue(line, line.contains("o=U e=AO rule=- amt=Y why=NORULE"))
+        assertTrue(line, line.contains("b=\"RM[AMOUNT] received from [NAME] for [NOTE]\""))
+        assertTrue(line, line.contains("note=Han"))
+        listOf("ALEX", "DEMO", "12", "34", "退", "款").forEach { assertFalse(it, line.contains(it)) }
+    }
 }

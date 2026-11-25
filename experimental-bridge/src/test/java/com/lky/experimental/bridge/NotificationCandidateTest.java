@@ -224,4 +224,36 @@ class NotificationCandidateTest {
         @Override public Clock withZone(ZoneId zone) { return this; }
         @Override public Instant instant() { return now; }
     }
+
+    static final String KACHING = "tng.receipt.kaching.en.observed.v1";
+
+    @Test void kachingProfileIsAcceptedOnlyAsAReviewedTngTupleAndSurvivesRestart() throws Exception {
+        PaymentRequest request = legacyCreate(1234);
+        UUID event = UUID.randomUUID(), lifecycle = UUID.randomUUID();
+        for (Candidate bad : java.util.Arrays.asList(
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.SYNTHETIC, DEVICE_ID, "INCOMING_CANDIDATE", KACHING, "RULE_MATCHED"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.SYNTHETIC, DEVICE_ID, "INCOMING_CANDIDATE", KACHING, "SYNTHETIC"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "INCOMING_CANDIDATE", KACHING, "SYNTHETIC"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "INCOMING_CANDIDATE", KACHING, "AMOUNT_ONLY"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "INCOMING_CANDIDATE", KACHING, null),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "UNKNOWN", KACHING, "RULE_MATCHED"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "INCOMING_CANDIDATE", "tng.receipt.kaching.en.observed.v2", "RULE_MATCHED"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "INCOMING_CANDIDATE", KACHING.toUpperCase(), "RULE_MATCHED"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "INCOMING_CANDIDATE", " " + KACHING, "RULE_MATCHED"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "INCOMING_CANDIDATE", "", "RULE_MATCHED"),
+                new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID, "INCOMING_CANDIDATE", null, "RULE_MATCHED")))
+            rejected(() -> service.ingestNotification(bad), "PROFILE_UNSUPPORTED");
+        assertThat(service.view().observations()).isEmpty();
+        Candidate kaching = new Candidate(event, lifecycle, 1, clock.now, 1234, Source.TNG_NOTIFICATION_CANDIDATE, DEVICE_ID,
+                "INCOMING_CANDIDATE", KACHING, "RULE_MATCHED");
+        Observation matched = service.ingestNotification(kaching);
+        assertThat(matched.disposition()).isEqualTo(Disposition.MATCHED);
+        assertThat(matched.requestId()).isEqualTo(request.id());
+        assertThat(service.ingestNotification(kaching)).isEqualTo(matched); // exact retry
+        store.close(); store = new SnapshotStore(file, mapper);
+        service = new ObservationService(store, clock, DEVICE_ID);
+        assertThat(service.view().observations()).singleElement()
+                .satisfies(o -> assertThat(o.candidate().classifierProfile()).isEqualTo(KACHING));
+        assertThat(service.view().requests().getFirst().status()).isEqualTo(Status.PAYMENT_DETECTED);
+    }
 }

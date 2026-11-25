@@ -1,5 +1,7 @@
 package dev.kaipay.notificationprobe
 
+import dev.kaipay.probe.TngNotificationProfiles.KACHING_RULE_ID as KACHING
+import dev.kaipay.probe.TngNotificationProfiles.V1_RULE_ID as V1
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Rule
@@ -23,7 +25,7 @@ class DeliveryStoreTest {
     @Before fun setup() { store = DeliveryStore(directory.root, { time }); store.setEnabled(true) }
 
     @Test fun `persisted retry keeps identity and minimizes stored and network data`() {
-        val event = requireNotNull(store.observe("PRIVATE_RAW_ANDROID_KEY", time, 123, device))
+        val event = requireNotNull(store.observe("PRIVATE_RAW_ANDROID_KEY", time, 123, device, V1))
         store.mark(event.eventId, DeliveryStatus.PENDING, "Connection unavailable", true)
         assertTrue("Atomic snapshot missing: " + directory.root.listFiles()?.map { it.name },
             directory.root.resolve("candidate-queue.json").exists())
@@ -31,7 +33,7 @@ class DeliveryStoreTest {
         assertTrue(restarted.enabled)
         assertEquals(restarted.warning, event, restarted.find(event.eventId)?.candidate)
         assertEquals(1, restarted.find(event.eventId)?.attempts)
-        assertNull(restarted.observe("PRIVATE_RAW_ANDROID_KEY", time, 123, device))
+        assertNull(restarted.observe("PRIVATE_RAW_ANDROID_KEY", time, 123, device, V1))
         assertEquals(1, restarted.rows().size)
         val json = event.json()
         assertEquals(setOf("eventId", "notificationId", "sequence", "deviceId", "source", "classification",
@@ -40,16 +42,16 @@ class DeliveryStoreTest {
         assertFalse(json.toString().contains("PRIVATE_RAW_ANDROID_KEY"))
     }
     @Test fun `eligible changed update invalidates original without second candidate`() {
-        val event = requireNotNull(store.observe("key", time, 123, device))
+        val event = requireNotNull(store.observe("key", time, 123, device, V1))
         store.uploaded(event.eventId)
-        assertNull(store.observe("key", time + 1, 234, device, changed = true))
+        assertNull(store.observe("key", time + 1, 234, device, V1, changed = true))
         assertEquals(1, store.rows().size)
         assertEquals(DeliveryStatus.INVALIDATION_PENDING, store.find(event.eventId)?.status)
         assertTrue(store.find(event.eventId)!!.uploaded)
         assertTrue(store.find(event.eventId)!!.invalidate)
     }
     @Test fun `unsupported new callback after process restart invalidates persisted original`() {
-        val event = requireNotNull(store.observe("key", time, 123, device))
+        val event = requireNotNull(store.observe("key", time, 123, device, V1))
         val restarted = DeliveryStore(directory.root, { time })
         restarted.unknownUpdate("key", time + 1)
         assertEquals(DeliveryStatus.INVALIDATION_PENDING, restarted.find(event.eventId)?.status)
@@ -57,38 +59,38 @@ class DeliveryStoreTest {
         assertEquals(event, restarted.find(event.eventId)?.candidate)
     }
     @Test fun `supported changed same amount and timestamp after restart invalidates by private fingerprint`() {
-        val event = requireNotNull(store.observe("key", time, 123, device, contentDigest = "invented-content-hash-one"))
+        val event = requireNotNull(store.observe("key", time, 123, device, V1, contentDigest = "invented-content-hash-one"))
         val restarted = DeliveryStore(directory.root, { time })
-        assertNull(restarted.observe("key", time, 123, device, contentDigest = "invented-content-hash-two"))
+        assertNull(restarted.observe("key", time, 123, device, V1, contentDigest = "invented-content-hash-two"))
         assertEquals(DeliveryStatus.INVALIDATION_PENDING, restarted.find(event.eventId)?.status)
         assertEquals(1, restarted.rows().size)
         assertFalse(directory.root.resolve("candidate-queue.json").readText().contains("invented-content-hash-one"))
     }
     @Test fun `stale and removed unsupported callbacks do not invalidate newer receipt`() {
-        val event = requireNotNull(store.observe("key", time, 123, device))
+        val event = requireNotNull(store.observe("key", time, 123, device, V1))
         store.unknownUpdate("key", time - 1)
         assertEquals(DeliveryStatus.PENDING, store.find(event.eventId)?.status)
         store.removed("key", time)
         store.unknownUpdate("key", time)
         assertEquals(DeliveryStatus.PENDING, store.find(event.eventId)?.status)
-        assertNull(store.observe("key", time, 123, device))
+        assertNull(store.observe("key", time, 123, device, V1))
     }
     @Test fun `key reuse needs removed lifecycle and newer post`() {
-        val first = requireNotNull(store.observe("key", time, 123, device))
+        val first = requireNotNull(store.observe("key", time, 123, device, V1))
         store.removed("key", time)
-        val second = requireNotNull(store.observe("key", time + 1, 123, device))
+        val second = requireNotNull(store.observe("key", time + 1, 123, device, V1))
         assertNotEquals(first.notificationId, second.notificationId)
         assertNotEquals(first.eventId, second.eventId)
     }
     @Test fun `newer unsupported reused key advances tombstone across restart`() {
-        store.observe("key", time, 123, device)
+        store.observe("key", time, 123, device, V1)
         store.removed("key", time)
         store.unknownUpdate("key", time + 3)
         val restarted = DeliveryStore(directory.root, { time })
-        assertNull(restarted.observe("key", time + 2, 123, device))
+        assertNull(restarted.observe("key", time + 2, 123, device, V1))
     }
     @Test fun `invalidation has independent persisted attempts after original retry budget`() {
-        val event = requireNotNull(store.observe("key", time, 123, device))
+        val event = requireNotNull(store.observe("key", time, 123, device, V1))
         repeat(MAX_ATTEMPTS) { store.mark(event.eventId, DeliveryStatus.PENDING, "Attempt", true) }
         store.uploaded(event.eventId); store.unknownUpdate("key", time + 1)
         assertEquals(MAX_ATTEMPTS, store.find(event.eventId)?.attempts)
@@ -97,13 +99,13 @@ class DeliveryStoreTest {
         assertEquals(1, DeliveryStore(directory.root, { time }).find(event.eventId)?.invalidationAttempts)
     }
     @Test fun `disable persists cancellation and keeps duplicate tombstones on reenable`() {
-        val event = requireNotNull(store.observe("key", time, 123, device))
+        val event = requireNotNull(store.observe("key", time, 123, device, V1))
         store.setEnabled(false)
         val restarted = DeliveryStore(directory.root, { time })
         assertFalse(restarted.enabled)
         assertEquals(DeliveryStatus.FAILED, restarted.find(event.eventId)?.status)
         restarted.setEnabled(true)
-        assertNull(restarted.observe("key", time, 123, device))
+        assertNull(restarted.observe("key", time, 123, device, V1))
         restarted.unknownUpdate("key", time + 1)
         assertEquals(DeliveryStatus.FAILED, restarted.find(event.eventId)?.status)
         assertFalse(restarted.find(event.eventId)!!.invalidate)
@@ -115,7 +117,7 @@ class DeliveryStoreTest {
         assertEquals(DeliveryStatus.EXPIRED, store.find(event.eventId)?.status)
         assertTrue(store.retry().isEmpty())
         assertEquals(event.eventId, DeliveryStore(directory.root, { time }).rows().single().candidate.eventId)
-        assertNull(store.observe("expired", time - DELIVERY_TTL, 123, device))
+        assertNull(store.observe("expired", time - DELIVERY_TTL, 123, device, V1))
     }
     @Test fun `queue refuses capacity growth without evicting retry history`() {
         repeat(DELIVERY_CAPACITY) { assertNotNull(store.synthetic(device, 1)) }
@@ -155,9 +157,52 @@ class DeliveryStoreTest {
         assertTrue(restarted.rows().isEmpty())
     }
     @Test fun `clear explicitly resets history and duplicate identity`() {
-        val original = requireNotNull(store.observe("key", time, 123, device))
+        val original = requireNotNull(store.observe("key", time, 123, device, V1))
         store.clear(); assertFalse(store.enabled); assertTrue(store.rows().isEmpty())
         store.setEnabled(true)
-        assertNotEquals(original.eventId, store.observe("key", time, 123, device)?.eventId)
+        assertNotEquals(original.eventId, store.observe("key", time, 123, device, V1)?.eventId)
+    }
+    @Test fun `each reviewed rule is written with its own profile and an unlisted profile queues nothing`() {
+        val first = requireNotNull(store.observe("first", time, 123, device, V1))
+        val second = requireNotNull(store.observe("second", time, 4567, device, KACHING))
+        assertEquals(V1, first.classifierProfile); assertEquals(KACHING, second.classifierProfile)
+        val json = second.json()
+        assertEquals(setOf("eventId", "notificationId", "sequence", "deviceId", "source", "classification",
+            "classifierProfile", "amountMinor", "observedAt", "evidenceQuality"), json.keys().asSequence().toSet())
+        assertEquals("TNG_NOTIFICATION_CANDIDATE", json.getString("source"))
+        assertEquals("INCOMING_CANDIDATE", json.getString("classification"))
+        assertEquals(KACHING, json.getString("classifierProfile"))
+        assertEquals("RULE_MATCHED", json.getString("evidenceQuality"))
+        assertEquals(4567L, json.getLong("amountMinor"))
+        val restarted = DeliveryStore(directory.root, { time })
+        assertEquals(second, restarted.find(second.eventId)?.candidate)
+        listOf("synthetic.debug.v1", "tng.receipt.kaching.en.observed.v2", "", KACHING.uppercase(), "other").forEach {
+            assertNull(it, store.observe("unlisted-$it", time, 123, device, it))
+        }
+        assertEquals(2, store.rows().size)
+    }
+    @Test fun `same key changing between reviewed rules invalidates the first candidate`() {
+        val event = requireNotNull(store.observe("key", time, 123, device, V1))
+        store.uploaded(event.eventId)
+        assertNull(store.observe("key", time + 1, 123, device, KACHING))
+        assertEquals(1, store.rows().size)
+        assertEquals(DeliveryStatus.INVALIDATION_PENDING, store.find(event.eventId)?.status)
+        assertTrue(store.find(event.eventId)!!.invalidate)
+    }
+    @Test fun `the same profile again does not invalidate and the change is detected in both directions`() {
+        val event = requireNotNull(store.observe("key", time, 123, device, KACHING))
+        assertNull(store.observe("key", time + 1, 123, device, KACHING))
+        assertEquals(DeliveryStatus.PENDING, store.find(event.eventId)?.status)
+        assertFalse(store.find(event.eventId)!!.invalidate)
+        assertNull(store.observe("key", time + 2, 123, device, V1))
+        assertEquals(DeliveryStatus.INVALIDATION_PENDING, store.find(event.eventId)?.status)
+        assertEquals(1, store.rows().size)
+    }
+    @Test fun `a stale other-profile callback on a removed lifecycle does not invalidate`() {
+        val event = requireNotNull(store.observe("key", time, 123, device, V1))
+        store.removed("key", time + 1)
+        assertNull(store.observe("key", time + 1, 123, device, KACHING))
+        assertEquals(DeliveryStatus.PENDING, store.find(event.eventId)?.status)
+        assertFalse(store.find(event.eventId)!!.invalidate)
     }
 }

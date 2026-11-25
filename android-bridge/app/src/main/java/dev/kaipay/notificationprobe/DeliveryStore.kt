@@ -1,5 +1,6 @@
 package dev.kaipay.notificationprobe
 
+import dev.kaipay.probe.TngNotificationProfiles
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -170,9 +171,10 @@ internal class DeliveryStore(directory: File, private val clock: () -> Long = Sy
         return add(Candidate(UUID.randomUUID().toString(), UUID.randomUUID().toString(), 1, deviceId,
             "SYNTHETIC", "synthetic.debug.v1", amount, Instant.ofEpochMilli(clock()).toString(), "SYNTHETIC"))
     }
-    @Synchronized fun observe(key: String, postTime: Long, amount: Long, deviceId: String, changed: Boolean = false,
+    @Synchronized fun observe(key: String, postTime: Long, amount: Long, deviceId: String, profile: String, changed: Boolean = false,
         contentDigest: String = "amount:$amount"): Candidate? {
-        if (!enabled || key.length > 1024 || amount !in 1..1_000_000 || postTime <= 0) return null
+        if (!enabled || key.length > 1024 || amount !in 1..1_000_000 || postTime <= 0 ||
+            profile !in TngNotificationProfiles.deliveredRuleIds) return null
         expire()
         if (clock() - postTime >= DELIVERY_TTL || postTime > clock() + 30_000) return null
         val digest = digest(key)
@@ -188,12 +190,16 @@ internal class DeliveryStore(directory: File, private val clock: () -> Long = Sy
             life = Lifecycle(digest, UUID.randomUUID().toString(), postTime, amount, 0, fingerprint = fingerprint)
             lifecycles[digest] = life
         } else {
-            if (!life.closed && (changed || life.amount != amount || life.fingerprint != fingerprint)) invalidate(life)
+            // A wording change between reviewed rules on one key is a change, even if the private digest is equal.
+            val otherProfile = entries.values.any { it.candidate.notificationId == life.notificationId &&
+                it.candidate.classifierProfile != profile }
+            if (!life.closed && (changed || life.amount != amount || life.fingerprint != fingerprint || otherProfile))
+                invalidate(life)
             life.lastPostTime = maxOf(life.lastPostTime, postTime); persist(); return null
         }
         life.amount = amount; life.lastPostTime = postTime; life.sequence++
         return add(Candidate(UUID.randomUUID().toString(), life.notificationId, life.sequence, deviceId,
-            "TNG_NOTIFICATION_CANDIDATE", "tng.receipt.en.observed.v1", amount,
+            "TNG_NOTIFICATION_CANDIDATE", profile, amount,
             Instant.ofEpochMilli(postTime).toString(), "RULE_MATCHED"))
     }
     @Synchronized fun unknownUpdate(key: String, postTime: Long) {

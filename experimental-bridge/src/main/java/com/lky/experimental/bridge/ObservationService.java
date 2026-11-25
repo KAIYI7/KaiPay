@@ -6,11 +6,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /** Single-process serialized decisions, persisted before visible success. */
 final class ObservationService {
     static final int MAX_REQUESTS = 500, MAX_OBSERVATIONS = 1000, MAX_AMOUNT = 1_000_000;
+    /** Reviewed companion rule IDs accepted as TNG classifier profiles; matching never depends on which one.
+     *  The null check matters: {@code Set.of(...).contains(null)} throws. */
+    static final Set<String> TNG_PROFILES = Set.of("tng.receipt.en.observed.v1", "tng.receipt.kaching.en.observed.v1");
     private final SnapshotStore store;
     private final Clock clock;
     private final UUID deviceId;
@@ -424,7 +428,7 @@ final class ObservationService {
         if (!live && (event.source() != Source.SIMULATED || event.deviceId() != null || event.classification() != null
                 || event.classifierProfile() != null || event.evidenceQuality() != null)) throw new BridgeFailure(422, "EVENT_INVALID");
         if (live && (event.deviceId() == null || !"INCOMING_CANDIDATE".equals(event.classification())
-                || !((event.source() == Source.TNG_NOTIFICATION_CANDIDATE && "tng.receipt.en.observed.v1".equals(event.classifierProfile()) && "RULE_MATCHED".equals(event.evidenceQuality()))
+                || !((event.source() == Source.TNG_NOTIFICATION_CANDIDATE && event.classifierProfile() != null && TNG_PROFILES.contains(event.classifierProfile()) && "RULE_MATCHED".equals(event.evidenceQuality()))
                 || (event.source() == Source.SYNTHETIC && "synthetic.debug.v1".equals(event.classifierProfile()) && "SYNTHETIC".equals(event.evidenceQuality())))))
             throw new BridgeFailure(422, "PROFILE_UNSUPPORTED");
         amount(event.amountMinor());

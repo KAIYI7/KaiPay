@@ -4,6 +4,8 @@ import androidx.work.Data
 import androidx.work.ListenableWorker.Result
 import androidx.work.testing.TestWorkerBuilder
 import androidx.work.testing.WorkManagerTestInitHelper
+import dev.kaipay.probe.TngNotificationProfiles.KACHING_RULE_ID as KACHING
+import dev.kaipay.probe.TngNotificationProfiles.V1_RULE_ID as V1
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Before
@@ -348,7 +350,7 @@ class DeliveryWorkerTest {
     }
     @Test fun `invalidation at original upload retry limit uses separate budget`() {
         serve { 200 }
-        val original = requireNotNull(delivery.store.observe("invented-key", System.currentTimeMillis(), 123, deviceId))
+        val original = requireNotNull(delivery.store.observe("invented-key", System.currentTimeMillis(), 123, deviceId, V1))
         repeat(MAX_ATTEMPTS) { delivery.store.mark(original.eventId, DeliveryStatus.PENDING, "Attempt", true) }
         delivery.store.uploaded(original.eventId)
         delivery.store.unknownUpdate("invented-key", System.currentTimeMillis() + 1)
@@ -359,7 +361,7 @@ class DeliveryWorkerTest {
     }
     @Test fun `cancelled attempted original uses invalidation control only without replay`() {
         serve { 404 }
-        val original = requireNotNull(delivery.store.observe("invented-key", System.currentTimeMillis(), 123, deviceId))
+        val original = requireNotNull(delivery.store.observe("invented-key", System.currentTimeMillis(), 123, deviceId, V1))
         delivery.store.mark(original.eventId, DeliveryStatus.PENDING, "Attempted but acknowledgement lost", true)
         delivery.store.setEnabled(false); delivery.store.setEnabled(true)
         delivery.store.unknownUpdate("invented-key", System.currentTimeMillis() + 1)
@@ -375,7 +377,7 @@ class DeliveryWorkerTest {
             if (!path.endsWith("/invalidate")) { received.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
             200
         }
-        val original = requireNotNull(delivery.store.observe("invented-key", System.currentTimeMillis(), 123, deviceId))
+        val original = requireNotNull(delivery.store.observe("invented-key", System.currentTimeMillis(), 123, deviceId, V1))
         val first = workers.submit<Result> { worker(original.eventId).doWork() }
         assertTrue(received.await(5, TimeUnit.SECONDS))
         delivery.store.unknownUpdate("invented-key", System.currentTimeMillis() + 1)
@@ -386,9 +388,9 @@ class DeliveryWorkerTest {
         assertEquals(2, paths.size)
         assertTrue(paths.last().endsWith("/invalidate"))
     }
-    @Test fun `only the first reviewed rule is queued and the second rule stays display only`() {
+    @Test fun `both reviewed rules are queued each with its own profile`() {
         ProbeRuntime.session.setConnected(true); ProbeRuntime.session.setEnabled(true)
-        // Invented values only. Both wordings classify as candidates; only v1 may reach the wire.
+        // Invented values only. Both wordings classify as candidates and both may reach the wire.
         val local = dev.kaipay.probe.ProbeSession(profile = dev.kaipay.probe.TngNotificationProfiles.current).apply {
             setConnected(true); setEnabled(true)
         }
@@ -401,14 +403,30 @@ class DeliveryWorkerTest {
             assertTrue(done.await(5, TimeUnit.SECONDS))
         }
         val second = post("second", "Ka-ching! Incoming Money.", "RM45.67 received from ALEX DEMO for demo")
-        assertEquals("tng.receipt.kaching.en.observed.v1", second.inspection!!.classification.ruleId)
+        assertEquals(KACHING, second.inspection!!.classification.ruleId)
         delivery.observed("second", second); callbacksComplete()
-        assertTrue(delivery.store.rows().isEmpty())
+        val kaching = delivery.store.rows().single()
+        assertEquals(KACHING, kaching.candidate.classifierProfile)
+        assertEquals(4567L, kaching.candidate.amountMinor)
+        assertEquals("RULE_MATCHED", kaching.candidate.evidenceQuality)
         val first = post("first", "You’ve received money!",
             "Alex Demo has transferred RM12.34 to you. Tap here to check the transaction details.")
         delivery.observed("first", first); callbacksComplete()
-        val row = delivery.store.rows().single()
-        assertEquals("tng.receipt.en.observed.v1", row.candidate.classifierProfile)
-        assertEquals(1234L, row.candidate.amountMinor)
+        val v1 = delivery.store.rows().single { it.candidate.eventId != kaching.candidate.eventId }
+        assertEquals(V1, v1.candidate.classifierProfile)
+        assertEquals(1234L, v1.candidate.amountMinor)
+        // A rejected (refund) note, an over-range amount and a group summary stay off the wire.
+        val refund = post("refund", "Ka-ching! Incoming Money.", "RM45.67 received from ALEX DEMO for 退款")
+        assertNull(refund.inspection!!.classification.ruleId)
+        delivery.observed("refund", refund); callbacksComplete()
+        val large = post("large", "Ka-ching! Incoming Money.", "RM10,000.01 received from ALEX DEMO for demo")
+        assertEquals(KACHING, large.inspection!!.classification.ruleId)
+        delivery.observed("large", large); callbacksComplete()
+        val grouped = requireNotNull(local.posted(dev.kaipay.probe.ProbeParser.OFFICIAL_PACKAGE, "grouped",
+            System.currentTimeMillis(), dev.kaipay.probe.NotificationMetadata(grouped = true, groupSummary = true)) {
+            dev.kaipay.probe.Fields("Ka-ching! Incoming Money.", "RM45.67 received from ALEX DEMO for demo",
+                "RM45.67 received from ALEX DEMO for demo") })
+        delivery.observed("grouped", grouped); callbacksComplete()
+        assertEquals(2, delivery.store.rows().size)
     }
 }

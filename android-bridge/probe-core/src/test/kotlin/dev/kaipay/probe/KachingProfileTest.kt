@@ -119,4 +119,32 @@ class KachingProfileTest {
                 "You’ve received money!").classification.outcome)
         assertEquals(listOf("tng.receipt.en.observed.v1", ruleId), TngNotificationProfiles.current.incomingRules.map { it.id })
     }
+    @Test fun `refund and reversal wording is rejected by the second rule only`() {
+        val english = listOf("reversal", "Reversal", "REVERSAL", "reversals", "refunded", "Refunds", "REFUNDING",
+            "chargeback", "ChargeBack", "chargebacks", "charge-back", "Charge back", "Bayaran balik", "BAYARAN  BALIK",
+            "bayaran" + Char(0xA0) + "balik", "pembalikan", "Pembalikan dana",
+            // Latin terms glued to Han text are rejected on the JVM and on Android alike (explicit ASCII edges).
+            "资金refunds", "reversal资金", "退回x")
+        val chinese = listOf("退款", "退还", "退還", "退回", "冲正", "沖正", "撤销", "撤銷", "撤回", "资金退款", "退回饭钱")
+        (english + chinese).forEach { word ->
+            val noted = inspect(body(note = word)).classification
+            assertEquals(word, ClassificationOutcome.UNKNOWN, noted.outcome)
+            assertEquals(word, EvidenceQuality.AMOUNT_ONLY, noted.confidence)
+            assertNull(word, noted.ruleId)
+        }
+        // In the name too: the reject reads the whole text.
+        listOf("REVERSAL DEMO", "退款 DEMO").forEach {
+            assertEquals(it, ClassificationOutcome.UNKNOWN, outcome(body(party = it)))
+        }
+        // Whole words only for Latin terms; benign notes still match.
+        listOf("refundable", "irreversal", "reversalx", "refunds2", "chargebackx", "rechargeback", "资金转账", "dinner", "Fund transfer", "pembayaran", "balik kampung")
+            .forEach { assertEquals(it, ClassificationOutcome.INCOMING_CANDIDATE, outcome(body(note = it))) }
+    }
+    @Test fun `the second rule's reject leaves the first rule unchanged`() {
+        val first = "REVERSAL DEMO has transferred RM12.34 to you. Tap here to check the transaction details."
+        val v1 = inspect(first, "You’ve received money!").classification
+        assertEquals(ClassificationOutcome.INCOMING_CANDIDATE, v1.outcome)
+        assertEquals("tng.receipt.en.observed.v1", v1.ruleId)
+        assertEquals(setOf("tng.receipt.en.observed.v1", ruleId), TngNotificationProfiles.deliveredRuleIds)
+    }
 }
